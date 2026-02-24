@@ -41,11 +41,13 @@ public:
 
 	FdHandleData& operator--() {
 		refs--;
-		if (refs <= 0 && slab.contains(this)) {
+		if (refs <= 0 && fd >= 0) {
 			fileDescriptors->remove(fd);
 			this->~FdHandleData();
 			if (slab.contains(this))
 				slab.free(this);
+			else
+				delete this;
 		}
 		return *this;
 	}
