@@ -12,7 +12,9 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
 
 file(GLOB SOURCES
         "src/*.cpp"
-        "src/allocation/*.cpp"
+        "src/alloc/*.cpp"
+        "src/ds/*.cpp"
+        "src/fs/*.cpp"
 )
 
 add_library(excessive ${SOURCES})
