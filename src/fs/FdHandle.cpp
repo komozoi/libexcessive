@@ -9,7 +9,7 @@
 #include "fcntl.h"
 #include "unistd.h"
 
-#include "ds/NumberedMap.h"
+#include "ds/HashMap.h"
 #include "ds/Queue.h"
 
 
@@ -20,7 +20,7 @@
 #endif
 
 
-static NumberedMap<int16_t, FdHandleData>* fileDescriptors = nullptr;
+static Map<int16_t, FdHandleData*>* fileDescriptors = nullptr;
 
 
 typedef struct {
@@ -330,7 +330,7 @@ FdHandle FdHandle::open(const char* path, int mode) {
 	if (fd != -1) {
 		FdHandleData* handleData = new FileHandleData(fd, false);
 		if (fileDescriptors == nullptr)
-			fileDescriptors = new NumberedMap<int16_t, FdHandleData>(64);
+			fileDescriptors = new HashMap<int16_t, FdHandleData*>(64);
 		fileDescriptors->put((int16_t) fd, handleData);
 	}
 	return FdHandle(fd);
@@ -352,7 +352,7 @@ FdHandle FdHandle::open(const char* path, int mode, int flag) {
 	if (fd != -1) {
 		FileHandleData* handleData = new FileHandleData(fd, isNew);
 		if (fileDescriptors == nullptr)
-			fileDescriptors = new NumberedMap<int16_t, FdHandleData>(64);
+			fileDescriptors = new HashMap<int16_t, FdHandleData*>(64);
 		fileDescriptors->put((int16_t) fd, handleData);
 	}
 	return FdHandle(fd);
@@ -360,7 +360,7 @@ FdHandle FdHandle::open(const char* path, int mode, int flag) {
 
 FdHandle FdHandle::from(int fd) {
 	if (fileDescriptors == nullptr)
-		fileDescriptors = new NumberedMap<int16_t, FdHandleData>(64);
+		fileDescriptors = new HashMap<int16_t, FdHandleData*>(64);
 	if (!fileDescriptors->hasKey(fd)) {
 		SocketHandleData* handleData = new(slab.allocate<SocketHandleData>()) SocketHandleData(fd);
 		fileDescriptors->put((int16_t) fd, handleData);
