@@ -9,14 +9,20 @@
 
 #include "stdint.h"
 #include "stddef.h"
+#include "string.h"
 
 
+template <int N = 63>
 struct btree_node_header_t {
 	uint64_t parent;
 	int nChildren;
 	int nElements;
 	int indexInParent;
+
+	// Unused 4 bytes for 8-byte alignment
 	uint32_t reserved;
+
+	uint64_t childOffsets[N + 1];
 };
 
 
@@ -25,8 +31,9 @@ struct btree_node_header_t {
 */
 template <class T, int N = 63>
 struct btree_node_t {
-	btree_node_header_t header;
-	uint64_t childOffsets[N + 1];
+	btree_node_t() = default;
+
+	btree_node_header_t<N> header;
 	T elements[N];
 };
 
@@ -44,7 +51,7 @@ public:
 	 */
 	bool insert(const T& val) {
 		btree_node_t<T, N> target;
-		btree_node_header_t& header = target.header;
+		btree_node_header_t<N>& header = target.header;
 		uint64_t offset;
 
 		int i = findNearest(val, target, offset);
@@ -88,26 +95,26 @@ public:
 		uint64_t offset;
 
 		int i = findNearest(val, target, offset);
-		if (target.nElements > i && compare(target.elements[i], val) == 0) {
+		if (target.header.nElements > i && compare(target.elements[i], val) == 0) {
 			target.elements[i] = val;
 			overwriteNode(offset, target);
 			return true;
 		}
 
-		if (target.nElements == N) {
+		if (target.header.nElements == N) {
 			// It's full, we need to split it
 			btree_node_t<T, N> rhs;
 			uint64_t rhsOffset;
 			if (offset == getRootOffset())
 				rhs = splitRoot(target, rhs, offset, rhsOffset);
 			else {
-				btree_node_t<T, N> parent = getNode(target.parent);
+				btree_node_t<T, N> parent = getNode(target.header.parent);
 				rhs = splitChild(parent, target, offset, rhsOffset);
 			}
 
 			// > is slightly faster than >=, let's see if you can figure out why :)
-			if (i > target.nElements) {
-				addToNodeUnchecked(rhs, val, i - target.nElements - 1);
+			if (i > target.header.nElements) {
+				addToNodeUnchecked(rhs, val, i - target.header.nElements - 1);
 				overwriteNode(rhsOffset, rhs);
 			} else {
 				addToNodeUnchecked(target, val, i);
@@ -139,6 +146,68 @@ public:
 		}
 
 		return false;
+	}
+
+	/**
+	 * Finds the given value, if present, otherwise the next highest value.  Updates val with the value found in the
+	 * tree, if it is found.
+	 * @param val value to search for, updated from the tree if it is present
+	 * @return true if a match was found, false if not
+	 */
+	bool findNext(T& val) {
+		btree_node_t<T, N> node;
+		uint64_t offset;
+
+		int i = findNearest(val, node, offset);
+		if (i > 0)
+			i--;
+
+		while (true) {
+			if (i < node.header.nElements && compare(node.elements[i], val) >= 0) {
+				// Found a valid next value (either equal or next greater)
+				val = node.elements[i];
+				return true;
+			}
+
+			// If this node has no children, there is no next element
+			if (node.header.nChildren == 0)
+				return false;
+
+			// Go to the next child
+			offset = node.header.childOffsets[i];
+			node = getNode(offset);
+			i = 0;
+		}
+	}
+
+	/**
+	 * Removes the value from the tree
+	 * TODO: Make this function rebalance tree correctly
+	 * Currently this function does NOT rebalance the tree.
+	 * @param val value to remove
+	 * @return true if the value was found and removed, false if not
+	 */
+	bool remove(T& val) {
+		btree_node_t<T, N> node;
+		uint64_t offset;
+
+		int i = findNearest(val, node, offset);
+		if (i >= node.header.nElements || compare(node.elements[i], val) != 0)
+			return false;
+
+		// Only remove from leaf nodes in this basic version
+		if (node.header.nChildren != 0) {
+			// Full B-tree remove (merging, rotation, etc.) would be required here
+			return false;
+		}
+
+		// Remove element
+		for (int j = i + 1; j < node.header.nElements; j++)
+			node.elements[j - 1] = node.elements[j];
+		node.header.nElements--;
+
+		overwriteNode(offset, node);
+		return true;
 	}
 
 	virtual ~BTreeBase() = default;
@@ -178,7 +247,7 @@ protected:
 			if (node.header.nChildren == 0)
 				return low;
 
-			offset = node.childOffsets[low];
+			offset = node.header.childOffsets[low];
 			node = getNode(offset);
 		}
 	}
@@ -223,13 +292,13 @@ protected:
 
 		// Update child references to the root
 		for (int j = 0; j < oldRoot.header.nChildren; j++) {
-			btree_node_t<T, N> subChild = getNode(oldRoot.childOffsets[j]);
+			btree_node_t<T, N> subChild = getNode(oldRoot.header.childOffsets[j]);
 			subChild.header.parent = oldRootOffset;
-			overwriteNodeHeader(oldRoot.childOffsets[j], subChild);
+			overwriteNodeHeader(oldRoot.header.childOffsets[j], subChild);
 		}
 
-		newRoot = {{0, 1, 0, -1, 0}, {}, {}};
-		newRoot.childOffsets[0] = oldRootOffset;
+		newRoot = {{0, 1, 0, -1, 0, {}}, {}};
+		newRoot.header.childOffsets[0] = oldRootOffset;
 
 		return splitChild(newRoot, oldRoot, oldRootOffset, newChildOffset);
 	}
@@ -253,7 +322,7 @@ protected:
 		}
 
 		int i = originalChild.header.indexInParent;
-		btree_node_t<T, N> newChild = {{originalChild.header.parent, 0, (originalChild.header.nElements + 1) / 2 - 1, i + 1, 0}, {}, {}};
+		btree_node_t<T, N> newChild = {{originalChild.header.parent, 0, (originalChild.header.nElements + 1) / 2 - 1, i + 1, 0, {}}, {}};
 
 		// Update the size of the original child, which is now much smaller
 		originalChild.header.nElements = originalChild.header.nElements - newChild.header.nElements - 1;
@@ -266,15 +335,15 @@ protected:
 			// Copy over the children
 			newChild.header.nChildren = newChild.header.nElements + 1;
 			originalChild.header.nChildren -= newChild.header.nChildren;
-			memcpy(newChild.childOffsets, &originalChild.childOffsets[originalChild.header.nChildren], sizeof(uint64_t) * newChild.header.nChildren);
+			memcpy(newChild.header.childOffsets, &originalChild.header.childOffsets[originalChild.header.nChildren], sizeof(uint64_t) * newChild.header.nChildren);
 		}
 
 		// We need to add the new child so we can get the offset of it
 		newChildOffset = addNode(newChild);
 
 		for (int j = parent.header.nElements - i - 1; j >= 0; j--)
-			parent.childOffsets[i + j + 2] = parent.childOffsets[i + j + 1];
-		parent.childOffsets[i + 1] = newChildOffset;
+			parent.header.childOffsets[i + j + 2] = parent.header.childOffsets[i + j + 1];
+		parent.header.childOffsets[i + 1] = newChildOffset;
 
 		for (int j = parent.header.nElements - i - 1; j >= 0; j--)
 			parent.elements[i + j + 1] = parent.elements[i + j];
@@ -285,17 +354,17 @@ protected:
 
 		// Update any children that got moved in the parent
 		for (int j = i + 2; j < parent.header.nChildren; j++) {
-			btree_node_t<T, N> subChild = getNode(parent.childOffsets[j]);
+			btree_node_t<T, N> subChild = getNode(parent.header.childOffsets[j]);
 			subChild.header.indexInParent = j;
-			overwriteNodeHeader(parent.childOffsets[j], subChild);
+			overwriteNodeHeader(parent.header.childOffsets[j], subChild);
 		}
 
 		// Update any children that got moved to newChild
 		for (int j = 0; j < newChild.header.nChildren; j++) {
-			btree_node_t<T, N> subChild = getNode(newChild.childOffsets[j]);
+			btree_node_t<T, N> subChild = getNode(newChild.header.childOffsets[j]);
 			subChild.header.indexInParent = j;
 			subChild.header.parent = newChildOffset;
-			overwriteNodeHeader(newChild.childOffsets[j], subChild);
+			overwriteNodeHeader(newChild.header.childOffsets[j], subChild);
 		}
 
 		overwriteNodeHeader(childOffset, originalChild);
@@ -338,16 +407,18 @@ protected:
 template <class T, int N = 63>
 class BTree: public BTreeBase<T, N> {
 public:
-	BTree(FdHandle file, off_t rootOffset, int (*compare) (const T&, const T&))
-		: BTreeBase<T, N>(compare), rootOffset(rootOffset), file(std::move(file)) {
+	BTree(FdHandle&& file, off_t rootOffset, int (*compare) (const T&, const T&))
+		: BTreeBase<T, N>(compare), rootOffset(rootOffset), file(file) {
 
-		if (file.isNew()) {
-			std::lock_guard<std::mutex> _ = file.getLock();
+		if (file.isNew())
+			initialize();
+	}
 
-			btree_node_t<T, N> root{{0, 0, 0, -1, 0}, {}, {}};
-			file.seek(rootOffset);
-			file.write(root);
-		}
+	BTree(const FdHandle& file, off_t rootOffset, int (*compare) (const T&, const T&))
+			: BTreeBase<T, N>(compare), rootOffset(rootOffset), file(file) {
+
+		if (file.isNew())
+			initialize();
 	}
 
 	off_t getHeaderEndOffset() const {
@@ -355,13 +426,11 @@ public:
 	}
 
 	void initialize() {
-		btree_node_t<T, N> root{{0, 0, 0, -1, 0}, {}, {}};
+		btree_node_t<T, N> root{{0, 0, 0, -1, 0, {}}, {}};
 
 		file.seek(rootOffset);
 		file.write(root);
 	}
-
-	~BTree() override = default;
 
 protected:
 
