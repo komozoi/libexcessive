@@ -509,7 +509,7 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 	std::atomic<int> ready{0};
 	std::atomic<bool> start{false};
 
-	auto worker = [&](int idx) {
+	std::function<void(int)> worker = [&](int idx) {
 		MmapHandle& mmap = mmaps[idx];
 
 		ready.fetch_add(1, std::memory_order_release);
@@ -517,12 +517,9 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 			// spin
 		}
 
-		mmap.seek(0, SEEK_SET);
-
-		for (size_t i = 0; i < blockSize; i++) {
-			uint8_t v = (uint8_t)(91 * i);
-			mmap.write(&v, 1);
-		}
+		uint8_t* ptr = mmap.directPointer<uint8_t>(0);
+		for (size_t i = 0; i < blockSize; i++)
+			ptr[i] = (uint8_t)(91 * i);
 	};
 
 	std::vector<std::thread> threads;
@@ -537,9 +534,8 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 	uint64_t t0 = millis_since_epoch();
 	start.store(true, std::memory_order_release);
 
-	for (auto& t : threads) {
+	for (std::thread& t : threads)
 		t.join();
-	}
 
 	uint64_t t1 = millis_since_epoch();
 	uint64_t multiMs = t1 - t0;
@@ -560,11 +556,10 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 	MmapHandle single = handle.getMmapHandle(threadCount * blockSize, blockSize);
 
 	uint64_t s0 = millis_since_epoch();
-	single.seek(0, SEEK_SET);
-	for (size_t i = 0; i < blockSize; i++) {
-		uint8_t v = (uint8_t)(91 * i);
-		single.write(&v, 1);
-	}
+
+	uint8_t* singlePtr = single.directPointer<uint8_t>(0);
+	for (size_t i = 0; i < blockSize; i++)
+		singlePtr[i] = (uint8_t)(91 * i);
 	uint64_t s1 = millis_since_epoch();
 
 	uint64_t singleMs = s1 - s0;
