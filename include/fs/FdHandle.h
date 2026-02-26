@@ -7,6 +7,65 @@
 
 #include "unistd.h"
 #include <mutex>
+#include "sys/mman.h"
+
+
+class FdHandleData;
+
+
+class MmapHandle {
+public:
+	explicit MmapHandle(FdHandleData& handleData, char* data, char* end);
+
+	MmapHandle(const MmapHandle& other) = delete;
+	inline MmapHandle(MmapHandle&& other) noexcept
+		: handleData(other.handleData), data(other.data), cursor(other.cursor), end(other.end) {
+		other.data = nullptr;
+	}
+
+	MmapHandle& operator=(MmapHandle&& other) noexcept = delete;
+
+	inline operator bool() const { // NOLINT(*-explicit-constructor)
+		return data != nullptr;
+	}
+
+	template<class T>
+	inline ssize_t write(const T& value) {
+		return write(&value, sizeof(T));
+	}
+
+	ssize_t write(const void* value, size_t size);
+
+
+	template<class T>
+	inline ssize_t read(T& value) {
+		return read(&value, sizeof(T));
+	}
+
+	template<class T>
+	inline T read() {
+		T out;
+		read(&out, sizeof(T));
+		return out;
+	}
+
+	ssize_t read(void* value, size_t size);
+
+	template<typename T>
+	inline T* directPointer(off_t where = 0) {
+		return (T*)&data[where];
+	}
+
+	off_t seek(off_t where, int whence = SEEK_SET);
+
+	~MmapHandle();
+
+private:
+	FdHandleData& handleData;
+	char* data;
+	char* cursor;
+	char* end;
+};
 
 
 class FdHandle {
@@ -75,12 +134,13 @@ public:
 
 	~FdHandle();
 
+	MmapHandle getMmapHandle(off_t offset, size_t size, int prot = PROT_READ | PROT_WRITE, int flags = MAP_SHARED);
+
+	int numReferences() const;
+
 private:
 	int16_t fd;
 };
-
-
-class FdHandleData;
 
 class FdTransaction {
 public:
