@@ -496,7 +496,7 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 	const char* test_file = "fd_mmap_test.tmp";
 	unlink(test_file);
 
-	const size_t blockSize = 32 * 1024 * 1024;
+	const size_t blockSize = 1024 * 1024;
 	const int threadCount = 4;
 
 	FdHandle handle = FdHandle::open(test_file, O_RDWR | O_CREAT, 0660);

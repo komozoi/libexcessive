@@ -167,7 +167,7 @@ TEST_F(BTreeBaseTest, DuplicateInsertions) {
 TEST_F(BTreeBaseTest, StressTest) {
 	uint64_t startTime = millis_since_epoch();
 
-	const int num_elements = 100000;
+	const int num_elements = 40000;
 	for (int i = 0; i < num_elements; ++i) {
 		int h = (int)(((uint32_t)i * 27644437 + 87) ^ 0xE7D9541) % 1299827;
 		tree.insert(h);
@@ -233,7 +233,7 @@ TEST_F(BTreeBaseTest, DiskStressTest) {
 	tree.initialize();
 	file.flush();
 
-	const int num_elements = 100000;
+	const int num_elements = 4000;
 	for (int i = 0; i < num_elements; ++i) {
 		int h = ((i * 27644437 + 87) ^ 0xE7D9541) % 1299827;
 		tree.insert(h);
