@@ -26,6 +26,6 @@ if(GTest_FOUND)
     file(GLOB_RECURSE TEST_SOURCES
             "src/tests/*.cpp"
     )
-    add_executable(tests src/testmain.cpp ${TEST_SOURCES} ${SOURCES})
-    target_link_libraries(tests excessive ${GTEST_LIBRARIES})
+    add_executable(libexcessive_tests src/testmain.cpp ${TEST_SOURCES} ${SOURCES})
+    target_link_libraries(libexcessive_tests excessive ${GTEST_LIBRARIES})
 endif()
