@@ -17,16 +17,6 @@ size_t checkFreeSystemMemoryBytes();
 class MemoryManager;
 
 
-template <class T>
-class SPtr {
-public:
-	SPtr(T* p) : p(p) {}
-
-private:
-	T* p;
-};
-
-
 class ModuleLevelAllocator : public Allocator {
 public:
 	inline ModuleLevelAllocator(MemoryManager& manager, Allocator& safe, const char* name);
