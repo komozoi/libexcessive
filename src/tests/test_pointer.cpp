@@ -187,3 +187,68 @@ TEST(SpTest, DestroyedExactlyOncePerBlock) {
 
 	EXPECT_EQ(destroyed, 1);
 }
+
+TEST(SpTest, StressTestComplexReferenceCounting) {
+	static int constructed = 0;
+	static int destroyed = 0;
+
+	struct Tracker {
+		Tracker() { ++constructed; }
+		Tracker(const Tracker&) { ++constructed; }
+		~Tracker() { ++destroyed; }
+	};
+
+	constructed = 0;
+	destroyed = 0;
+
+	{
+		// Block A - start as UNIQUE
+		sp<Tracker> a(SpPointerType::UNIQUE);
+
+		// Copy UNIQUE, becomes COW (per current acquire_from_copy)
+		sp<Tracker> b = a;
+
+		// getWritableCopy(), another COW to same block
+		sp<Tracker> c = a.getWritableCopy();
+
+		// Inner scope with more aliases + mutations
+		{
+			sp<Tracker> d = c;                    // copy COW, another COW, refs=4 on block A
+
+			// Trigger COW detach on b (COW + shared)
+			b.mut();                              //, new block B, b becomes SHARED
+
+			// Trigger COW detach on c
+			c.mut();                              //, new block C, c becomes SHARED
+
+			// Trigger COW detach on d (still pointing at old block A)
+			d.mut();                              //, new block D, d becomes SHARED
+
+			// Now we have 4 independent blocks (A,B,C,D)
+
+			// Move a SHARED pointer
+			sp<Tracker> e = std::move(c);         // e takes block C, c becomes null
+
+			// Copy a SHARED pointer
+			sp<Tracker> f = e;                    // refs on block C now 2
+
+			// Mutate SHARED (no detach, just write)
+			f.mut();
+
+			// Reset while shared
+			e.reset();                            // drops one ref on block C
+
+			// New independent UNIQUE + copy + mutate
+			sp<Tracker> g(SpPointerType::UNIQUE);
+			sp<Tracker> h = g;
+			h.mut();                              // triggers detach, block E for h (SHARED)
+
+			// Cross-block assignment (releases old, acquires new)
+			b = h;                                // b releases block B, takes block E (now SHARED)
+		}  // d, e, f, g, h destruct here, should clean up blocks B, C (now 1), D, E
+
+		// Final releases of remaining pointers
+	}  // a, b destruct, block A and remaining block E
+
+	EXPECT_EQ(constructed, destroyed);
+}
