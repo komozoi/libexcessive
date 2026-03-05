@@ -31,7 +31,6 @@ struct compressed_pointer_details {
 
 struct sp_pointer_details_t {
 	std::atomic<uint32_t> refs;
-	SpPointerType type;
 
 	void* getPtr() {
 		return (void*)&this[1];
@@ -46,12 +45,11 @@ public:
 	sp(std::nullptr_t) : details(nullptr) {}
 
 	template<typename... Args>
-	explicit sp(SpPointerType type, Args&&... args) {
+	explicit sp(SpPointerType type, Args&&... args) : type(type) {
 		size_t total = sizeof(sp_pointer_details_t) + sizeof(T);
 		details = (sp_pointer_details_t*)::operator new(total);
 
 		details->refs.store(1, std::memory_order_relaxed);
-		details->type = type;
 
 		new (details->getPtr()) T(std::forward<Args>(args)...);
 	}
@@ -62,32 +60,27 @@ public:
 		auto* block = (sp_pointer_details_t*)::operator new(total);
 
 		block->refs.store(1, std::memory_order_relaxed);
-		block->type = SpPointerType::UNIQUE;
 
 		new (block->getPtr()) T(std::forward<Args>(args)...);
 
-		sp p;
-		p.details = block;
-		return p;
+		return {block, SpPointerType::UNIQUE};
 	}
 
 	template<typename U>
-	explicit sp(U&& value) {
+	explicit sp(U&& value) : type(SpPointerType::UNIQUE) {
 		size_t total = sizeof(sp_pointer_details_t) + sizeof(T);
 		details = (sp_pointer_details_t*)::operator new(total);
 
 		details->refs.store(1, std::memory_order_relaxed);
-		details->type = SpPointerType::UNIQUE;
 
 		new (details->getPtr()) T(std::forward<U>(value));
 	}
 
-	explicit sp(const T& value) {
+	explicit sp(const T& value) : type(SpPointerType::UNIQUE) {
 		size_t total = sizeof(sp_pointer_details_t) + sizeof(T);
 		details = (sp_pointer_details_t*)::operator new(total);
 
 		details->refs.store(1, std::memory_order_relaxed);
-		details->type = SpPointerType::UNIQUE;
 
 		new (details->getPtr()) T(value);
 	}
@@ -153,8 +146,19 @@ public:
 		std::swap(details, other.details);
 	}
 
+	sp<T> getWritableCopy() const {
+		return sp<T>(details, SpPointerType::COPY_ON_WRITE);
+	}
+
+	SpPointerType pointerType() const {
+		return type;
+	}
+
 private:
 	sp_pointer_details_t* details;
+	SpPointerType type;
+
+	sp(sp_pointer_details_t* details, SpPointerType type) : details(details), type(type) {}
 
 	// ---------- Internals ----------
 
@@ -163,10 +167,11 @@ private:
 		if (!details)
 			return;
 
-		if (details->type == SpPointerType::UNIQUE) {
+		if (other.type == SpPointerType::UNIQUE) {
 			// UNIQUE copied -> becomes COW
-			details->type = SpPointerType::COPY_ON_WRITE;
-		}
+			type = SpPointerType::COPY_ON_WRITE;
+		} else
+			type = other.type;
 
 		details->refs.fetch_add(1, std::memory_order_relaxed);
 	}
@@ -189,7 +194,7 @@ private:
 		if (!details)
 			return;
 
-		if (details->type != SpPointerType::COPY_ON_WRITE)
+		if (type != SpPointerType::COPY_ON_WRITE)
 			return;
 
 		if (details->refs.load(std::memory_order_acquire) == 1)
@@ -202,11 +207,11 @@ private:
 		auto* block = (sp_pointer_details_t*)::operator new(total);
 
 		block->refs.store(1, std::memory_order_relaxed);
-		block->type = SpPointerType::COPY_ON_WRITE;
 
 		new (block->getPtr()) T(*(T*)old->getPtr());
 
 		details = block;
+		type = SpPointerType::SHARED;
 
 		// drop old ref
 		if (old->refs.fetch_sub(1, std::memory_order_acq_rel) == 1) {
