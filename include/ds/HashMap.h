@@ -282,12 +282,12 @@ public:
 	}
 
 protected:
-	int locate(const K& key) const {
-		// This number is probably prime.  I designed it to distribute the bits of the key around for
-		// better key distribution.
+	template<class U>
+	int locate(const U& key) const {
 		uint32_t hashedKey = (uint32_t)(((uint64_t)key * 7224373213449699941LU) >> 32);
 		int startIndex = (hashedKey % capacity);
 		int index = startIndex;
+
 		while (entries[index].present) {
 			if (entries[index].key == key)
 				break;
@@ -295,6 +295,28 @@ protected:
 			if (index == startIndex)
 				return -1;
 		}
+
+		return index;
+	}
+
+	template<class A, class B>
+	int locate(const std::pair<A,B>& key) const {
+		uint32_t h1 = (uint32_t)(((uint64_t)key.first  * 7224373213449699941LU) >> 32);
+		uint32_t h2 = (uint32_t)(((uint64_t)key.second * 23428012901LU) >> 2);
+
+		uint32_t hashedKey = h1 ^ (h2 * 91);
+
+		int startIndex = (hashedKey % capacity);
+		int index = startIndex;
+
+		while (entries[index].present) {
+			if (entries[index].key == key)
+				break;
+			index = (index + 1) % capacity;
+			if (index == startIndex)
+				return -1;
+		}
+
 		return index;
 	}
 
