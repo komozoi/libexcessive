@@ -18,7 +18,7 @@ Allocator& defaultAllocator = memoryManager.getDefaultModule();
 
 
 ModuleLevelAllocator::ModuleLevelAllocator(MemoryManager& manager, Allocator& safe, const char* name)
-	: manager(manager), name(name), heapOffsetToSize(128, safe), ptrToSize(1000000, safe) {
+	: manager(manager), name(name), heapOffsetToSize(128, safe), ptrToSize(1024, safe) {
 
 }
 
@@ -32,6 +32,11 @@ ModuleLevelAllocator& MemoryManager::createModule(const char* name) {
 
 Range<ModuleLevelAllocator**> MemoryManager::allModules() {
 	return Range<ModuleLevelAllocator**>(allocators, &allocators[numAllocators]);
+}
+
+MemoryManager::~MemoryManager() {
+	for (int i = 0; i < numAllocators; i++)
+		delete allocators[i];
 }
 
 void* ModuleLevelAllocator::alloc(size_t size) {

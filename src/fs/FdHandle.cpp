@@ -20,7 +20,22 @@
 #endif
 
 
-static Map<int16_t, FdHandleData*>* fileDescriptors = nullptr;
+
+class FdHandleState {
+public:
+
+	HashMap<int16_t, FdHandleData*>* fileDescriptors = nullptr;
+
+	Map<int16_t, FdHandleData*>* getFds() {
+		if (fileDescriptors == nullptr)
+			fileDescriptors = new HashMap<int16_t, FdHandleData*>(64);
+		return fileDescriptors;
+	}
+
+	~FdHandleState();
+};
+
+static FdHandleState state;
 
 
 typedef struct {
@@ -42,11 +57,11 @@ public:
 	FdHandleData& operator--() {
 		refs--;
 		if (refs <= 0 && fd >= 0) {
-			fileDescriptors->remove(fd);
-			this->~FdHandleData();
-			if (slab.contains(this))
+			state.getFds()->remove(fd);
+			if (slab.contains(this)) {
+				this->~FdHandleData();
 				slab.free(this);
-			else
+			} else
 				delete this;
 		}
 		return *this;
@@ -174,17 +189,12 @@ public:
 	virtual void markToClose() {}
 	virtual bool getShouldClose() const { return false; }
 
-	void close() {
+	virtual ~FdHandleData() {
 		if (fd >= 0) {
 			flush();
 			::close(fd);
-			fileDescriptors->remove(fd);
 		}
 		fd = -1;
-	}
-
-	virtual ~FdHandleData() {
-		close();
 	}
 
 	int16_t fd;
@@ -315,7 +325,7 @@ static FileHandleData errorHandle(-1, false);
 static FdHandleData& getHandleData(int16_t fd) {
 	if (fd < 0)
 		return errorHandle;
-	return *fileDescriptors->get(fd);
+	return *state.getFds()->get(fd);
 }
 
 
@@ -335,9 +345,7 @@ FdHandle FdHandle::open(const char* path, int mode) {
 	int fd = ::open(path, mode);
 	if (fd != -1) {
 		FdHandleData* handleData = new FileHandleData(fd, false);
-		if (fileDescriptors == nullptr)
-			fileDescriptors = new HashMap<int16_t, FdHandleData*>(64);
-		fileDescriptors->put((int16_t) fd, handleData);
+		state.getFds()->put((int16_t) fd, handleData);
 	}
 	return FdHandle(fd);
 }
@@ -357,19 +365,15 @@ FdHandle FdHandle::open(const char* path, int mode, int flag) {
 
 	if (fd != -1) {
 		FileHandleData* handleData = new FileHandleData(fd, isNew);
-		if (fileDescriptors == nullptr)
-			fileDescriptors = new HashMap<int16_t, FdHandleData*>(64);
-		fileDescriptors->put((int16_t) fd, handleData);
+		state.getFds()->put((int16_t) fd, handleData);
 	}
 	return FdHandle(fd);
 }
 
 FdHandle FdHandle::from(int fd) {
-	if (fileDescriptors == nullptr)
-		fileDescriptors = new HashMap<int16_t, FdHandleData*>(64);
-	if (!fileDescriptors->hasKey(fd)) {
+	if (!state.getFds()->hasKey(fd)) {
 		SocketHandleData* handleData = new(slab.allocate<SocketHandleData>()) SocketHandleData(fd);
-		fileDescriptors->put((int16_t) fd, handleData);
+		state.getFds()->put((int16_t) fd, handleData);
 	}
 
 	return FdHandle(fd);
@@ -421,7 +425,7 @@ void FdHandle::flush() const {
 }
 
 void FdHandle::close() {
-	getHandleData(fd).close();
+	delete state.getFds()->remove(fd);
 	fd = -1;
 }
 
@@ -578,5 +582,14 @@ MmapHandle::~MmapHandle() {
 	if (data) {
 		munmap(data, end - data);
 		--handleData;
+	}
+}
+
+FdHandleState::~FdHandleState() {
+	if (fileDescriptors) {
+		for (int i = 0; i < fileDescriptors->getCapacity(); i++)
+			if (fileDescriptors->presentAtIndex(i))
+				delete fileDescriptors->valueAtIndex(i);
+		delete fileDescriptors;
 	}
 }

@@ -115,6 +115,8 @@ public:
 
 	Range<ModuleLevelAllocator**> allModules();
 
+	~MemoryManager();
+
 private:
 	DefaultAllocator safeAllocator;
 	const static int MAX_ALLOCATORS = 32;
