@@ -17,6 +17,10 @@ variables:
   SECRET_DETECTION_ENABLED: 'true'
 
 cmake-build-and-test:
+  rules:
+    - changes:
+      - /*.{cpp, h, c}
+      - CMakeLists.txt
   stage: test
   image: gcc:13
   before_script:
