@@ -153,12 +153,12 @@ public:
 	}
 
 	SpPointerType pointerType() const {
-		return type;
+		return (SpPointerType)type;
 	}
 
 private:
 	sp_pointer_details_t* details;
-	SpPointerType type;
+	char type = SpPointerType::NULLPTR;
 
 	sp(sp_pointer_details_t* d, SpPointerType t) : details(d), type(t) {}
 
