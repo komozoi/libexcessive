@@ -19,8 +19,11 @@ variables:
 cmake-build-and-test:
   rules:
     - changes:
-      - /*.{cpp, h, c}
-      - CMakeLists.txt
+      - "**/*.cpp"
+      - "**/*.h"
+      - "**/*.c"
+      - "CMakeLists.txt"
+      - ".gitlab-ci.yml"
   stage: test
   image: gcc:13
   before_script:
