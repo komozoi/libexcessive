@@ -1,8 +1,111 @@
 # LibExcessive
 
-A C++ utility library that brings Java-like container interfaces
-to C++ while avoiding verbosity and staying fast, with emphasis on
-making safety and data organization easy.
+- High-performance, parallel file I/O with RAII semantics
+- High-performance on-disk data structures
+- A bunch of utility functions and classes
+
+## Try it in 5 minutes
+
+Create a CMakeLists.txt:
+
+```cmake
+cmake_minimum_required(VERSION 3.0)
+project(BTreeDemo)
+
+# Adds excessive to the project
+include(FetchContent)
+
+FetchContent_Declare(
+        excessive
+        GIT_REPOSITORY https://gitlab.com/Nuclear_Man_D/libexcessive.git
+        GIT_TAG "b75d7b7b5bc35855a41b453db2129376a3b9ac43"
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS ON
+        SYSTEM
+)
+
+FetchContent_MakeAvailable(excessive)
+
+# Create the demo executable and link excessive into it
+add_executable(demo demo.cpp)
+target_link_libraries(demo PRIVATE excessive)
+```
+
+And create a file `demo.cpp`:
+
+```c++
+#include <fs/FdHandle.h>
+#include <fs/BTree.h>
+#include "fcntl.h"
+#include <random>
+#include <cstdio>
+
+
+struct btree_entry_s {
+    int key;
+    int value;
+
+    static int compare(const btree_entry_s &a, const btree_entry_s &b) {
+        return a.key - b.key;
+    }
+};
+
+int main() {
+    FdHandle file = FdHandle::open("btree.bin", O_RDWR | O_CREAT, 0660);
+
+    // It is easy to check if the file already existed or was just created
+    if (file.isNew()) {
+        printf("Created a new file since none was present.\n");
+    } else {
+        printf("Found an existing data file.\n");
+    }
+
+    BTree<btree_entry_s> tree(file, 0, btree_entry_s::compare);
+
+    // Add 100 random elements to the tree
+    std::random_device rd;
+    for (int i = 0; i < 100; ++i) {
+        btree_entry_s new_entry{(int) rd() % 5000, (int) rd()};
+        tree.insert(new_entry);
+    }
+
+    // See what the next highest values are for given inputs
+    // Each run this would change as the BTree grows
+    for (int i = 0; i < 5000; i += 500) {
+        btree_entry_s result{i, 0};
+        if (tree.findNext(result)) {
+            printf("Next highest entry from %i is (%i, %i)\n", i, result.key, result.value);
+        } else {
+            printf("No next highest entry found for %i\n", i);
+        }
+    }
+
+    // All data is already written to the file (although not necessarily flushed)
+    // For this reason, no cleanup is needed here for the BTree.
+
+    // File automatically closes when all references go out of scope,
+    // but can be closed manually with:
+    // write_handle.close();
+}
+```
+
+If you are using an IDE, this may be enough to import the project and run it - very convenient!
+
+If not, run these commands to compile and run:
+
+```bash
+# Setup
+mkdir build && cd build && cmake ..
+
+# Compile
+make
+
+# Run the demo to create the data file
+./demo
+
+# Run the demo again to add more to the data file and see the effects
+./demo
+```
 
 ## Overview
 
