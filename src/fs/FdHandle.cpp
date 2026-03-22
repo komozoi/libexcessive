@@ -23,12 +23,12 @@
 
 class FdHandleState {
 public:
-
+	DefaultAllocator allocator;
 	HashMap<int16_t, FdHandleData*>* fileDescriptors = nullptr;
 
 	Map<int16_t, FdHandleData*>* getFds() {
 		if (fileDescriptors == nullptr)
-			fileDescriptors = new HashMap<int16_t, FdHandleData*>(64);
+			fileDescriptors = new HashMap<int16_t, FdHandleData*>(64, allocator);
 		return fileDescriptors;
 	}
 
