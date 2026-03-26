@@ -190,6 +190,11 @@ Unlike in other libraries, the bigint implementation uses a fixed width.  The bi
 in an EVM implementation, where most values are 256-bit.  This is designed to work like a typical register or even
 normal fixed-width datatype, just bigger, and acts like you would expect with truncation and such.
 
+There are plenty of great libraries that implement variable-width bigint; there is no reason to add that to this
+library.  Originally I wasn't going to include my own bigint implementation as I figured existing libraries were
+sufficient, but I changed my mind when I saw that they were all variable-length, which does not work for my
+typical applications.
+
 Examples:
 
 ```c++
