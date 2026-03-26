@@ -105,3 +105,21 @@ TEST(HashMapTest, AssignmentOperators) {
 	c = std::move(b);
 	EXPECT_EQ(c.get(5), "five");
 }
+
+TEST(HashMapTest, PairKeyInsertAndRetrieve) {
+	HashMap<std::pair<int,int>, std::string> map(8);
+
+	map.put({1,2}, "alpha");
+	map.put({3,4}, "beta");
+
+	EXPECT_TRUE(map.hasKey({1,2}));
+	EXPECT_TRUE(map.hasKey({3,4}));
+	EXPECT_FALSE(map.hasKey({5,6}));
+
+	EXPECT_EQ(map.get({1,2}), "alpha");
+	EXPECT_EQ(map.get({3,4}), "beta");
+
+	std::string* ptr = map.getPtr({3,4});
+	ASSERT_NE(ptr, nullptr);
+	EXPECT_EQ(*ptr, "beta");
+}
