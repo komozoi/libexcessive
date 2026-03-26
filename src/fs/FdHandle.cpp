@@ -97,7 +97,7 @@ public:
 			}
 		}
 
-		queued_write_t *item = (queued_write_t *) malloc(sizeof(queued_write_t) + size);
+		queued_write_t* item = (queued_write_t*) malloc(sizeof(queued_write_t) + size);
 		item->size = size;
 		item->where = where;
 		memcpy(item->content, value, size);
@@ -190,6 +190,10 @@ public:
 	int16_t fd;
 	std::mutex mutex;
 
+	int numReferences() const {
+		return refs;
+	}
+
 private:
 	int refs;
 
@@ -215,7 +219,7 @@ public:
 						printf("\n                        ");
 					else if (i != 0 && (i & 7) == 0)
 						printf(" ");
-					printf(" %02hhx", ((const char *) value)[i]);
+					printf(" %02hhx", ((const char*) value)[i]);
 				}
 				printf("\n");
 			}
@@ -238,7 +242,7 @@ public:
 						printf("\n                        ");
 					else if (i != 0 && (i & 7) == 0)
 						printf(" ");
-					printf(" %02hhx", ((const char *) value)[i]);
+					printf(" %02hhx", ((const char*) value)[i]);
 				}
 				printf("\n");
 			}
@@ -384,7 +388,7 @@ ssize_t FdHandle::write(const void* value, size_t size) const {
 	return getHandleData(fd).write(value, size);
 }
 
-void FdHandle::queueWrite(const void *value, size_t size, off_t where) const {
+void FdHandle::queueWrite(const void* value, size_t size, off_t where) const {
 	getHandleData(fd).queueWrite(value, size, where);
 }
 
@@ -442,8 +446,51 @@ void FdHandle::markToClose() const {
 	getHandleData(fd).markToClose();
 }
 
+MmapHandle FdHandle::getMmapHandle(off_t offset, size_t size, int prot, int flags) {
+	FdHandleData& handle = getHandleData(fd);
+
+	// Make sure the file is big enough, then
+	// restore the previous cursor position
+	{
+		std::lock_guard _(handle.mutex);
+
+		// Get current file offset to restore later
+		off_t previousOffset = lseek(fd, 0, SEEK_CUR);
+		if (previousOffset == -1)
+			return MmapHandle(handle, nullptr, nullptr);
+
+		// Get file size
+		off_t currentSize = lseek(fd, 0, SEEK_END);
+		if (currentSize == -1) {
+			lseek(fd, previousOffset, SEEK_SET);
+			return MmapHandle(handle, nullptr, nullptr);
+		}
+
+		// Expand the file if needed
+		if (currentSize < (off_t)(offset + size)) {
+			if (ftruncate(fd, offset + size) == -1) {
+				lseek(fd, previousOffset, SEEK_SET);
+				return MmapHandle(handle, nullptr, nullptr);
+			}
+		}
+
+		// Restore previous offset
+		if (lseek(fd, previousOffset, SEEK_SET) == -1)
+			return MmapHandle(handle, nullptr, nullptr);
+	}
+
+	char* mmapRegion = (char*)::mmap(nullptr, size, prot, flags, fd, offset);
+	if (mmapRegion == MAP_FAILED)
+		mmapRegion = nullptr;
+	return MmapHandle(handle, mmapRegion, &mmapRegion[size]);
+}
+
 bool FdHandle::shouldClose() const {
 	return getHandleData(fd).getShouldClose();
+}
+
+int FdHandle::numReferences() const {
+	return getHandleData(fd).numReferences();
 }
 
 FdTransaction::FdTransaction(const FdHandle& handle) : handleData(getHandleData(handle.getFd())) {
@@ -451,7 +498,7 @@ FdTransaction::FdTransaction(const FdHandle& handle) : handleData(getHandleData(
 	//handleData.flush();
 }
 
-ssize_t FdTransaction::write(const void *value, size_t size) const {
+ssize_t FdTransaction::write(const void* value, size_t size) const {
 	return handleData.write(value, size);
 }
 
@@ -482,4 +529,54 @@ bool FdTransaction::isStream() const {
 FdTransaction::~FdTransaction() {
 	//handleData.flush();
 	handleData.mutex.unlock();
+}
+
+
+MmapHandle::MmapHandle(FdHandleData &handleData, char *data, char *end)
+		: handleData(handleData), data(data), cursor(data), end(end) {
+	if (data)
+		++handleData;
+}
+
+ssize_t MmapHandle::write(const void* value, size_t size) {
+	if (size > (size_t)(end - cursor))
+		size = end - cursor;
+	memcpy(cursor, value, size);
+	cursor = &cursor[size];
+	return size;
+}
+
+ssize_t MmapHandle::read(void* value, size_t size) {
+	if (size > (size_t)(end - cursor))
+		size = end - cursor;
+	memcpy(value, cursor, size);
+	cursor = &cursor[size];
+	return size;
+}
+
+off_t MmapHandle::seek(off_t where, int whence) {
+	off_t pos = cursor - data;
+
+	if (whence == SEEK_SET) {
+		pos = where;
+	} else if (whence == SEEK_CUR) {
+		pos += where;
+	} else if (whence == SEEK_END) {
+		pos = (end - data) + where;
+	} else
+		return -1;
+
+	if (pos < 0) pos = 0;
+	if (pos > (end - data)) pos = end - data;
+
+	cursor = &data[pos];
+
+	return pos;
+}
+
+MmapHandle::~MmapHandle() {
+	if (data) {
+		munmap(data, end - data);
+		--handleData;
+	}
 }

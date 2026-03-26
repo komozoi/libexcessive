@@ -105,3 +105,36 @@ TEST_F(FdHandleTest, CloseOnReferenceLost) {
 TEST_F(FdHandleTest, FdHandleSize) {
 	EXPECT_EQ(sizeof(FdHandle), 2);
 }
+
+/*
+TEST_F(FdHandleTest, WriteAndReadMmap) {
+	const string test_content = "Hello, World!";
+
+	{
+		// Create and write to the file
+		FdHandle handle_write = FdHandle::open(TEST_FILE, O_WRONLY | O_CREAT, 0660);
+		MmapHandle writer = handle_write.getMmapHandle(0, 1024);
+		writer.write(test_content.data(), test_content.size());
+		writer.write<uint8_t>(0);
+	}
+
+	{
+		// Open the file for reading
+		FdHandle handle_read = FdHandle::open(TEST_FILE, O_RDONLY);
+		MmapHandle reader = handle_read.getMmapHandle(0, 1024);
+
+		// Verify that the content was read correctly
+		EXPECT_STREQ(reader.directPointer<const char>(), test_content.c_str());
+	}
+}
+
+TEST_F(FdHandleTest, CloseOnReferenceLostMmap) {
+	FdHandle handle = FdHandle::open(TEST_FILE, O_WRONLY | O_CREAT, 0660);
+	{
+		MmapHandle writer = handle.getMmapHandle(0, 1024);
+		writer.write<int>(0);
+		EXPECT_EQ(handle.numReferences(), 2);
+	}
+
+	EXPECT_EQ(handle.numReferences(), 1);
+}*/
