@@ -125,6 +125,71 @@ int main() {
 }
 ```
 
+### Smart Pointer with Copy on Write Behavior
+
+```c++
+#include <alloc/pointer.h>
+
+struct Data {
+    int value;
+};
+
+int main() {
+    // UNIQUE (default-style ownership)
+    sp<Data> x(SpPointerType::UNIQUE, Data{10});
+
+    // Copying a UNIQUE pointer does NOT immediately copy the data
+    sp<Data> y = x;
+    // x stays UNIQUE
+    // y becomes COPY_ON_WRITE
+    // both point to the same underlying object (for now)
+
+    // First write triggers a deep copy
+    y.mut().value = 20;
+    // now:
+    // x->value == 10
+    // y->value == 20
+    // they no longer share memory
+
+
+    // You can keep copying before mutation is needed
+    sp<Data> z = x;
+    // still sharing with x
+
+    z.mut().value = 30;
+    // z detaches and becomes independent
+    // x is still unchanged
+
+
+    // SHARED mode = always shared, no copy-on-write
+    sp<Data> sharedA(SpPointerType::SHARED, Data{100});
+    sp<Data> sharedB = sharedA;
+
+    sharedB.mut().value = 200;
+    // both see the change:
+    // sharedA->value == 200
+    // sharedB->value == 200
+
+
+    // Move = transfer ownership, no copies
+    sp<Data> moved = std::move(sharedA);
+    // sharedA is now null
+    // moved owns the data
+
+
+    // Scoped lifetime (RAII)
+    {
+        sp<Data> temp(SpPointerType::UNIQUE, Data{5});
+        sp<Data> alias = temp;
+        // alias is COPY_ON_WRITE
+
+        // object is destroyed exactly once when both go out of scope
+    }
+
+    return 0;
+}
+```
+
 ### Simple Containers
 
 Simple examples showing the style of usage that matches the library design:
