@@ -10,8 +10,8 @@
 #include <cstdint>
 #include <atomic>
 #include <mutex>
-#include "LinkedList.h"
-#include "allocation/Allocator.h"
+#include "ds/LinkedList.h"
+#include "alloc/Allocator.h"
 
 
 typedef struct slab_chunk_s {

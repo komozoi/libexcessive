@@ -6,10 +6,10 @@
 #define EXCESSIVE_MEMORYMANAGER_H
 
 #include "stdint.h"
-#include "allocation/Allocator.h"
+#include "alloc/Allocator.h"
 #include "SlabAllocator.h"
-#include "NumberedMap.h"
-#include "HashMap.h"
+#include "ds/NumberedMap.h"
+#include "ds/HashMap.h"
 #include "Range.h"
 
 size_t checkFreeSystemMemoryBytes();
@@ -30,7 +30,7 @@ private:
 
 class ModuleLevelAllocator : public Allocator {
 public:
-	inline ModuleLevelAllocator(MemoryManager& manager, const char* name);
+	inline ModuleLevelAllocator(MemoryManager& manager, Allocator& safe, const char* name);
 
 	void* alloc(size_t size) override;
 
@@ -127,6 +127,7 @@ public:
 	Range<ModuleLevelAllocator**> allModules();
 
 private:
+	DefaultAllocator safeAllocator;
 	const static int MAX_ALLOCATORS = 32;
 	ModuleLevelAllocator* allocators[MAX_ALLOCATORS];
 	int numAllocators = 0;

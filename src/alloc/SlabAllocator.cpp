@@ -3,7 +3,7 @@
 //
 
 #include <cstdio>
-#include "allocation/SlabAllocator.h"
+#include "alloc/SlabAllocator.h"
 
 
 // Allows us to use valgrind to find memory leaks

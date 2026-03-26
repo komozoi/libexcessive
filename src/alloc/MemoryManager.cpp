@@ -2,7 +2,7 @@
 // Created by komozoi on 10.9.25.
 //
 
-#include "allocation/MemoryManager.h"
+#include "alloc/MemoryManager.h"
 #include <sys/sysinfo.h>
 
 
@@ -17,15 +17,15 @@ MemoryManager memoryManager;
 Allocator& defaultAllocator = memoryManager.getDefaultModule();
 
 
-ModuleLevelAllocator::ModuleLevelAllocator(MemoryManager& manager, const char* name)
-	: manager(manager), name(name), heapOffsetToSize(128), ptrToSize(1000000) {
+ModuleLevelAllocator::ModuleLevelAllocator(MemoryManager& manager, Allocator& safe, const char* name)
+	: manager(manager), name(name), heapOffsetToSize(128, safe), ptrToSize(1000000, safe) {
 
 }
 
 ModuleLevelAllocator& MemoryManager::createModule(const char* name) {
 	ModuleLevelAllocator* allocator = allocators[0];
 	if (numAllocators < MAX_ALLOCATORS)
-		allocator = allocators[numAllocators++] = new ModuleLevelAllocator(*this, name);
+		allocator = allocators[numAllocators++] = new ModuleLevelAllocator(*this, safeAllocator, name);
 
 	return *allocator;
 }

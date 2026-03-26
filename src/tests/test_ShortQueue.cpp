@@ -3,7 +3,7 @@
 //
 #include "gtest/gtest.h"
 
-#include "ShortQueue.h"
+#include "ds/ShortQueue.h"
 
 
 TEST(ShortQueue, InsertMaintainsSortedOrder) {

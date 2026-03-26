@@ -2,7 +2,7 @@
 // Created by komozoi on 19.2.25.
 //
 
-#include "allocation/SlabAllocator.h"
+#include "alloc/SlabAllocator.h"
 #include <gtest/gtest.h>
 #include <memory>
 
