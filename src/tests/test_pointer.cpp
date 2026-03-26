@@ -13,13 +13,13 @@ TEST(SpTest, DefaultIsNull) {
 }
 
 TEST(SpTest, ConstructFromRawPointer) {
-	sp<int> p(new int(42));
+	sp<int> p(42);
 	EXPECT_TRUE(p);
 	EXPECT_EQ(*p, 42);
 }
 
 TEST(SpTest, MoveConstructorTransfersOwnership) {
-	sp<int> a(new int(7));
+	sp<int> a(7);
 	sp<int> b(std::move(a));
 
 	EXPECT_FALSE(a);
@@ -28,7 +28,7 @@ TEST(SpTest, MoveConstructorTransfersOwnership) {
 }
 
 TEST(SpTest, MoveAssignmentTransfersOwnership) {
-	sp<int> a(new int(5));
+	sp<int> a(5);
 	sp<int> b;
 
 	b = std::move(a);
@@ -38,17 +38,6 @@ TEST(SpTest, MoveAssignmentTransfersOwnership) {
 	EXPECT_EQ(*b, 5);
 }
 
-TEST(SpTest, ReleaseTransfersRawPointer) {
-	sp<int> p(new int(99));
-
-	int* raw = p.release();
-
-	EXPECT_FALSE(p);
-	EXPECT_EQ(*raw, 99);
-
-	delete raw;
-}
-
 TEST(SpTest, ResetDeletesObject) {
 	static int destroyed = 0;
 	struct Counter {
@@ -56,7 +45,7 @@ TEST(SpTest, ResetDeletesObject) {
 	};
 
 	{
-		sp<Counter> p(new Counter());
+		sp<Counter> p = sp<Counter>::create();
 		p.reset();
 		EXPECT_EQ(destroyed, 1);
 	}
@@ -65,28 +54,28 @@ TEST(SpTest, ResetDeletesObject) {
 }
 
 TEST(SpTest, CopyFromUniqueCreatesCopyOnWrite) {
-	sp<int> a(new int(10), SpPointerType::UNIQUE);
+	sp<int> a(SpPointerType::UNIQUE, 10);
 
-	sp<int> b = a;   // enable copy later
+	sp<int> b = a;
 
 	EXPECT_TRUE(a);
 	EXPECT_TRUE(b);
 	EXPECT_EQ(*a, 10);
 	EXPECT_EQ(*b, 10);
 
-	*b = 20;  // should trigger deep copy
+	b.mut() = 20;  // should trigger deep copy
 
 	EXPECT_EQ(*b, 20);
 	EXPECT_EQ(*a, 10);
 }
 
 TEST(SpTest, MultipleCopyOnWriteIsolation) {
-	sp<int> a(new int(1), SpPointerType::UNIQUE);
+	sp<int> a(SpPointerType::UNIQUE, 1);
 	sp<int> b = a;
 	sp<int> c = a;
 
-	*b = 2;
-	*c = 3;
+	b.mut() = 2;
+	c.mut() = 3;
 
 	EXPECT_EQ(*a, 1);
 	EXPECT_EQ(*b, 2);
@@ -94,10 +83,10 @@ TEST(SpTest, MultipleCopyOnWriteIsolation) {
 }
 
 TEST(SpTest, SharedDoesNotCopyOnWrite) {
-	sp<int> a(5, SpPointerType::SHARED);
+	sp<int> a(SpPointerType::SHARED, 5);
 	sp<int> b = a;
 
-	*b = 8;
+	b.mut() = 8;
 
 	EXPECT_EQ(*a, 8);
 	EXPECT_EQ(*b, 8);
@@ -115,13 +104,16 @@ TEST(SpTest, MovePreservesUnique) {
 TEST(SpTest, CopyOnWriteDeletesExactlyOnce) {
 	static int destroyed = 0;
 	struct Counter {
+		Counter() = default;
+		Counter(Counter&& moved)  noexcept {}
 		~Counter() { destroyed++; }
+		void doNothing() const {}
 	};
 
 	{
-		sp<Counter> a(Counter());
-		sp<Counter> b = a;
-		*b;  // no write, no COW yet
+		sp<Counter> a = sp<Counter>::create();
+		sp<Counter> b = a; // NOLINT(*-unnecessary-copy-initialization)
+		b->doNothing();
 	}
 
 	EXPECT_EQ(destroyed, 1);
@@ -132,12 +124,12 @@ TEST(SpTest, WriteTriggersSingleClone) {
 		int value;
 	};
 
-	sp<Data> a(new Data{1});
+	sp<Data> a(Data{1});
 	sp<Data> b = a;
 
 	EXPECT_EQ(a.get(), b.get());
 
-	b->value = 2;
+	b.mut().value = 2;
 
 	EXPECT_NE(a.get(), b.get());
 	EXPECT_EQ(a->value, 1);
