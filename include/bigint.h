@@ -566,6 +566,8 @@ public:
 typedef UnsignedFixedWidthBigInt<2> uint128_t;
 typedef UnsignedFixedWidthBigInt<3> uint192_t;
 typedef UnsignedFixedWidthBigInt<4> uint256_t;
+typedef UnsignedFixedWidthBigInt<6> uint384_t;
+typedef UnsignedFixedWidthBigInt<8> uint512_t;
 
 static_assert(!std::is_polymorphic<uint256_t>::value, "uint256_t cannot be polymorphic");
 

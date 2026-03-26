@@ -10,6 +10,8 @@
 #include <cstdio>
 #include <cstring>
 #include <cmath>
+#include <iterator>
+#include <cstddef>
 
 
 template<class T>
@@ -25,6 +27,115 @@ public:
 template<class T>
 class LinkedList {
 public:
+
+	class iterator {
+	public:
+		typedef std::bidirectional_iterator_tag iterator_category;
+		typedef T value_type;
+		typedef std::ptrdiff_t difference_type;
+		typedef T* pointer;
+		typedef T& reference;
+
+		iterator() : node(nullptr), list(nullptr) {}
+		iterator(linkedlist_value_container_t<T>* node, LinkedList<T>* list) : node(node), list(list) {}
+
+		reference operator*() const { return node->value; }
+		pointer operator->() const { return &node->value; }
+
+		iterator& operator++() {
+			if (node) node = node->next;
+			return *this;
+		}
+
+		iterator operator++(int) {
+			iterator tmp = *this;
+			++(*this);
+			return tmp;
+		}
+
+		iterator& operator--() {
+			node = node ? node->previous : (list ? list->last : nullptr);
+			return *this;
+		}
+
+		iterator operator--(int) {
+			iterator tmp = *this;
+			--(*this);
+			return tmp;
+		}
+
+		bool operator==(const iterator& other) const { return node == other.node; }
+		bool operator!=(const iterator& other) const { return node != other.node; }
+
+	private:
+		linkedlist_value_container_t<T>* node;
+		LinkedList<T>* list;
+		friend class LinkedList;
+		friend class const_iterator;
+	};
+
+	class const_iterator {
+	public:
+		typedef std::bidirectional_iterator_tag iterator_category;
+		typedef const T value_type;
+		typedef std::ptrdiff_t difference_type;
+		typedef const T* pointer;
+		typedef const T& reference;
+
+		const_iterator() : node(nullptr), list(nullptr) {}
+		const_iterator(const linkedlist_value_container_t<T>* node, const LinkedList<T>* list) : node(node), list(list) {}
+		const_iterator(const iterator& other) : node(other.node), list(other.list) {}
+
+		reference operator*() const { return node->value; }
+		pointer operator->() const { return &node->value; }
+
+		const_iterator& operator++() {
+			if (node) node = node->next;
+			return *this;
+		}
+
+		const_iterator operator++(int) {
+			const_iterator tmp = *this;
+			++(*this);
+			return tmp;
+		}
+
+		const_iterator& operator--() {
+			node = node ? node->previous : (list ? list->last : nullptr);
+			return *this;
+		}
+
+		const_iterator operator--(int) {
+			const_iterator tmp = *this;
+			--(*this);
+			return tmp;
+		}
+
+		bool operator==(const const_iterator& other) const { return node == other.node; }
+		bool operator!=(const const_iterator& other) const { return node != other.node; }
+
+	private:
+		const linkedlist_value_container_t<T>* node;
+		const LinkedList<T>* list;
+		friend class LinkedList;
+	};
+
+	iterator begin() { return iterator(first, this); }
+	iterator end() { return iterator(nullptr, this); }
+	const_iterator begin() const { return const_iterator(first, this); }
+	const_iterator end() const { return const_iterator(nullptr, this); }
+	const_iterator cbegin() const { return const_iterator(first, this); }
+	const_iterator cend() const { return const_iterator(nullptr, this); }
+
+	typedef std::reverse_iterator<iterator> reverse_iterator;
+	typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
+
+	reverse_iterator rbegin() { return reverse_iterator(end()); }
+	reverse_iterator rend() { return reverse_iterator(begin()); }
+	const_reverse_iterator rbegin() const { return const_reverse_iterator(end()); }
+	const_reverse_iterator rend() const { return const_reverse_iterator(begin()); }
+	const_reverse_iterator crbegin() const { return const_reverse_iterator(end()); }
+	const_reverse_iterator crend() const { return const_reverse_iterator(begin()); }
 
 	/**
 	 * Creates an empty LinkedList.
@@ -67,7 +178,7 @@ public:
 	 * @param i Index of item to find
 	 * @return Container at index i, or nullptr if i is out of bounds
 	 */
-	linkedlist_value_container_t<T>* findItem(int i) {
+	linkedlist_value_container_t<T>* findItem(int i) const {
 		if (i < 0 || i >= length)
 			return nullptr;
 		linkedlist_value_container_t<T>* current = first;

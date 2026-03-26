@@ -5,6 +5,8 @@
 #ifndef LIBEXCESSIVE_POINTER_H
 #define LIBEXCESSIVE_POINTER_H
 
+#include <atomic>
+
 #include "Allocator.h"
 
 
