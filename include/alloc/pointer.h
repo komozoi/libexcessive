@@ -57,7 +57,7 @@ public:
 	template<typename... Args>
 	static sp<T> create(Args&&... args) {
 		size_t total = sizeof(sp_pointer_details_t) + sizeof(T);
-		auto* block = (sp_pointer_details_t*)::operator new(total);
+		sp_pointer_details_t* block = (sp_pointer_details_t*)::operator new(total);
 
 		block->refs.store(1, std::memory_order_relaxed);
 
@@ -139,14 +139,16 @@ public:
 
 	void reset() {
 		release_ref();
-		details = nullptr;
+		type = SpPointerType::NULLPTR;
 	}
 
 	void swap(sp& other) noexcept {
 		std::swap(details, other.details);
+		std::swap(type, other.type);
 	}
 
 	sp<T> getWritableCopy() const {
+		details->refs.fetch_add(1, std::memory_order_relaxed);
 		return sp<T>(details, SpPointerType::COPY_ON_WRITE);
 	}
 
@@ -158,7 +160,7 @@ private:
 	sp_pointer_details_t* details;
 	SpPointerType type;
 
-	sp(sp_pointer_details_t* details, SpPointerType type) : details(details), type(type) {}
+	sp(sp_pointer_details_t* d, SpPointerType t) : details(d), type(t) {}
 
 	// ---------- Internals ----------
 
