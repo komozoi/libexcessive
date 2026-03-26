@@ -136,4 +136,54 @@ TEST(SpTest, WriteTriggersSingleClone) {
 	EXPECT_EQ(b->value, 2);
 }
 
+TEST(SpTest, CopyFromUniqueCreatesCOW) {
+	sp<int> a(SpPointerType::UNIQUE, 5);
+	sp<int> b = a;
 
+	EXPECT_EQ(b.pointerType(), SpPointerType::COPY_ON_WRITE);
+	EXPECT_EQ(a.pointerType(), SpPointerType::UNIQUE);
+}
+
+TEST(SpTest, COWDetachesOnMut) {
+	sp<int> a(SpPointerType::UNIQUE, 10);
+	sp<int> b = a;
+
+	b.mut() = 20;
+
+	EXPECT_EQ(*a, 10);
+	EXPECT_EQ(*b, 20);
+	EXPECT_EQ(b.pointerType(), SpPointerType::SHARED);
+
+	sp<int> c = b;
+
+	c.mut() = 30;
+
+	EXPECT_EQ(*b, 30);
+	EXPECT_EQ(*c, 30);
+	EXPECT_EQ(c.pointerType(), SpPointerType::SHARED);
+}
+
+TEST(SpTest, SharedDoesNotDetach) {
+	sp<int> a(SpPointerType::SHARED, 1);
+	sp<int> b = a;
+
+	b.mut() = 5;
+
+	EXPECT_EQ(*a, 5);
+	EXPECT_EQ(*b, 5);
+}
+
+TEST(SpTest, DestroyedExactlyOncePerBlock) {
+	static int destroyed = 0;
+
+	struct Counter {
+		~Counter() { destroyed++; }
+	};
+
+	{
+		sp<Counter> a(SpPointerType::UNIQUE);
+		sp<Counter> b = a;
+	}
+
+	EXPECT_EQ(destroyed, 1);
+}
