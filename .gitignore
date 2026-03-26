@@ -1,0 +1,7 @@
+
+# Project file
+.idea/
+
+# Object files and build directory
+*.o
+cmake-build-debug
