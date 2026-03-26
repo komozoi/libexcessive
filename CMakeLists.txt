@@ -19,6 +19,7 @@ file(GLOB SOURCES
 
 add_library(excessive ${SOURCES})
 target_include_directories(excessive PUBLIC "include")
+target_include_directories(excessive PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
 
 find_package(GTest)
 if(GTest_FOUND)
