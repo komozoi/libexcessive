@@ -102,7 +102,7 @@ int main() {
     printf("b     = %s\n", b.toHexString().c_str());
     printf("a + b = %s\n", sum.toHexString().c_str());
     printf("a * b = %s\n", prod.toHexString().c_str());
-    printf("b⁴    = %s\n", pow.toHexString().c_str());
+    printf("b**4  = %s\n", pow.toHexString().c_str());
 
     // Output:
     // a     = ffffffffffffffffffffffffffffffff
