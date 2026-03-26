@@ -14,7 +14,7 @@ class RAMBTree: public BTreeBase<T, N> {
 public:
 	RAMBTree(int (*compare)(const T &, const T &))
 		: BTreeBase<T, N>(compare) {
-		nodes.add({0, 0, 0, -1, 0, {}, {}});
+		nodes.add({{0, 0, 0, -1, 0, {}}, {}});
 	}
 
 protected:
@@ -43,11 +43,11 @@ protected:
 		else {
 			int lastChildOffset = -1;
 			for (int i = 0; i < node.header.nChildren; i++) {
-				if ((int)node.childOffsets[i] >= nodes.size())
+				if ((int)node.header.childOffsets[i] >= nodes.size())
 					ADD_FAILURE();
-				if ((int)node.childOffsets[i] == lastChildOffset)
+				if ((int)node.header.childOffsets[i] == lastChildOffset)
 					abort();
-				lastChildOffset = (int)node.childOffsets[i];
+				lastChildOffset = (int)node.header.childOffsets[i];
 			}
 		}
 		uint64_t i = nodes.size();
@@ -57,29 +57,28 @@ protected:
 	}
 
 	void overwriteNode(uint64_t offset, const btree_node_t<T, N>& node) override {
-		if (node.header.nElements > N)
-			ADD_FAILURE();
-		else if (node.header.nElements < N / 2 && offset != getRootOffset())
-			ADD_FAILURE();
-		else if (node.header.indexInParent > getNode(node.header.parent).header.nElements + 1)
-			ADD_FAILURE();
-		else if (node.header.nChildren != 0 && node.header.nChildren != node.header.nElements + 1)
-			ADD_FAILURE();
-		else {
-			int lastChildOffset = -1;
-			for (int i = 0; i < node.header.nChildren; i++) {
-				if ((int)node.childOffsets[i] >= nodes.size())
-					ADD_FAILURE();
-				if (node.childOffsets[i] == offset)
-					ADD_FAILURE();
-				else if (getNode(node.childOffsets[i]).header.parent != offset)
-					ADD_FAILURE();
-				else if (getNode(node.childOffsets[i]).header.indexInParent != i)
-					ADD_FAILURE();
-				if ((int)node.childOffsets[i] == lastChildOffset)
-					abort();
-				lastChildOffset = (int)node.childOffsets[i];
-			}
+		EXPECT_LE(node.header.nElements, N);
+		if (offset != getRootOffset()) {
+			EXPECT_GE(node.header.nElements, N / 2);
+		}
+		EXPECT_LE(node.header.indexInParent, getNode(node.header.parent).header.nElements + 1);
+		if (node.header.nChildren != 0) {
+			EXPECT_EQ(node.header.nChildren, node.header.nElements + 1);
+		}
+
+		int lastChildOffset = -1;
+		for (int i = 0; i < node.header.nChildren; i++) {
+			EXPECT_LT((int)node.header.childOffsets[i], nodes.size());
+			if (node.header.childOffsets[i] == offset)
+				ADD_FAILURE();
+			else if (getNode(node.header.childOffsets[i]).header.parent != offset)
+				ADD_FAILURE();
+			else if (getNode(node.header.childOffsets[i]).header.indexInParent != i)
+				ADD_FAILURE();
+			if ((int)node.header.childOffsets[i] == lastChildOffset)
+				abort();
+			lastChildOffset = (int)node.header.childOffsets[i];
+
 		}
 		nodes.set((int)offset, node);
 	}
@@ -93,7 +92,7 @@ protected:
 
 
 static int compareInts(const int& a, const int& b) {
-	return b - a;
+	return a - b;
 }
 
 
@@ -226,7 +225,7 @@ TEST_F(BTreeBaseTest, MinNodeSize) {
 }
 
 // Stress test with many elements
-/*TEST_F(BTreeBaseTest, DiskStressTest) {
+TEST_F(BTreeBaseTest, DiskStressTest) {
 	uint64_t startTime = millis_since_epoch();
 
 	FdHandle file = FdHandle::open("/tmp/BTreeDiskStressTest.bin", O_RDWR | O_CREAT, 0660);
@@ -259,4 +258,50 @@ TEST_F(BTreeBaseTest, MinNodeSize) {
 
 	printf("Insertion time for %i elements: %lums (%.3fus per element)\n", num_elements, insertionTime, 1000.0 * (double) insertionTime / num_elements);
 	printf("Retrieval time for %i elements: %lums (%.3fus per element)\n", num_elements, retrieveTime, 1000.0 * (double) retrieveTime / num_elements);
+}
+
+// TODO: It is known that remove does not work properly
+/*TEST_F(BTreeBaseTest, BasicInsertAndRemove) {
+	const int num_elements = 100;
+	for (int i = 0; i < num_elements; ++i) {
+		tree.insert(i);
+	}
+
+	int val;
+	EXPECT_TRUE(tree.find(val = 5));
+	EXPECT_EQ(5, val);
+
+	EXPECT_TRUE(tree.find(val = 10));
+	EXPECT_EQ(10, val);
+
+	tree.remove(val);
+
+	EXPECT_TRUE(tree.find(val = 3));
+	EXPECT_EQ(3, val);
+
+	int not_found = -1;
+	EXPECT_FALSE(tree.find(not_found));
+	EXPECT_EQ(-1, not_found);
 }*/
+
+
+TEST_F(BTreeBaseTest, FindNext) {
+	const int num_elements = 100;
+	for (int i = 0; i < num_elements; ++i) {
+		tree.insert(i * 2);
+	}
+
+	tree.insert(5000);
+
+	int val = 95;
+	EXPECT_TRUE(tree.findNext(val));
+	EXPECT_EQ(96, val);
+
+	val = 1000;
+	EXPECT_TRUE(tree.findNext(val));
+	EXPECT_EQ(5000, val);
+
+	val = 10000;
+	EXPECT_FALSE(tree.findNext(val));
+	EXPECT_EQ(10000, val);
+}
