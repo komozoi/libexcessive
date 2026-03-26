@@ -8,7 +8,6 @@
 #include "stdint.h"
 #include "alloc/Allocator.h"
 #include "SlabAllocator.h"
-#include "ds/NumberedMap.h"
 #include "ds/HashMap.h"
 #include "Range.h"
 
