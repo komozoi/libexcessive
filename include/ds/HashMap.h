@@ -10,6 +10,7 @@
 #include "stdint.h"
 #include "alloc/Allocator.h"
 #include "Map.h"
+#include <new>
 
 
 template <class K, class T>
