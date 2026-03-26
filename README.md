@@ -9,7 +9,7 @@
 Create a CMakeLists.txt:
 
 ```cmake
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.14)
 project(BTreeDemo)
 
 # Adds excessive to the project
@@ -18,7 +18,7 @@ include(FetchContent)
 FetchContent_Declare(
         excessive
         GIT_REPOSITORY https://gitea.com/komozoi/excessive.git
-        GIT_TAG "f8bc275d77457998a14611bc17825781dbe96f3d"
+        GIT_TAG v0.1.0
         GIT_SHALLOW TRUE
         GIT_PROGRESS ON
         SYSTEM
@@ -36,7 +36,7 @@ And create a file `demo.cpp`:
 ```c++
 #include <fs/FdHandle.h>
 #include <fs/BTree.h>
-#include "fcntl.h"
+#include <fcntl.h>
 #include <random>
 #include <cstdio>
 
@@ -51,14 +51,14 @@ struct btree_entry_s {
 };
 
 int main() {
-    FdHandle file = FdHandle::open("btree.bin", O_RDWR | O_CREAT, 0660);
+    FdHandle file = FdHandle::open("btree.bin", O_RDWR | O_CREAT, 0644);
+	if (!file) {
+		printf("Failed to open file!\n");
+		return 1;
+	}
 
     // It is easy to check if the file already existed or was just created
-    if (file.isNew()) {
-        printf("Created a new file since none was present.\n");
-    } else {
-        printf("Found an existing data file.\n");
-    }
+    printf("File is %s.\n", file.isNew() ? "newly created" : "existing");
 
     BTree<btree_entry_s> tree(file, 0, btree_entry_s::compare);
 
@@ -86,6 +86,8 @@ int main() {
     // File automatically closes when all references go out of scope,
     // but can be closed manually with:
     // write_handle.close();
+
+	return 0;
 }
 ```
 
@@ -106,6 +108,9 @@ make
 # Run the demo again to add more to the data file and see the effects
 ./demo
 ```
+
+And that's it - efficient and persistent data storage in less than 60 lines of code.  No extra installation steps
+or complex APIs.  It just works.
 
 ## Overview
 
