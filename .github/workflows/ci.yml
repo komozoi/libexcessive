@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [ "master", "main" ]
+    paths:
+      - '**/*.cpp'
+      - '**/*.c'
+      - '**/*.h'
+      - '**/*.hpp'
+      - '**/CMakeLists.txt'
+      - '**/*.cmake'
+  pull_request:
+    branches: [ "master", "main" ]
+    paths:
+      - '**/*.cpp'
+      - '**/*.c'
+      - '**/*.h'
+      - '**/*.hpp'
+      - '**/CMakeLists.txt'
+      - '**/*.cmake'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libgtest-dev
+
+    - name: Configure CMake
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Release -DLIBEXCESSIVE_BUILD_TESTS=ON
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config Release --target libexcessive_tests
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: |
+        # Ensure tests can find any required resources or handle directory changes if needed.
+        ./libexcessive_tests
