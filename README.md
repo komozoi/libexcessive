@@ -1,5 +1,7 @@
 # LibExcessive
 
+[![Github Actions Status](https://github.com/komozoi/libexcessive/actions/workflows/ci.yml/badge.svg)](https://github.com/komozoi/excessive/actions)
+
 - High-performance, parallel file I/O with RAII semantics
 - High-performance on-disk data structures
 - A bunch of utility functions and classes
@@ -144,7 +146,7 @@ Everything is tested on Debian Linux currently, although
 any Unix flavor should work.  I do not plan on supporting Windows.
 
 Main repository is on Gitea at https://gitea.com/komozoi/excessive, but is mirrored to GitHub
-at https://github.com/komozoi/excessive.
+at https://github.com/komozoi/libexcessive.
 
 ## Building
 
