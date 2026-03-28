@@ -5,6 +5,10 @@ on:
     branches: [ "master" ]
     paths:
       - 'docs/wiki/**'
+  pull_request:
+    branches: [ "master" ]
+    paths:
+      - 'docs/wiki/**'
   workflow_dispatch:
 
 permissions:
