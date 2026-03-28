@@ -17,12 +17,23 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      - name: Prepare Docs
+      - name: Setup Ruby + Jekyll
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.1'
+          bundler-cache: true
+
+      - name: Build site
+        if: github.event.action != 'closed'
         run: |
-          mkdir -p _site
-          cp docs/wiki/*.md _site/
-          echo "title: LibExcessive: High-Performance Persistent Datastructures in C++" > _site/_config.yml
-          echo "baseurl: /pr-${{ github.event.number }}" >> _site/_config.yml
+          gem install bundler jekyll
+
+          cat > _config.yml << EOF
+          title: "LibExcessive: High-Performance Persistent Datastructures in C++"
+          baseurl: /pr-preview/pr-${{ github.event.number }}
+          EOF
+
+          jekyll build --source docs/wiki --destination _site
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
