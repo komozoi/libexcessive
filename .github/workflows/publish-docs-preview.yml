@@ -20,20 +20,14 @@ jobs:
       - name: Setup Ruby + Jekyll
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.1'
-          bundler-cache: true
+          ruby-version: '3.1'   # compatible with GitHub Pages
 
       - name: Build site
         if: github.event.action != 'closed'
         run: |
-          gem install bundler jekyll
+          gem install jekyll jekyll-remote-theme just-the-docs
 
-          cat > _config.yml << EOF
-          title: "LibExcessive: High-Performance Persistent Datastructures in C++"
-          baseurl: /pr-preview/pr-${{ github.event.number }}
-          EOF
-
-          jekyll build --source docs/wiki --destination _site
+          jekyll build --source docs/wiki --destination _site --config docs/wiki/_config.yml
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
