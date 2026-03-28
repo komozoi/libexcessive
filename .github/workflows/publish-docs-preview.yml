@@ -1,26 +1,14 @@
-name: Publish Wiki Docs to GitHub Pages
+name: PR Preview
 
 on:
-  push:
+  pull_request:
     branches: [ "master" ]
     paths:
       - 'docs/wiki/**'
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
-
 jobs:
   build:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,20 +22,26 @@ jobs:
           mkdir -p _site
           cp docs/wiki/*.md _site/
           echo "title: LibExcessive: High-Performance Persistent Datastructures in C++" > _site/_config.yml
-          echo "baseurl: /libexcessive" >> _site/_config.yml
+          echo "baseurl: /pr-${{ github.event.number }}" >> _site/_config.yml
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: '_site'
 
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+  deploy-preview:
+    if: github.event.pull_request.head.repo.fork == false
     needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: pr-${{ github.event.number }}
+      url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy to Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@v4
