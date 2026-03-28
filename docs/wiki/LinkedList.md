@@ -1,4 +1,3 @@
-
 ---
 title: "LinkedList: Efficient Doubly Linked List"
 description: "A professional doubly linked list implementation with simple, clean APIs and no external dependencies."

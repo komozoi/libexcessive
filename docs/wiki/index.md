@@ -20,16 +20,13 @@ on-disk data structures, and efficient memory management utilities.
 
 ## Documentation Index
 
-- [**FdHandle**](FdHandle.md) - Smart file descriptor management and I/O.
-- [**MmapHandle**](MmapHandle.md) - High-performance memory-mapped I/O.
-- [**BTree**](BTree.md) - Persistent on-disk sorted data structures.
-- [**FreeSpaceFile**](FreeSpaceFile.md) - Managed file space allocation and reuse.
-- [**Bigint**](Bigint.md) - Fixed-width large integer arithmetic.
-- [**LinkedList**](LinkedList.md) - Doubly linked list implementation.
-- [**Logger**](Logger.md) - Thread-safe logging system.
-- [**SlabPointer**](SlabPointer.md) - Smart pointer for slab-allocated objects.
-- [**StrUtil**](StrUtil.md) - Performance-oriented string utilities.
+- [**FdHandle**](FdHandle.html) - Smart file descriptor management and I/O.
+- [**MmapHandle**](MmapHandle.html) - High-performance memory-mapped I/O.
+- [**BTree**](BTree.html) - Persistent on-disk sorted data structures.
+- [**FreeSpaceFile**](FreeSpaceFile.html) - Managed file space allocation and reuse.
+- [**Bigint**](Bigint.html) - Fixed-width large integer arithmetic.
+- [**LinkedList**](LinkedList.html) - Doubly linked list implementation.
+- [**Logger**](Logger.html) - Thread-safe logging system.
+- [**SlabPointer**](SlabPointer.html) - Smart pointer for slab-allocated objects.
+- [**StrUtil**](StrUtil.html) - Performance-oriented string utilities.
 
-## Related Resources
-
-- [Project README](../../README.md)
