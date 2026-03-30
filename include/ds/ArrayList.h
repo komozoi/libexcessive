@@ -27,9 +27,9 @@
 #include <string>
 #include <cmath>
 #include <utility>
-#include <type_traits>
 #include "Range.h"
 #include "MonkeyIterator.h"
+#include "Container.h"
 
 /*
  * This class was originally designed for use in larger embedded systems.
@@ -38,7 +38,7 @@
  */
 
 template<class T>
-class ArrayList {
+class ArrayList : public Container<T, T*, const T*> {
 public:
 
 	ArrayList() {
@@ -311,10 +311,10 @@ public:
 		return tmp;
 	}
 
-	T* begin() { return elements; }
-	T* end() { return &(elements[length]); }
-	const T* begin() const { return elements; }
-	const T* end() const { return &(elements[length]); }
+	T* begin() override { return elements; }
+	T* end() override { return &(elements[length]); }
+	const T* begin() const override { return elements; }
+	const T* end() const override { return &(elements[length]); }
 
 	template<class E>
 	Range<MonkeyIterator<T*, E>> rangeOf() {
@@ -346,6 +346,8 @@ public:
 		clear();
 		free((void*)elements);
 	}
+
+protected:
 
 private:
 	int length, allocated;

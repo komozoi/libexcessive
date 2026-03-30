@@ -22,134 +22,165 @@
 
 #include <cstdlib>
 #include <cstdio>
-#include <cstring>
-#include <cmath>
 #include <iterator>
 #include <cstddef>
+#include "Container.h"
+
+
+template<class T>
+class LinkedList;
 
 
 template<class T>
 class linkedlist_value_container_t {
 public:
-	explicit inline linkedlist_value_container_t(const T& value) : value(value) {}
+	explicit inline linkedlist_value_container_t(const T& value) : value(value), next(nullptr), previous(nullptr) {}
+
 	T value;
 	linkedlist_value_container_t* next;
 	linkedlist_value_container_t* previous;
-};
 
-
-template<class T>
-class LinkedList {
-public:
-
-	class iterator {
+	class Iterator {
 	public:
+		// Needed for reverse_iterator
 		typedef std::bidirectional_iterator_tag iterator_category;
 		typedef T value_type;
 		typedef std::ptrdiff_t difference_type;
 		typedef T* pointer;
 		typedef T& reference;
 
-		iterator() : node(nullptr), list(nullptr) {}
-		iterator(linkedlist_value_container_t<T>* node, LinkedList<T>* list) : node(node), list(list) {}
+		Iterator() : node(nullptr), atEnd(true) {}
+		Iterator(linkedlist_value_container_t* node, bool atEnd) : node(node), atEnd(atEnd) {}
 
-		reference operator*() const { return node->value; }
-		pointer operator->() const { return &node->value; }
+		T& operator*() const {
+			return node->value;
+		}
 
-		iterator& operator++() {
-			if (node) node = node->next;
+		T* operator->() const {
+			if (atEnd)
+				return nullptr;
+			return &node->value;
+		}
+
+		Iterator& operator++() {
+			if (!atEnd && node) {
+				if (node->next)
+					node = node->next;
+				else
+					atEnd = true;
+			}
 			return *this;
 		}
 
-		iterator operator++(int) {
-			iterator tmp = *this;
+		Iterator operator++(int) {
+			Iterator tmp = *this;
 			++(*this);
 			return tmp;
 		}
 
-		iterator& operator--() {
-			node = node ? node->previous : (list ? list->last : nullptr);
+		Iterator& operator--() {
+			if (atEnd)
+				atEnd = false;
+			else
+				node = node ? node->previous : nullptr;
 			return *this;
 		}
 
-		iterator operator--(int) {
-			iterator tmp = *this;
+		Iterator operator--(int) {
+			Iterator tmp = *this;
 			--(*this);
 			return tmp;
 		}
 
-		bool operator==(const iterator& other) const { return node == other.node; }
-		bool operator!=(const iterator& other) const { return node != other.node; }
+		bool operator==(const Iterator& other) const {
+			if (atEnd != other.atEnd) return false;
+			if (atEnd) return true; // Both are at end, node doesn't matter (or should both be last)
+			return node == other.node;
+		}
+		bool operator!=(const Iterator& other) const { return !(*this == other); }
 
 	private:
-		linkedlist_value_container_t<T>* node;
-		LinkedList<T>* list;
-		friend class LinkedList;
-		friend class const_iterator;
+		linkedlist_value_container_t* node;
+		bool atEnd;
 	};
 
-	class const_iterator {
+	class ConstIterator {
 	public:
+		// Needed for reverse_iterator
 		typedef std::bidirectional_iterator_tag iterator_category;
 		typedef const T value_type;
 		typedef std::ptrdiff_t difference_type;
 		typedef const T* pointer;
 		typedef const T& reference;
 
-		const_iterator() : node(nullptr), list(nullptr) {}
-		const_iterator(const linkedlist_value_container_t<T>* node, const LinkedList<T>* list) : node(node), list(list) {}
-		const_iterator(const iterator& other) : node(other.node), list(other.list) {}
+		ConstIterator() : node(nullptr), atEnd(true) {}
+		ConstIterator(const linkedlist_value_container_t* node, bool atEnd) : node(node), atEnd(atEnd) {}
+		ConstIterator(const Iterator& other) : node(other.node), atEnd(other.atEnd) {}
 
-		reference operator*() const { return node->value; }
-		pointer operator->() const { return &node->value; }
+		const T& operator*() const { return node->value; }
+		const T* operator->() const {
+			if (atEnd)
+				return nullptr;
+			return &node->value;
+		}
 
-		const_iterator& operator++() {
-			if (node) node = node->next;
+		ConstIterator& operator++() {
+			if (!atEnd && node) {
+				if (node->next)
+					node = node->next;
+				else
+					atEnd = true;
+			}
 			return *this;
 		}
 
-		const_iterator operator++(int) {
-			const_iterator tmp = *this;
+		ConstIterator operator++(int) {
+			ConstIterator tmp = *this;
 			++(*this);
 			return tmp;
 		}
 
-		const_iterator& operator--() {
-			node = node ? node->previous : (list ? list->last : nullptr);
+		ConstIterator& operator--() {
+			if (atEnd)
+				atEnd = false;
+			else
+				node = node ? node->previous : nullptr;
 			return *this;
 		}
 
-		const_iterator operator--(int) {
-			const_iterator tmp = *this;
+		ConstIterator operator--(int) {
+			ConstIterator tmp = *this;
 			--(*this);
 			return tmp;
 		}
 
-		bool operator==(const const_iterator& other) const { return node == other.node; }
-		bool operator!=(const const_iterator& other) const { return node != other.node; }
+		bool operator==(const ConstIterator& other) const {
+			if (atEnd != other.atEnd) return false;
+			if (atEnd) return true;
+			return node == other.node;
+		}
+		bool operator!=(const ConstIterator& other) const { return !(*this == other); }
 
 	private:
-		const linkedlist_value_container_t<T>* node;
-		const LinkedList<T>* list;
-		friend class LinkedList;
+		const linkedlist_value_container_t* node;
+		bool atEnd;
 	};
+};
 
-	iterator begin() { return iterator(first, this); }
-	iterator end() { return iterator(nullptr, this); }
-	const_iterator begin() const { return const_iterator(first, this); }
-	const_iterator end() const { return const_iterator(nullptr, this); }
-	const_iterator cbegin() const { return const_iterator(first, this); }
-	const_iterator cend() const { return const_iterator(nullptr, this); }
 
-	typedef std::reverse_iterator<iterator> reverse_iterator;
-	typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
+template<class T>
+class LinkedList : public Container<T, typename linkedlist_value_container_t<T>::Iterator, typename linkedlist_value_container_t<T>::ConstIterator> {
+public:
 
-	reverse_iterator rbegin() { return reverse_iterator(end()); }
-	reverse_iterator rend() { return reverse_iterator(begin()); }
-	const_reverse_iterator rbegin() const { return const_reverse_iterator(end()); }
-	const_reverse_iterator rend() const { return const_reverse_iterator(begin()); }
-	const_reverse_iterator crbegin() const { return const_reverse_iterator(end()); }
-	const_reverse_iterator crend() const { return const_reverse_iterator(begin()); }
+	typedef typename linkedlist_value_container_t<T>::Iterator iterator;
+	typedef typename linkedlist_value_container_t<T>::ConstIterator const_iterator;
+
+	iterator begin() override { return iterator(first, first == nullptr); }
+	iterator end() override { return iterator(last, true); }
+	const_iterator begin() const override { return const_iterator(first, first == nullptr); }
+	const_iterator end() const override { return const_iterator(last, true); }
+	const_iterator cbegin() const { return const_iterator(first, first == nullptr); }
+	const_iterator cend() const { return const_iterator(last, true); }
 
 	/**
 	 * Creates an empty LinkedList.
@@ -394,6 +425,12 @@ public:
 	inline linkedlist_value_container_t<T>* getRawCursor() { return cursor; }
 	inline void setRawCursor(linkedlist_value_container_t<T>* newCursor) { cursor = newCursor; }
 
+public:
+	int length;
+	linkedlist_value_container_t<T>* first = nullptr;
+	linkedlist_value_container_t<T>* last = nullptr;
+	linkedlist_value_container_t<T>* cursor = nullptr;
+
 private:
 	T removeRaw(linkedlist_value_container_t<T>* containerToRemove) {
 		if (containerToRemove == last)
@@ -415,11 +452,6 @@ private:
 		delete containerToRemove;
 		return value;
 	}
-
-	int length;
-	linkedlist_value_container_t<T>* first = nullptr;
-	linkedlist_value_container_t<T>* last = nullptr;
-	linkedlist_value_container_t<T>* cursor = nullptr;
 };
 
 #endif //EXCESSIVE_LINKEDLIST_H

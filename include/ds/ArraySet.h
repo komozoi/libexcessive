@@ -19,12 +19,13 @@
 #ifndef EXCESSIVE_ARRAYSET_H
 #define EXCESSIVE_ARRAYSET_H
 
+#include "Container.h"
 #include "ArrayList.h"
 #include "Set.h"
 
 
 template<class T>
-class ArraySet: public Set<T> {
+class ArraySet: public Set<T>, public Container<T, T*, const T*> {
 public:
 
 	ArraySet() {
@@ -145,13 +146,13 @@ public:
 		return elements;
 	}
 
-	T* begin() { return elements; }
-	T* end() { return &(elements[length]); }
-	const T* begin() const { return elements; }
-	const T* end() const { return &(elements[length]); }
+	T* begin() override { return elements; }
+	T* end() override { return &(elements[length]); }
+	const T* begin() const override { return elements; }
+	const T* end() const override { return &(elements[length]); }
 
 
-	~ArraySet() { free(elements); }
+	~ArraySet() override { free(elements); }
 
 	inline void clear() override { length = 0; }
 
@@ -162,6 +163,8 @@ public:
 	T minimum() const {
 		return elements[0];
 	}
+
+protected:
 
 private:
 

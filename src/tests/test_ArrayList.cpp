@@ -212,3 +212,18 @@ TEST(ArrayListTest, ExportMemoryTransfersOwnership) {
 
 	free(mem);  // caller now owns memory
 }
+
+TEST(ArrayListTest, ContainerInterface) {
+    ArrayList<int> list;
+    list.add(10);
+    list.add(20);
+    list.add(30);
+
+    Container<int, int*, const int*>* container = &list;
+    EXPECT_EQ(container->getElement(0), 10);
+    EXPECT_EQ(container->getElement(1), 20);
+    EXPECT_EQ(container->getElement(2), 30);
+
+    EXPECT_EQ(container->find(20), 1);
+    EXPECT_EQ(container->find(40), -1);
+}
