@@ -39,6 +39,15 @@ static void _lshift_word(int size, uint64_t* a, int nwords) {
 }
 
 
+/**
+ * @brief Internal helper for fast addition of two big integers.
+ * @param aSize Number of 64-bit chunks in a.
+ * @param a Pointer to the first big integer.
+ * @param bSize Number of 64-bit chunks in b.
+ * @param b Pointer to the second big integer.
+ * @param ySize Number of 64-bit chunks in the output y.
+ * @param y Pointer to the result big integer.
+ */
 void _internalBigintFastAdd(int aSize, const uint64_t* a, int bSize, const uint64_t* b, int ySize, uint64_t* y) {
 	/* Make it so that A will be smaller than B */
 	if (aSize > bSize) {
@@ -96,6 +105,15 @@ void _internalBigintFastAdd(int aSize, const uint64_t* a, int bSize, const uint6
 }
 
 
+/**
+ * @brief Internal helper for fast subtraction of two big integers.
+ * @param aSize Number of 64-bit chunks in a.
+ * @param a Pointer to the first big integer.
+ * @param bSize Number of 64-bit chunks in b.
+ * @param b Pointer to the second big integer.
+ * @param ySize Number of 64-bit chunks in the output y.
+ * @param y Pointer to the result big integer.
+ */
 void _internalBigintFastSub(int aSize, const uint64_t* a, int bSize, const uint64_t* b, int ySize, uint64_t* y) {
 	if (aSize == bSize && bSize == ySize) {
 		uint64_t borrow = 0;
@@ -178,6 +196,20 @@ void _internalBigintFastSub(int aSize, const uint64_t* a, int bSize, const uint6
 
 void _internalBigintKaratsuba(int aSize, const uint64_t* a, int bSize, const uint64_t* b, int ySize, uint64_t* y, int rlevel = 0);
 
+	/**
+	 * @brief Internal helper for fast multiplication of two big integers.
+	 * 
+	 * @details Uses a nested loop $O(size^2)$ approach for small numbers (size <= 32).
+	 *          For larger numbers, it switches to the Karatsuba algorithm $O(size^{1.585})$.
+	 *          Intermediate products are calculated using 128-bit integers.
+	 * 
+	 * @param size Number of 64-bit chunks in a and b.
+	 * @param a Pointer to the first big integer.
+	 * @param b Pointer to the second big integer.
+	 * @param y Pointer to the result big integer (must have 2*size chunks).
+	 * 
+	 * @complexity $O(N^2)$ for $N \le 32$, $O(N^{1.585})$ for $N > 32$, where $N$ is size.
+	 */
 void _internalBigintFastMul(int size, const uint64_t* a, const uint64_t* b, uint64_t* y) {
 	uint64_t row[size];
 	uint64_t tmp[size];
@@ -300,6 +332,21 @@ void _internalBigintKaratsuba(int aSize, const uint64_t* a, int bSize, const uin
 }
 
 
+/**
+ * @brief Internal helper for fast division of two big integers.
+ * 
+ * @details Implements a bit-by-bit long division algorithm with optimizations.
+ *          It iterates from the most significant bit of the numerator down to the 
+ *          most significant bit of the divisor. It includes a heuristic to minimize 
+ *          revert additions and an optimization to handle bit shifts efficiently.
+ * 
+ * @param remainder Pointer to store the remainder (initialized with numerator).
+ * @param divisor Pointer to the divisor.
+ * @param quotient Pointer to store the quotient (if not null).
+ * @param size Number of 64-bit chunks.
+ * 
+ * @complexity $O(N \cdot B)$ where $N$ is size and $B$ is the number of bits in the numerator.
+ */
 void _internalBigintFastDiv(uint64_t* remainder, const uint64_t* divisor, uint64_t* quotient, int size) {
 	uint16_t numeratorBits = 0;
 	for (int i = size - 1; i >= 0; i--)
@@ -402,6 +449,19 @@ void _internalBigintFastDiv(uint64_t* remainder, const uint64_t* divisor, uint64
 	}
 }
 
+/**
+ * @brief Internal helper for fast exponentiation.
+ * 
+ * @details Implements the "square-and-multiply" algorithm.
+ *          It reduces the number of multiplications from $O(\text{power})$ to $O(\log(\text{power}))$.
+ * 
+ * @param x Base big integer.
+ * @param y Result big integer.
+ * @param size Number of 64-bit chunks.
+ * @param power Exponent.
+ * 
+ * @complexity $O(\log(\text{power}) \cdot \text{MulComplexity}(size))$.
+ */
 void _internalBigintFastPow(const uint64_t* x, uint64_t* y, int size, int power) {
 	uint64_t multiplier[size];
 	uint64_t tmp[size];
@@ -426,6 +486,19 @@ void _internalBigintFastPow(const uint64_t* x, uint64_t* y, int size, int power)
 	}
 }
 
+/**
+ * @brief Internal helper for fast nth root calculation.
+ * 
+ * @details Implements integer nth root using binary search on the range $[2^{(B-1)/n}, 2^{(B+1)/n}]$.
+ *          In each step, it uses `_internalBigintFastPow` to verify the guess.
+ * 
+ * @param x Input big integer.
+ * @param y Result big integer.
+ * @param size Number of 64-bit chunks.
+ * @param root The root to calculate (e.g., 2 for square root).
+ * 
+ * @complexity $O(\frac{B}{root} \cdot \text{PowComplexity}(size))$, where $B$ is the number of bits in $x$.
+ */
 void _internalBigintFastRoot(const uint64_t* x, uint64_t* y, int size, int root) {
 	if (root == 1)
 		memcpy(y, x, size * sizeof(uint64_t));
@@ -547,6 +620,12 @@ void _internalBigintFastRoot(const uint64_t* x, uint64_t* y, int size, int root)
 	// high is already loaded into the output at this point
 }
 
+/**
+ * @brief Internal helper for fast square root calculation.
+ * @param x Input big integer.
+ * @param y Result big integer.
+ * @param size Number of 64-bit chunks.
+ */
 void _internalBigintFastSqrt(const uint64_t* x, uint64_t* y, int size) {
 	// Determine approximate bit length of x
 	int highestWord = size - 1;
@@ -682,6 +761,20 @@ void _internalBigintFastSqrt(const uint64_t* x, uint64_t* y, int size) {
 }*/
 
 
+/**
+ * @brief Internal helper for fast calculation of small roots.
+ * 
+ * @details Implements the integer nth root using Newton's method:
+ *          $R_{k+1} = \lfloor \frac{1}{n} ((n-1)R_k + \lfloor \frac{x}{R_k^{n-1}} \rfloor) \rfloor$.
+ *          It runs for a fixed number of iterations (8) which is usually sufficient for small roots.
+ * 
+ * @param x Input big integer.
+ * @param y Result big integer.
+ * @param size Number of 64-bit chunks.
+ * @param root The root to calculate.
+ * 
+ * @complexity $O(\text{Iterations} \cdot (\text{PowComplexity} + \text{DivComplexity}))$.
+ */
 void _internalBigintFastSmallRoot(const uint64_t* x, uint64_t* y, int size, int root) {
 	if (root == 1)
 		memcpy(y, x, size * sizeof(uint64_t));
@@ -763,6 +856,13 @@ void _internalBigintFastSmallRoot(const uint64_t* x, uint64_t* y, int size, int 
 }
 
 
+/**
+ * @brief Converts a big integer to a double.
+ * @param bits Number of bits to consider.
+ * @param N Number of 64-bit chunks.
+ * @param chunks Pointer to the big integer chunks.
+ * @return The double value.
+ */
 double _internalBigintConvertToDouble(uint16_t bits, int N, const uint64_t* chunks) {
 	if (bits == 0)
 		return 0.0;
@@ -803,6 +903,12 @@ double _internalBigintConvertToDouble(uint16_t bits, int N, const uint64_t* chun
 	return out.val;
 }
 
+/**
+ * @brief Converts a double to a big integer.
+ * @param value The double value.
+ * @param N Number of 64-bit chunks.
+ * @param chunks Pointer to store the result big integer.
+ */
 void _internalBigintConvertFromDouble(double value, int N, uint64_t* chunks) {
 	if (value < 0.5 && value >= 0.0) {
 		bzero(chunks, N * sizeof(uint64_t));
@@ -843,6 +949,13 @@ void _internalBigintConvertFromDouble(double value, int N, uint64_t* chunks) {
 }
 
 
+/**
+ * @brief Internal helper for multiplying a big integer by a double.
+ * @param a Pointer to the big integer.
+ * @param b The double value.
+ * @param y Pointer to store the result big integer.
+ * @param size Number of 64-bit chunks.
+ */
 void _internalBigintFastMulDouble(const uint64_t* a, double b, uint64_t* y, int size) {
 	bzero(y, size * sizeof(uint64_t));
 

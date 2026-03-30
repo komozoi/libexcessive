@@ -24,27 +24,62 @@
 
 
 /**
- * This is a base to build other formats on.
- * It keeps a BTree of free regions in the file.
+ * @brief Base class for files that manage free space using a B-Tree.
+ * 
+ * This class keeps a B-Tree of free regions in the file to allow efficient
+ * allocation and deallocation of space.
  */
-
-
 class FreeSpaceFile {
 public:
+	/**
+	 * @brief Constructs a FreeSpaceFile from an FdHandle (move).
+	 * @param file The file handle.
+	 */
 	explicit FreeSpaceFile(FdHandle&& file);
+
+	/**
+	 * @brief Constructs a FreeSpaceFile from an FdHandle (copy).
+	 * @param file The file handle.
+	 */
 	explicit FreeSpaceFile(const FdHandle& file);
 
+	/**
+	 * @brief Marks a region of the file as free.
+	 * @param start Starting offset of the region.
+	 * @param length Length of the region in bytes.
+	 */
 	void markFreeRegion(off_t start, uint32_t length);
 
+	/**
+	 * @brief Finds and allocates a free region of at least the specified length.
+	 * @param length Minimum required length.
+	 * @return Offset of the allocated region, or -1 if no suitable region is found.
+	 */
 	off_t getFreeRegion(uint32_t length);
 
+	/**
+	 * @brief Gets the offset immediately following the file header.
+	 * @return End offset of the header.
+	 */
 	off_t getHeaderEnd();
 
 protected:
+	/**
+	 * @brief Represents a free region in the file.
+	 */
 	struct free_region_pair_t {
-		uint64_t offset;
-		uint32_t size;
+		uint64_t offset; /**< Starting offset of the free region. */
+		uint32_t size;   /**< Size of the free region in bytes. */
 
+		/**
+		 * @brief Comparison function for free regions.
+		 * 
+		 * Sorts by size ascending, then by offset ascending.
+		 * 
+		 * @param a First region.
+		 * @param b Second region.
+		 * @return Comparison result.
+		 */
 		static int compare(const free_region_pair_t& a, const free_region_pair_t& b) {
 			// This sorts by size first, ascending, then by offset, descending.
 			// This way the BTree will return the next-largest element with the lowest offset first
@@ -63,8 +98,8 @@ protected:
 		}
 	};
 
-	FdHandle file;
-	BTree<free_region_pair_t> freeRegions;
+	FdHandle file;                        /**< The file handle. */
+	BTree<free_region_pair_t> freeRegions; /**< B-Tree of free regions. */
 };
 
 

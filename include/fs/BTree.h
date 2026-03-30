@@ -26,33 +26,59 @@
 #include "string.h"
 
 
+/**
+ * @brief Header for a B-Tree node.
+ * 
+ * @tparam N The maximum number of elements in a node.
+ */
 template <int N = 63>
 struct btree_node_header_t {
-	uint64_t parent;
-	int nChildren;
-	int nElements;
-	int indexInParent;
+	uint64_t parent;        /**< Offset of the parent node. */
+	int nChildren;          /**< Number of children of this node. */
+	int nElements;          /**< Number of elements currently in this node. */
+	int indexInParent;      /**< Index of this node in the parent's childOffsets. */
 
 	// Unused 4 bytes for 8-byte alignment
-	uint32_t reserved;
+	uint32_t reserved;      /**< Reserved for 8-byte alignment. */
 
-	uint64_t childOffsets[N + 1];
+	uint64_t childOffsets[N + 1]; /**< Offsets of children nodes. */
 };
 
 
 /**
+ * @brief A B-Tree node structure.
+ * 
  * If sizeof(T) == 24, then sizeof(btree_node_t<T, 63>) == 2048.
-*/
+ * 
+ * @tparam T The type of elements stored in the node.  For building an on-disk
+ *           tree map, this must contain both the key and value.  This value
+ *           will be used for indexing according to whatever comparator is
+ *           selected.
+ * @tparam N The maximum number of elements in a node.
+ */
 template <class T, int N = 63>
 struct btree_node_t {
+	/**
+	 * @brief Default constructor for btree_node_t.
+	 */
 	btree_node_t() = default;
 
-	btree_node_header_t<N> header;
-	T elements[N];
+	btree_node_header_t<N> header; /**< Node header containing metadata and child offsets. */
+	T elements[N];                 /**< Array of elements in the node. */
 };
 
 
-// Note that N is the number of elements, not the number of children per node, which is (N + 1).
+/**
+ * @brief Base class for B-Tree implementations.
+ * 
+ * Note that N is the number of elements, not the number of children per node, which is (N + 1).
+ * 
+* @tparam T The type of elements stored in the B-Tree.  For building an on-disk
+ *          tree map, this must contain both the key and value.  This value
+ *          will be used for indexing according to whatever comparator is
+ *          selected.
+ * @tparam N The maximum number of elements per node.
+ */
 template <class T, int N = 63>
 class BTreeBase {
 public:
@@ -224,9 +250,16 @@ public:
 		return true;
 	}
 
+	/**
+	 * @brief Destructor for BTreeBase.
+	 */
 	virtual ~BTreeBase() = default;
 
 protected:
+	/**
+	 * @brief Constructs a BTreeBase with a custom comparison function.
+	 * @param compare Pointer to a function that compares two elements of type T.
+	 */
 	explicit BTreeBase(int (*compare) (const T&, const T&)) : compare(compare) {}
 
 	/**
@@ -266,6 +299,12 @@ protected:
 		}
 	}
 
+	/**
+	 * @brief Shifts elements and inserts a new element into a node without checking for capacity.
+	 * @param node The node to modify.
+	 * @param element The element to insert.
+	 * @param idx The index at which to insert the element.
+	 */
 	void addToNodeUnchecked(btree_node_t<T, N>& node, const T& element, int idx) {
 		for (int j = node.header.nElements - 1; j >= idx; j--)
 			node.elements[j + 1] = node.elements[j];
@@ -273,6 +312,12 @@ protected:
 		node.header.nElements++;
 	}
 
+	/**
+	 * @brief Recursively inserts an element into a node that is not full.
+	 * @param node The node to insert into.
+	 * @param offset The disk offset of the node.
+	 * @param element The element to insert.
+	 */
 	void insertNonFull(btree_node_t<T, N>& node, uint64_t offset, const T& element) {
 		int i = scanNode(node, element);
 
@@ -299,6 +344,14 @@ protected:
 
 	}
 
+	/**
+	 * @brief Splits the root node of the B-Tree.
+	 * @param oldRoot The current root node.
+	 * @param newRoot The new root node being created.
+	 * @param oldRootOffset Output parameter for the new offset of the old root.
+	 * @param newChildOffset Output parameter for the offset of the new child.
+	 * @return The new child node created by splitting.
+	 */
 	virtual btree_node_t<T, N> splitRoot(btree_node_t<T, N>& oldRoot, btree_node_t<T, N>& newRoot, uint64_t& oldRootOffset, uint64_t& newChildOffset) {
 		oldRoot.header.parent = getRootOffset();
 		oldRoot.header.indexInParent = 0;
@@ -317,6 +370,14 @@ protected:
 		return splitChild(newRoot, oldRoot, oldRootOffset, newChildOffset);
 	}
 
+	/**
+	 * @brief Splits a child node when it becomes full.
+	 * @param parent The parent node.
+	 * @param originalChild The full child node to split.
+	 * @param childOffset The offset of the child node.
+	 * @param newChildOffset Output parameter for the offset of the newly created node.
+	 * @return The newly created node.
+	 */
 	btree_node_t<T, N> splitChild(btree_node_t<T, N>& parent, btree_node_t<T, N>& originalChild, uint64_t childOffset, uint64_t& newChildOffset) {
 		if (parent.header.nElements == N) {
 			btree_node_t<T, N> rhs;
@@ -387,6 +448,12 @@ protected:
 		return newChild;
 	}
 
+	/**
+	 * @brief Scans a node to find the position for an element.
+	 * @param node The node to scan.
+	 * @param element The element to look for.
+	 * @return The index where the element is located or should be inserted.
+	 */
 	int scanNode(const btree_node_t<T, N>& node, const T& element) {
 		int i = 0;
 		for (; i < node.header.nElements; i++) {
@@ -397,18 +464,51 @@ protected:
 		return i;
 	}
 
+	/**
+	 * @brief Retrieves a node from storage at the specified offset.
+	 * @param offset The disk offset of the node.
+	 * @return The node read from storage.
+	 */
 	virtual btree_node_t<T, N> getNode(uint64_t offset) const = 0;
+
+	/**
+	 * @brief Retrieves the root node of the B-Tree.
+	 * @return The root node.
+	 */
 	virtual btree_node_t<T, N> getRootNode() const = 0;
+
+	/**
+	 * @brief Retrieves the disk offset of the root node.
+	 * @return The offset of the root node.
+	 */
 	virtual uint64_t getRootOffset() const = 0;
 
+	/**
+	 * @brief Adds a new node to storage.
+	 * @param node The node to add.
+	 * @return The disk offset where the node was added.
+	 */
 	virtual uint64_t addNode(const btree_node_t<T, N>& node) = 0;
+
+	/**
+	 * @brief Overwrites an existing node in storage.
+	 * @param offset The disk offset of the node.
+	 * @param node The node data to write.
+	 */
 	virtual void overwriteNode(uint64_t offset, const btree_node_t<T, N>& node) = 0;
 
-	// This just overwrites the initial data, currently the first three longs.  Should save time
-	// if the children and elements have not been modified.
+	/**
+	 * @brief Overwrites only the header of an existing node in storage.
+	 * 
+	 * This just overwrites the initial data, currently the first three longs.
+	 * Should save time if the children and elements have not been modified.
+	 * 
+	 * @param offset The disk offset of the node.
+	 * @param node The node containing the header to write.
+	 */
 	virtual void overwriteNodeHeader(uint64_t offset, const btree_node_t<T, N>& node) = 0;
 
-	int (*compare) (const T&, const T&);
+	int (*compare) (const T&, const T&); /**< Comparison function for elements of type T. */
 };
 
 
@@ -421,6 +521,12 @@ protected:
 template <class T, int N = 63>
 class BTree: public BTreeBase<T, N> {
 public:
+	/**
+	 * @brief Constructs a BTree with a file handle and root offset.
+	 * @param file The file handle to use for storage.
+	 * @param rootOffset The disk offset of the root node.
+	 * @param compare Comparison function for elements.
+	 */
 	BTree(FdHandle&& file, off_t rootOffset, int (*compare) (const T&, const T&))
 		: BTreeBase<T, N>(compare), rootOffset(rootOffset), file(file) {
 
@@ -428,6 +534,12 @@ public:
 			initialize();
 	}
 
+	/**
+	 * @brief Constructs a BTree with a file handle and root offset (copy version).
+	 * @param file The file handle to use for storage.
+	 * @param rootOffset The disk offset of the root node.
+	 * @param compare Comparison function for elements.
+	 */
 	BTree(const FdHandle& file, off_t rootOffset, int (*compare) (const T&, const T&))
 			: BTreeBase<T, N>(compare), rootOffset(rootOffset), file(file) {
 
@@ -435,10 +547,17 @@ public:
 			initialize();
 	}
 
+	/**
+	 * @brief Gets the offset immediately following the root node.
+	 * @return The offset after the root node.
+	 */
 	off_t getHeaderEndOffset() const {
 		return rootOffset + sizeof(btree_node_t<T, N>);
 	}
 
+	/**
+	 * @brief Initializes a new B-Tree by writing an empty root node.
+	 */
 	void initialize() {
 		btree_node_t<T, N> root{{0, 0, 0, -1, 0, {}}, {}};
 
@@ -448,6 +567,11 @@ public:
 
 protected:
 
+	/**
+	 * @brief Retrieves a node from the file.
+	 * @param offset Disk offset.
+	 * @return The node.
+	 */
 	btree_node_t<T, N> getNode(uint64_t offset) const override {
 		btree_node_t<T, N> resultat;
 
@@ -456,34 +580,55 @@ protected:
 		return resultat;
 	}
 
+	/**
+	 * @brief Retrieves the root node from the file.
+	 * @return The root node.
+	 */
 	btree_node_t<T, N> getRootNode() const override {
 		return getNode(rootOffset);
 	}
 
+	/**
+	 * @brief Returns the root offset.
+	 * @return The root offset.
+	 */
 	uint64_t getRootOffset() const override {
 		return rootOffset;
 	}
 
+	/**
+	 * @brief Appends a new node to the file.
+	 * @param node The node to add.
+	 * @return The offset where it was added.
+	 */
 	uint64_t addNode(const btree_node_t<T, N>& node) override {
 		uint64_t offset = file.seekToEndWithPadding(8);
 		file.write(node);
 		return offset;
 	}
 
+	/**
+	 * @brief Overwrites a node in the file.
+	 * @param offset Disk offset.
+	 * @param node Node data.
+	 */
 	void overwriteNode(uint64_t offset, const btree_node_t<T, N>& node) override {
 		file.seek(offset);
 		file.write(node);
 	}
 
-	// This just overwrites the initial data, currently the first three longs.  Should save time
-	// if the children and elements have not been modified.
+	/**
+	 * @brief Overwrites only the header of a node in the file.
+	 * @param offset Disk offset.
+	 * @param node Node data containing the header.
+	 */
 	void overwriteNodeHeader(uint64_t offset, const btree_node_t<T, N>& node) override {
 		file.seek(offset);
 		file.write(&node, sizeof(node.header));
 	}
 
-	off_t rootOffset;
-	FdHandle file;
+	off_t rootOffset; /**< Offset of the root node in the file. */
+	FdHandle file;    /**< File handle for storage. */
 };
 
 #endif //EXCESSIVE_BTREE_H

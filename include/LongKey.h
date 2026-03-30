@@ -27,21 +27,44 @@
 #include "strutil.h"
 
 
+/**
+ * @brief A template class for representing fixed-length keys or identifiers.
+ * 
+ * Provides storage, comparison, and serialization for keys of N bits.
+ * 
+ * @tparam N The number of bits in the key.
+ */
 template<int N>
 class LongKey {
 public:
+	/**
+	 * @brief Default constructor. Does not initialize the data.
+	 */
 	inline LongKey() {
 		// Uninitialized on purpose
 	}
 
+	/**
+	 * @brief Copy constructor.
+	 * @param other The other LongKey to copy from.
+	 */
 	inline LongKey(const LongKey<N>& other) {
 		memcpy(data.rawBytes, other.data.rawBytes, sizeof(data));
 	}
 
+	/**
+	 * @brief Move constructor.
+	 * @param other The other LongKey to move from.
+	 */
 	inline LongKey(LongKey<N>&& other)  noexcept {
 		memcpy(data.rawBytes, other.data.rawBytes, sizeof(data));
 	}
 
+	/**
+	 * @brief Constructs from a LongKey of a different size.
+	 * @tparam N2 Bit size of the input LongKey.
+	 * @param other The LongKey to convert from.
+	 */
 	template<int N2>
 	inline explicit LongKey(LongKey<N2>&& other) {
 		int inputSize = N2 / 8;
@@ -51,6 +74,11 @@ public:
 		bzero(&data.rawBytes[inputSize], N / 8 - inputSize);
 	}
 
+	/**
+	 * @brief Constructs from a byte buffer.
+	 * @param buffer Pointer to the byte buffer.
+	 * @param isBigEndian True if the buffer is in big-endian format.
+	 */
 	LongKey(const uint8_t* buffer, bool isBigEndian = false) {
 		if (isBigEndian) {
 			for (int i = 0; i < N/8; ++i)
@@ -60,6 +88,12 @@ public:
 		}
 	}
 
+	/**
+	 * @brief Constructs from a byte buffer with a specified number of bytes.
+	 * @param buffer Pointer to the byte buffer.
+	 * @param nBytes Number of bytes to read from the buffer.
+	 * @param isBigEndian True if the buffer is in big-endian format.
+	 */
 	LongKey(const uint8_t* buffer, int nBytes, bool isBigEndian = false) {
 		if (nBytes * 8 > N)
 			nBytes = N / 8;
@@ -73,6 +107,10 @@ public:
 		bzero(&this->data.rawBytes[nBytes], N/8 - nBytes);
 	}
 
+	/**
+	 * @brief Constructs from a hexadecimal string.
+	 * @param s The null-terminated hex string (optionally starting with "0x").
+	 */
 	LongKey(const char* s) {
 		if (s[0] == '0' && s[1] == 'x')
 			s = &s[2];
@@ -97,6 +135,10 @@ public:
 		bzero(&data.rawBytes[N/8], ((N + 63) / 64) * 8 - N/8);
 	}
 
+	/**
+	 * @brief Constructs from a hexadecimal string view.
+	 * @param s The hex string view (optionally starting with "0x").
+	 */
 	explicit LongKey(std::string_view s) {
 		if (s[0] == '0' && s[1] == 'x')
 			s = s.substr(2);
@@ -123,7 +165,11 @@ public:
 		bzero(&data.rawBytes[N/8], ((N + 63) / 64) * 8 - N/8);
 	}
 
-	// Equality
+	/**
+	 * @brief Equality operator.
+	 * @param other The other LongKey to compare with.
+	 * @return True if all chunks match.
+	 */
 	bool operator==(const LongKey<N>& other) const {
 		for (int i = 0; i < (N + 63) / 64; ++i) {
 			if (this->data.chunks[i] != other.data.chunks[i])
@@ -132,6 +178,11 @@ public:
 		return true;
 	}
 
+	/**
+	 * @brief Inequality operator.
+	 * @param other The other LongKey to compare with.
+	 * @return True if any chunks differ.
+	 */
 	bool operator!=(const LongKey<N>& other) const {
 		for (int i = 0; i < (N + 63) / 64; ++i) {
 			if (this->data.chunks[i] != other.data.chunks[i])
@@ -140,7 +191,11 @@ public:
 		return false;
 	}
 
-	// Comparison
+	/**
+	 * @brief Less-than operator.
+	 * @param other The other LongKey to compare with.
+	 * @return True if this key is numerically less than the other.
+	 */
 	bool operator<(const LongKey<N>& other) const {
 		for (int i = (N - 1) / 64; i >= 0; --i) {
 			if (this->data.chunks[i] < other.data.chunks[i]) return true;
@@ -149,10 +204,20 @@ public:
 		return false;
 	}
 
+	/**
+	 * @brief Greater-than operator.
+	 * @param other The other LongKey to compare with.
+	 * @return True if this key is numerically greater than the other.
+	 */
 	bool operator>(const LongKey<N>& other) const {
 		return other < *this;
 	}
 
+	/**
+	 * @brief Less-than-or-equal operator.
+	 * @param other The other LongKey to compare with.
+	 * @return True if this key is numerically less than or equal to the other.
+	 */
 	bool operator<=(const LongKey<N>& other) const {
 		for (int i = (N - 1) / 64; i >= 0; --i) {
 			if (this->data.chunks[i] <= other.data.chunks[i]) return true;
@@ -161,21 +226,41 @@ public:
 		return false;
 	}
 
+	/**
+	 * @brief Greater-than-or-equal operator.
+	 * @param other The other LongKey to compare with.
+	 * @return True if this key is numerically greater than or equal to the other.
+	 */
 	bool operator>=(const LongKey<N>& other) const {
 		return other <= *this;
 	}
 
+	/**
+	 * @brief Copy assignment operator.
+	 * @param other The other LongKey to copy from.
+	 * @return Reference to this.
+	 */
 	LongKey<N>& operator=(const LongKey<N>& other) {
 		if (&other != this)
 			memcpy(data.rawBytes, other.data.rawBytes, sizeof(data));
 		return *this;
 	}
 
+	/**
+	 * @brief Move assignment operator.
+	 * @param other The other LongKey to move from.
+	 * @return Reference to this.
+	 */
 	LongKey<N>& operator=(LongKey<N>&& other)  noexcept {
 		memcpy(data.rawBytes, other.data.rawBytes, sizeof(data));
 		return *this;
 	}
 
+	/**
+	 * @brief Subtraction-like comparison operator.
+	 * @param other The other LongKey to compare with.
+	 * @return 1 if this > other, -1 if this < other, 0 if equal.
+	 */
 	long operator-(const LongKey<N>& other) const {
 		for (int i = 0; i < (N + 63) / 64; i++) {
 			if (data.chunks[i] > other.data.chunks[i])
@@ -186,6 +271,11 @@ public:
 		return 0;
 	}
 
+	/**
+	 * @brief Compares this key with another.
+	 * @param other The other LongKey.
+	 * @return 1 if this > other, -1 if this < other, 0 if equal.
+	 */
 	inline int compare(const LongKey<N>& other) const {
 		for (int i = 0; i < (N + 63) / 64; i++) {
 			if (data.chunks[i] > other.data.chunks[i])
@@ -196,7 +286,11 @@ public:
 		return 0;
 	}
 
-	// Serialize to byte buffer
+	/**
+	 * @brief Serializes the key to a byte buffer.
+	 * @param buffer Output buffer (must be at least N/8 bytes).
+	 * @param isBigEndian True if output should be in big-endian format.
+	 */
 	void toBytes(uint8_t* buffer, bool isBigEndian) const {
 		if (isBigEndian) {
 			for (int i = 0; i < N / 8; ++i)
@@ -206,6 +300,12 @@ public:
 		}
 	}
 
+	/**
+	 * @brief Converts the key to a hexadecimal string.
+	 * @param buffer Output buffer for the string.
+	 * @param forceSize If true, keeps leading zeros to match the full key size.
+	 * @param addPrefix If true, prepends "0x" to the string.
+	 */
 	void toStr(char* buffer, bool forceSize = false, bool addPrefix = true) const {
 		if (addPrefix) {
 			buffer[0] = '0';
@@ -226,6 +326,10 @@ public:
 		buffer[i] = 0;
 	}
 
+	/**
+	 * @brief Conversion operator to std::string (hexadecimal representation).
+	 * @return Hexadecimal string starting with "0x".
+	 */
 	operator std::string() const { // NOLINT(*-explicit-constructor)
 		static constexpr char HEX_DIGITS[] = "0123456789AbcDeF";
 
@@ -250,6 +354,10 @@ public:
 		return result;
 	}
 
+	/**
+	 * @brief Checks if the key is all zeros.
+	 * @return True if all chunks are zero.
+	 */
 	bool isZero() const {
 		for (int i = 0; i < (N + 63) / 64; i++)
 			if (data.chunks[i])
@@ -317,6 +425,10 @@ public:
 		return hash;
 	}*/
 
+	/**
+	 * @brief 64-bit hash operator (avalanche hash).
+	 * @return 64-bit hash value.
+	 */
 	operator uint64_t() const {
 		constexpr uint64_t SEED = 0x9e3779b97f4a7c15;
 		constexpr uint64_t C1 = 0xff51afd7ed558ccd;
@@ -363,21 +475,39 @@ public:
 		return hash;
 	}
 
+	/**
+	 * @brief Union for accessing the key data as chunks or raw bytes.
+	 */
 	union {
-		uint64_t chunks[(N + 63) / 64];
-		uint8_t rawBytes[((N + 63) / 64) * 8];
+		uint64_t chunks[(N + 63) / 64]; /**< Data as 64-bit chunks. */
+		uint8_t rawBytes[((N + 63) / 64) * 8]; /**< Data as raw bytes. */
 	} data{};
 };
 
-// Output operator for this
+/**
+ * @brief Output stream operator for LongKey.
+ * @tparam N Bit size.
+ * @param os Output stream.
+ * @param val LongKey to output.
+ * @return Reference to the output stream.
+ */
 template<int N>
 std::ostream& operator<<(std::ostream& os, const LongKey<N>& val) {
 	os << (std::string)val;
 	return os;
 }
 
+/**
+ * @brief Specialization of std::hash for LongKey.
+ * @tparam N Bit size.
+ */
 template <int N>
 struct std::hash<LongKey<N>> {
+	/**
+	 * @brief Hash function for LongKey.
+	 * @param k The key to hash.
+	 * @return Hash value.
+	 */
 	std::size_t operator()(const LongKey<N>& k) const {
 		return k.operator uint64_t();
 	}

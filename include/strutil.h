@@ -27,6 +27,11 @@
 #include "string.h"
 
 
+/**
+ * @brief Checks if a string consists only of digits.
+ * @param s The string view to check.
+ * @return True if the string is not empty and all characters are digits.
+ */
 static inline bool isNumber(const std::string_view& s) {
 	std::string_view::const_iterator it = s.begin();
 	while (it != s.end() && std::isdigit(*it)) ++it;
@@ -52,6 +57,11 @@ static inline char* concatf(char* s1, const char* s2, ...) {
 	return s1;
 }
 
+/**
+ * @brief Parses a single hexadecimal digit.
+ * @param c The character to parse.
+ * @return The value of the digit (0-15), or 255 if invalid.
+ */
 static inline uint8_t parseHexDigit(char c) {
 	if ('0' <= c && '9' >= c)
 		return c - '0';
@@ -63,6 +73,11 @@ static inline uint8_t parseHexDigit(char c) {
 }
 
 
+/**
+ * @brief Parses a hexadecimal string into a 32-bit unsigned integer.
+ * @param s The string view to parse (optionally starting with "0x").
+ * @return The parsed value.
+ */
 static inline uint32_t parseHexStr32(std::string_view s) {
 	if (s.size() > 1 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
 		s = s.substr(2);
@@ -75,6 +90,11 @@ static inline uint32_t parseHexStr32(std::string_view s) {
 }
 
 
+/**
+ * @brief Parses a hexadecimal string into a 64-bit unsigned integer.
+ * @param s The string view to parse (optionally starting with "0x").
+ * @return The parsed value.
+ */
 static inline uint64_t parseHexStr64(std::string_view s) {
 	if (s.size() > 1 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
 		s = s.substr(2);
@@ -87,6 +107,12 @@ static inline uint64_t parseHexStr64(std::string_view s) {
 }
 
 
+/**
+ * @brief Converts a 64-bit unsigned integer to a hexadecimal string.
+ * @param value The value to convert.
+ * @param outBuffer Buffer to store the resulting null-terminated string.
+ * @return Pointer to the null-terminator in the output buffer.
+ */
 static inline char* toHex(uint64_t value, char* outBuffer) {
 	/*const char* base = "0123456789Abcdef";
 	*(outBuffer++) = '0';
@@ -108,6 +134,13 @@ static inline char* toHex(uint64_t value, char* outBuffer) {
 }
 
 
+/**
+ * @brief Converts a byte array to a hexadecimal string.
+ * @param data Pointer to the byte array.
+ * @param size Number of bytes to convert.
+ * @param outBuffer Buffer to store the resulting null-terminated string.
+ * @return Pointer to the null-terminator in the output buffer.
+ */
 static inline char* toHex(const uint8_t* data, int size, char* outBuffer) {
 	if (data == nullptr)
 		return stpcpy(outBuffer, "(null)");
@@ -127,9 +160,13 @@ static inline char* toHex(const uint8_t* data, int size, char* outBuffer) {
 }
 
 
-// Formats similar to "hexdump -C", but the number of columns is adjustable.
-// If columns is -1, then only one row is created.
-// The returned pointer is allocated with malloc, so be sure to free it.
+/**
+ * @brief Formats binary data for a hex dump similar to "hexdump -C".
+ * @param data Pointer to the binary data.
+ * @param size Size of the data in bytes.
+ * @param columns Number of columns per row. If -1, only one row is created.
+ * @return A newly allocated string (must be freed with free() by caller).
+ */
 char* formatBinaryDataForHexdump(const uint8_t* data, int size, int columns=-1);
 
 
