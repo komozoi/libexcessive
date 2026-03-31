@@ -42,7 +42,6 @@ public:
 	const_reverse_iterator crend() const { return const_reverse_iterator(cbegin()); }
 
 	virtual int size() const = 0;
-	int numUsed() const { return size(); }
 	virtual bool isEmpty() const { return size() == 0; }
 
 	virtual R getElement(int i) {
