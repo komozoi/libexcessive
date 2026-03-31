@@ -147,25 +147,40 @@ private:
 
 template <class K>
 class HashSet: public Set<K, HashSetIterator<K>, HashSetConstIterator<K>> {
-private:
-	struct hashset_entry_s {
-		K key;
-		bool present;
-	};
+	void allocate(unsigned int cap) {
+		unsigned int maskSize = (cap + 63) / 64;
+		size_t totalSize = cap * sizeof(K) + maskSize * sizeof(uint64_t);
+		keys = (K*)malloc(totalSize);
+		mask = (uint64_t*)(keys + cap);
+		for (unsigned int i = 0; i < maskSize; i++)
+			mask[i] = 0;
+	}
+
+	bool isPresent(unsigned int index) const {
+		return (mask[index >> 6] >> (index & 0x3F)) & 1;
+	}
+
+	void setPresent(unsigned int index, bool present) {
+		if (present)
+			mask[index >> 6] |= (1ULL << (index & 0x3F));
+		else
+			mask[index >> 6] &= ~(1ULL << (index & 0x3F));
+	}
+
 public:
 	typedef HashSetIterator<K> Iterator;
 	typedef HashSetConstIterator<K> ConstIterator;
 
 	Iterator begin() override {
 		for (unsigned int i = 0; i < capacity; i++)
-			if (entries[i].present) return Iterator(this, i);
+			if (isPresent(i)) return Iterator(this, i);
 		return end();
 	}
 	Iterator end() override { return Iterator(this, -1); }
 
 	ConstIterator begin() const override {
 		for (unsigned int i = 0; i < capacity; i++)
-			if (entries[i].present) return ConstIterator(this, i);
+			if (isPresent(i)) return ConstIterator(this, i);
 		return end();
 	}
 	ConstIterator end() const override { return ConstIterator(this, -1); }
@@ -175,17 +190,13 @@ public:
 	explicit HashSet(unsigned int capacity) : capacity(capacity) {
 		if (capacity == 0)
 			capacity = 1;
-		entries = (hashset_entry_s*)malloc(capacity * sizeof(hashset_entry_s));
-		for (unsigned int i = 0; i < capacity; i++)
-			entries[i].present = false;
+		allocate(capacity);
 	}
 
 	explicit HashSet(const K* src, unsigned int qty) : capacity((qty * 7) / 5 + 1) {
 		if (capacity == 0)
 			capacity = 1;
-		entries = (hashset_entry_s*)malloc(capacity * sizeof(hashset_entry_s));
-		for (unsigned int i = 0; i < capacity; i++)
-			entries[i].present = false;
+		allocate(capacity);
 
 		for (unsigned int i = 0; i < qty; i++)
 			add(src[i]);
@@ -193,17 +204,16 @@ public:
 
 	HashSet(const HashSet<K>& other)
 			: capacity(other.capacity), amountUsed(0) {
-		entries = (hashset_entry_s*)malloc(capacity * sizeof(hashset_entry_s));
-		for (unsigned int i = 0; i < capacity; i++)
-			entries[i].present = false;
+		allocate(capacity);
 		addFrom(other);
 	}
 
 	HashSet(HashSet<K>&& other) noexcept
-			: capacity(other.capacity), amountUsed(other.amountUsed), entries(other.entries) {
+			: capacity(other.capacity), amountUsed(other.amountUsed), keys(other.keys), mask(other.mask) {
 		other.amountUsed = 0;
 		other.capacity = 0;
-		other.entries = nullptr;
+		other.keys = nullptr;
+		other.mask = nullptr;
 	}
 
 	HashSet& operator=(const HashSet<K>& other) {
@@ -211,27 +221,32 @@ public:
 			return *this;
 
 		clear();
-		free(entries);
+		if (keys)
+			free(keys);
 
 		capacity = other.capacity;
-		entries = (hashset_entry_s*)malloc(capacity * sizeof(hashset_entry_s));
-		for (unsigned int i = 0; i < capacity; i++)
-			entries[i].present = false;
+		allocate(capacity);
 		addFrom(other);
 
 		return *this;
 	}
 
 	HashSet& operator=(HashSet<K>&& other) noexcept {
+		if (&other == this)
+			return *this;
+
 		clear();
-		free(entries);
+		if (keys)
+			free(keys);
 
 		amountUsed = other.amountUsed;
 		capacity = other.capacity;
-		entries = other.entries;
+		keys = other.keys;
+		mask = other.mask;
 		other.amountUsed = 0;
 		other.capacity = 0;
-		other.entries = nullptr;
+		other.keys = nullptr;
+		other.mask = nullptr;
 
 		return *this;
 	}
@@ -242,11 +257,11 @@ public:
 		if (index == -1) {
 			resize(capacity * 2);
 			index = locate(key);
-		} else if (entries[index & 0xFFFFFFFF].present)
+		} else if (isPresent(index))
 			return true;
 
-		new (&entries[index].key) K(key);
-		entries[index].present = true;
+		new (&keys[index]) K(key);
+		setPresent(index, true);
 		amountUsed++;
 
 		return false;
@@ -254,9 +269,8 @@ public:
 
 	void addFrom(const HashSet<K>& other) {
 		for (uint32_t i = 0; i < other.capacity; i++) {
-			hashset_entry_s& entry = other.entries[i];
-			if (entry.present)
-				add(entry.key);
+			if (other.isPresent(i))
+				add(other.keys[i]);
 		}
 	}
 
@@ -264,25 +278,27 @@ public:
 		int idx = locate(key);
 		if (idx == -1)
 			return false;
-		return entries[idx].present;
+		return isPresent(idx);
 	}
 
 	bool remove(K key) override {
 		int idx = locate(key);
-		if (idx == -1 || !entries[idx].present)
+		if (idx == -1 || !isPresent(idx))
 			return false;
 
-		entries[idx].key.~K();
-		entries[idx].present = false;
+		keys[idx].~K();
+		setPresent(idx, false);
 		amountUsed--;
 
 		// Fix any broken parts of the hashset
 		idx = (idx + 1) % capacity;
-		while (entries[idx].present) {
-			entries[idx].present = false;
+		while (isPresent(idx)) {
+			K tempKey = std::move(keys[idx]);
+			keys[idx].~K();
+			setPresent(idx, false);
 			amountUsed--;
 
-			add(std::move(entries[idx].key));
+			add(std::move(tempKey));
 
 			idx = (idx + 1) % capacity;
 		}
@@ -291,23 +307,26 @@ public:
 	}
 
 	int getCapacity() const { return capacity; }
-	bool presentAtIndex(int i) const { return entries[i].present; }
-	K& keyAtIndex(int i) const { return entries[i].key; }
+	bool presentAtIndex(int i) const { return isPresent(i); }
+	K& keyAtIndex(int i) const { return keys[i]; }
 
 	~HashSet() override {
 		clear();
-		free(entries);
+		if (keys)
+			free(keys);
 	}
 
 	void clear() override {
 		if (amountUsed == 0)
 			return;
 		for (unsigned int i = 0; i < capacity; i++) {
-			if (entries[i].present) {
-				entries[i].~hashset_entry_s();
-				entries[i].present = false;
+			if (isPresent(i)) {
+				keys[i].~K();
 			}
 		}
+		unsigned int maskSize = (capacity + 63) / 64;
+		for (unsigned int i = 0; i < maskSize; i++)
+			mask[i] = 0;
 		amountUsed = 0;
 	}
 
@@ -319,8 +338,8 @@ public:
 		ArrayList<K> out(amountUsed);
 
 		for (uint32_t i = 0; i < capacity; i++)
-			if (entries[i].present)
-				out.add(entries[i].key);
+			if (isPresent(i))
+				out.add(keys[i]);
 
 		return out;
 	}
@@ -332,8 +351,8 @@ private:
 		uint32_t hashedKey = (uint32_t)(key * 7224373213449699941LU);
 		int startIndex = (hashedKey % capacity);
 		int index = startIndex;
-		while (entries[index].present) {
-			if (entries[index].key == key)
+		while (isPresent(index)) {
+			if (keys[index] == key)
 				break;
 			index = (index + 1) % capacity;
 			if (index == startIndex)
@@ -343,28 +362,30 @@ private:
 	}
 
 	void resize(unsigned int newCapacity) {
-		hashset_entry_s* oldEntries = entries;
+		K* oldKeys = keys;
+		uint64_t* oldMask = mask;
 		unsigned int oldCapacity = capacity;
 
-		entries = (hashset_entry_s*)malloc(newCapacity * sizeof(hashset_entry_s));
+		allocate(newCapacity);
 		capacity = newCapacity;
-		for (unsigned int i = 0; i < newCapacity; i++)
-			entries[i].present = false;
 
 		// Copy everything over
 		amountUsed = 0;
 		for (unsigned int i = 0; i < oldCapacity; i++) {
-			if (oldEntries[i].present)
-				add(oldEntries[i].key);
+			if ((oldMask[i >> 6] >> (i & 0x3F)) & 1) {
+				add(std::move(oldKeys[i]));
+				oldKeys[i].~K();
+			}
 		}
 
 		// Free old memory
-		free(oldEntries);
+		free(oldKeys);
 	}
 
 	unsigned int capacity;
 	unsigned int amountUsed {0};
-	hashset_entry_s* entries;
+	K* keys;
+	uint64_t* mask;
 };
 
 
