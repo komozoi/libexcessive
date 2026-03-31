@@ -238,14 +238,14 @@ TEST(FreeSpaceFileTest, ManyRegionsStress) {
 
 	const int count = 500;
 
-	std::vector<off_t> blocks;
+	ArrayList<off_t> blocks(count);
 
 	for (int i = 0; i < count; i++) {
-		blocks.push_back(fs.getFreeRegion(4096));
+		blocks.add(fs.getFreeRegion(4096));
 	}
 
 	for (int i = 0; i < count; i++) {
-		fs.markFreeRegion(blocks[i], 4096);
+		fs.markFreeRegion(blocks.get(i), 4096);
 	}
 
 	for (int i = 0; i < count; i++) {

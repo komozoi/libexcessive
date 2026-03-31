@@ -34,6 +34,12 @@ struct MapElement {
 
 	class Iterator {
 	public:
+		using iterator_category = std::bidirectional_iterator_tag;
+		using value_type = MapElement<K, T>;
+		using difference_type = std::ptrdiff_t;
+		using pointer = MapElement<K, T>*;
+		using reference = MapElement<K, T>;
+
 		Iterator(Map<K, T>* map, long index)
 			: map(map), index(index) {}
 
@@ -85,6 +91,12 @@ struct MapElement {
 
 	class ConstIterator {
 	public:
+		using iterator_category = std::bidirectional_iterator_tag;
+		using value_type = const MapElement<K, T>;
+		using difference_type = std::ptrdiff_t;
+		using pointer = const MapElement<K, T>*;
+		using reference = const MapElement<K, T>;
+
 		ConstIterator(const Map<K, T>* map, long index)
 			: map(map), index(index) {}
 

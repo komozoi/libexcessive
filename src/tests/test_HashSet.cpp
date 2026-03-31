@@ -18,9 +18,8 @@
 
 #include <gtest/gtest.h>
 #include "ds/HashSet.h"
-
-
-#include <gtest/gtest.h>
+#include "ds/ArrayList.h"
+#include <algorithm>
 
 TEST(HashSetTest, ConstructorCapacity) {
 	HashSet<int> s(10);
@@ -222,5 +221,48 @@ TEST(HashSetTest, ContainerInterface) {
 
     // Test find
     EXPECT_GE(container->find(20), 0);
+}
+
+TEST(HashSetTest, ReverseIteration) {
+    HashSet<int> set(10);
+    set.add(10);
+    set.add(20);
+    set.add(30);
+    
+    // Collect all elements via normal iteration
+    ArrayList<int> forward;
+    for (auto val : set) {
+        forward.add(val);
+    }
+    std::reverse(forward.begin(), forward.end());
+    
+    int count = 0;
+    for (auto it = set.rbegin(); it != set.rend(); ++it) {
+        EXPECT_EQ(*it, forward.get(count));
+        count++;
+    }
+    EXPECT_EQ(count, 3);
+}
+
+TEST(HashSetTest, ConstReverseIteration) {
+    HashSet<int> set(10);
+    set.add(10);
+    set.add(20);
+    set.add(30);
+    const HashSet<int>& cset = set;
+    
+    // Collect all elements via normal iteration
+    ArrayList<int> forward;
+    for (auto val : cset) {
+        forward.add(val);
+    }
+    std::reverse(forward.begin(), forward.end());
+    
+    int count = 0;
+    for (auto it = cset.crbegin(); it != cset.crend(); ++it) {
+        EXPECT_EQ(*it, forward.get(count));
+        count++;
+    }
+    EXPECT_EQ(count, 3);
 }
 

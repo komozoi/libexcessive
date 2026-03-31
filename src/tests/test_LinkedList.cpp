@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 #include "ds/LinkedList.h"
+#include "ds/ArrayList.h"
 
 TEST(LinkedListTest, BasicOps) {
     LinkedList<int> list;
@@ -119,6 +120,21 @@ TEST(LinkedListTest, ReverseIteration) {
     int count = 0;
     int expected[] = {3, 2, 1};
     for (auto it = list.rbegin(); it != list.rend(); ++it) {
+        EXPECT_EQ(*it, expected[count++]);
+    }
+    EXPECT_EQ(count, 3);
+}
+
+TEST(LinkedListTest, ConstReverseIteration) {
+    LinkedList<int> list;
+    list.add(1);
+    list.add(2);
+    list.add(3);
+
+    const LinkedList<int>& clist = list;
+    int expected[] = {3, 2, 1};
+    int count = 0;
+    for (auto it = clist.crbegin(); it != clist.crend(); ++it) {
         EXPECT_EQ(*it, expected[count++]);
     }
     EXPECT_EQ(count, 3);

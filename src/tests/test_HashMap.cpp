@@ -19,8 +19,11 @@
 // test_hashmap.cpp
 
 #include "ds/HashMap.h"
+#include "ds/ArrayList.h"
 #include <gtest/gtest.h>
 #include <string>
+#include <algorithm>
+
 
 TEST(HashMapTest, InsertAndRetrieve) {
 	HashMap<int, std::string> map(8);
@@ -164,4 +167,53 @@ TEST(HashMapTest, ContainerInterface) {
     // Test getElement (indices are based on internal hash map order, but should be valid)
     MapElement<int, std::string> e0 = container->getElement(0);
     EXPECT_TRUE(e0.key == 1 || e0.key == 2 || e0.key == 3);
+}
+
+TEST(HashMapTest, ReverseIteration) {
+    HashMap<int, int> map(10);
+    map.put(1, 100);
+    map.put(2, 200);
+    map.put(3, 300);
+    
+    ArrayList<int> forwardKeys;
+    ArrayList<int> forwardValues;
+    for (auto elem : map) {
+        forwardKeys.add(elem.key);
+        forwardValues.add(elem.value);
+    }
+    std::reverse(forwardKeys.begin(), forwardKeys.end());
+    std::reverse(forwardValues.begin(), forwardValues.end());
+    
+    int count = 0;
+    for (auto it = map.rbegin(); it != map.rend(); ++it) {
+        EXPECT_EQ((*it).key, forwardKeys.get(count));
+        EXPECT_EQ((*it).value, forwardValues.get(count));
+        count++;
+    }
+    EXPECT_EQ(count, 3);
+}
+
+TEST(HashMapTest, ConstReverseIteration) {
+    HashMap<int, int> map(10);
+    map.put(1, 100);
+    map.put(2, 200);
+    map.put(3, 300);
+    const HashMap<int, int>& cmap = map;
+    
+    ArrayList<int> forwardKeys;
+    ArrayList<int> forwardValues;
+    for (auto elem : cmap) {
+        forwardKeys.add(elem.key);
+        forwardValues.add(elem.value);
+    }
+    std::reverse(forwardKeys.begin(), forwardKeys.end());
+    std::reverse(forwardValues.begin(), forwardValues.end());
+    
+    int count = 0;
+    for (auto it = cmap.crbegin(); it != cmap.crend(); ++it) {
+        EXPECT_EQ((*it).key, forwardKeys.get(count));
+        EXPECT_EQ((*it).value, forwardValues.get(count));
+        count++;
+    }
+    EXPECT_EQ(count, 3);
 }

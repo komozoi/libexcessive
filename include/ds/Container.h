@@ -38,8 +38,8 @@ public:
 	reverse_iterator rend() { return reverse_iterator(begin()); }
 	const_reverse_iterator rbegin() const { return const_reverse_iterator(end()); }
 	const_reverse_iterator rend() const { return const_reverse_iterator(begin()); }
-	const_reverse_iterator crbegin() const { return const_reverse_iterator(end()); }
-	const_reverse_iterator crend() const { return const_reverse_iterator(begin()); }
+	const_reverse_iterator crbegin() const { return const_reverse_iterator(cend()); }
+	const_reverse_iterator crend() const { return const_reverse_iterator(cbegin()); }
 
 	virtual int size() const = 0;
 	int numUsed() const { return size(); }

@@ -33,6 +33,12 @@ class HashSet;
 template <class K>
 class HashSetIterator {
 public:
+	using iterator_category = std::bidirectional_iterator_tag;
+	using value_type = K;
+	using difference_type = std::ptrdiff_t;
+	using pointer = K*;
+	using reference = K&;
+
 	HashSetIterator(HashSet<K>* set, int index) : set(set), index(index) {}
 	K& operator*() { return set->keyAtIndex(index); }
 	HashSetIterator& operator++() {
@@ -43,6 +49,38 @@ public:
 			index = -1;
 		return *this;
 	}
+
+	HashSetIterator operator++(int) {
+		HashSetIterator tmp = *this;
+		++(*this);
+		return tmp;
+	}
+
+	HashSetIterator& operator--() {
+		if (index == -1) {
+			// Find last element
+			for (int i = (int)set->getCapacity() - 1; i >= 0; i--) {
+				if (set->presentAtIndex(i)) {
+					index = i;
+					return *this;
+				}
+			}
+		} else {
+			index--;
+			while (index >= 0 && !set->presentAtIndex(index))
+				index--;
+			if (index < 0)
+				index = -1; // Or should it be before-begin? STL reverse_iterator needs to reach one before begin.
+		}
+		return *this;
+	}
+
+	HashSetIterator operator--(int) {
+		HashSetIterator tmp = *this;
+		--(*this);
+		return tmp;
+	}
+
 	bool operator==(const HashSetIterator& other) const { return set == other.set && index == other.index; }
 	bool operator!=(const HashSetIterator& other) const { return !(*this == other); }
 private:
@@ -53,6 +91,12 @@ private:
 template <class K>
 class HashSetConstIterator {
 public:
+	using iterator_category = std::bidirectional_iterator_tag;
+	using value_type = const K;
+	using difference_type = std::ptrdiff_t;
+	using pointer = const K*;
+	using reference = const K&;
+
 	HashSetConstIterator(const HashSet<K>* set, int index) : set(set), index(index) {}
 	const K& operator*() const { return set->keyAtIndex(index); }
 	HashSetConstIterator& operator++() {
@@ -63,6 +107,37 @@ public:
 			index = -1;
 		return *this;
 	}
+
+	HashSetConstIterator operator++(int) {
+		HashSetConstIterator tmp = *this;
+		++(*this);
+		return tmp;
+	}
+
+	HashSetConstIterator& operator--() {
+		if (index == -1) {
+			for (int i = (int)set->getCapacity() - 1; i >= 0; i--) {
+				if (set->presentAtIndex(i)) {
+					index = i;
+					return *this;
+				}
+			}
+		} else {
+			index--;
+			while (index >= 0 && !set->presentAtIndex(index))
+				index--;
+			if (index < 0)
+				index = -1;
+		}
+		return *this;
+	}
+
+	HashSetConstIterator operator--(int) {
+		HashSetConstIterator tmp = *this;
+		--(*this);
+		return tmp;
+	}
+
 	bool operator==(const HashSetConstIterator& other) const { return set == other.set && index == other.index; }
 	bool operator!=(const HashSetConstIterator& other) const { return !(*this == other); }
 private:

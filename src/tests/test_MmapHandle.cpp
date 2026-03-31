@@ -22,6 +22,9 @@
 #include <cstring>
 #include <cstdint>
 #include <thread>
+#include <functional>
+#include <atomic>
+#include "ds/ArrayList.h"
 #include "fs/FdHandle.h"
 #include "universaltime.h"
 
@@ -516,16 +519,16 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 
 	FdHandle handle = FdHandle::open(test_file, O_RDWR | O_CREAT, 0660);
 
-	std::vector<MmapHandle> mmaps;
-	for (int i = 0; i < threadCount; i++) {
-		mmaps.emplace_back(handle.getMmapHandle(i * blockSize, blockSize));
+	ArrayList<MmapHandle> mmaps((int)threadCount);
+	for (int i = 0; i < (int)threadCount; i++) {
+		mmaps.add(handle.getMmapHandle(i * blockSize, blockSize));
 	}
 
 	std::atomic<int> ready{0};
 	std::atomic<bool> start{false};
 
 	std::function<void(int)> worker = [&](int idx) {
-		MmapHandle& mmap = mmaps[idx];
+		MmapHandle& mmap = mmaps.get(idx);
 
 		ready.fetch_add(1, std::memory_order_release);
 		while (!start.load(std::memory_order_acquire)) {
@@ -537,9 +540,9 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 			ptr[i] = (uint8_t)(91 * i);
 	};
 
-	std::vector<std::thread> threads;
+	std::thread threads[threadCount];
 	for (int i = 0; i < threadCount; i++) {
-		threads.emplace_back(worker, i);
+		threads[i] = std::thread(worker, i);
 	}
 
 	while (ready.load(std::memory_order_acquire) != threadCount) {
@@ -549,21 +552,22 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 	uint64_t t0 = millis_since_epoch();
 	start.store(true, std::memory_order_release);
 
-	for (std::thread& t : threads)
-		t.join();
+	for (int i = 0; i < threadCount; i++)
+		threads[i].join();
 
 	uint64_t t1 = millis_since_epoch();
 	uint64_t multiMs = t1 - t0;
 
 	// ---- correctness verification ----
-	std::vector<uint8_t> verify(blockSize);
+	ArrayList<uint8_t> verify((int)blockSize);
+	verify.addCopies(0, blockSize);
 
 	for (int i = 0; i < threadCount; i++) {
 		handle.seek(i * blockSize, SEEK_SET);
-		handle.read(verify.data(), verify.size());
+		handle.read(verify.getMemory(), (int)blockSize);
 
 		for (size_t j = 0; j < blockSize; j++) {
-			ASSERT_EQ(verify[j], (uint8_t)(91 * j));
+			ASSERT_EQ(verify.get((int)j), (uint8_t)(91 * j));
 		}
 	}
 

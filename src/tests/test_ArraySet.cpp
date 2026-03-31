@@ -178,3 +178,30 @@ TEST(ArraySetTest, GetMemory) {
 	int* mem = s.getMemory();
 	EXPECT_EQ(mem[0], 1);
 }
+
+TEST(ArraySetTest, ReverseIteration) {
+    int arr[] = {1, 2, 3};
+    ArraySet<int> set(arr, 3);
+    std::vector<int> expected{3, 2, 1};
+    
+    int count = 0;
+    for (auto it = set.rbegin(); it != set.rend(); ++it) {
+        EXPECT_EQ(*it, expected[count]);
+        count++;
+    }
+    EXPECT_EQ(count, 3);
+}
+
+TEST(ArraySetTest, ConstReverseIteration) {
+    int arr[] = {1, 2, 3};
+    ArraySet<int> set(arr, 3);
+    const ArraySet<int>& cset = set;
+    
+    ArrayList<int> expected{3, 2, 1};
+    int count = 0;
+    for (auto it = cset.crbegin(); it != cset.crend(); ++it) {
+        EXPECT_EQ(*it, expected.get(count));
+        count++;
+    }
+    EXPECT_EQ(count, 3);
+}
