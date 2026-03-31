@@ -37,16 +37,32 @@
  * This prevents heap fragmentation.
  */
 
+/**
+ * @brief A dynamic array implementation.
+ *
+ * This class provides a contiguous memory storage for elements, with automatic
+ * resizing when the capacity is exceeded. It is designed to be efficient and
+ * minimize heap fragmentation by never shrinking the allocated memory.
+ *
+ * @tparam T The type of elements stored in the array.
+ */
 template<class T>
 class ArrayList : public Container<T, T&, T*, const T*> {
 public:
 
+	/**
+	 * @brief Constructs an empty ArrayList with a default initial capacity.
+	 */
 	ArrayList() {
 		allocated = 64;
 		length = 0;
 		elements = (T*)malloc(sizeof(T) * allocated);
 	}
 
+	/**
+	 * @brief Constructs an ArrayList with one element using move semantics.
+	 * @param v The element to move into the array.
+	 */
 	explicit ArrayList(T&& v) {
 		allocated = 64;
 		length = 1;
@@ -54,6 +70,10 @@ public:
 		new (elements) T(std::move(v));
 	}
 
+	/**
+	 * @brief Constructs an ArrayList with one element.
+	 * @param v The element to copy into the array.
+	 */
 	explicit ArrayList(const T& v) {
 		allocated = 64;
 		length = 1;
@@ -61,12 +81,21 @@ public:
 		new (elements) T(v);
 	}
 
+	/**
+	 * @brief Constructs an empty ArrayList with a specified initial capacity.
+	 * @param start_capacity Initial number of elements to allocate space for.
+	 */
 	explicit ArrayList(int start_capacity) {
 		allocated = start_capacity;
 		length = 0;
 		elements = (T*)malloc(sizeof(T) * allocated);
 	}
 
+	/**
+	 * @brief Constructs an ArrayList from a raw array.
+	 * @param src Pointer to the source array.
+	 * @param size Number of elements to copy from the source.
+	 */
 	ArrayList(const T* src, int size) {
 		allocated = size;
 		length = size;
@@ -75,6 +104,10 @@ public:
 			new (&elements[i]) T(src[i]);
 	}
 
+	/**
+	 * @brief Constructs an ArrayList from a string view.
+	 * @param view The string view to copy data from.
+	 */
 	explicit ArrayList(std::string_view view) {
 		allocated = (int)view.length();
 		length = (int)view.length();
@@ -82,9 +115,17 @@ public:
 		memcpy(elements, view.data(), sizeof(T) * length);
 	}
 
+	/**
+	 * @brief Move constructor.
+	 * @param from The ArrayList to move from.
+	 */
 	ArrayList(ArrayList<T>&& from) noexcept
 		: length(from.length), allocated(from.allocated), elements(from.exportMemory()) {}
 
+	/**
+	 * @brief Copy constructor.
+	 * @param v The ArrayList to copy from.
+	 */
 	ArrayList(const ArrayList<T>& v) {
 		allocated = v.allocated;
 		length = v.length;
@@ -93,6 +134,10 @@ public:
 			new (&elements[i]) T(v.elements[i]);
 	}
 
+	/**
+	 * @brief Constructs an ArrayList from an initializer list.
+	 * @param initList The initializer list of elements.
+	 */
 	ArrayList(std::initializer_list<T> initList) {
 		allocated = static_cast<int>(initList.size());
 		length = allocated;
@@ -104,6 +149,11 @@ public:
 		}
 	}
 
+	/**
+	 * @brief Move assignment operator.
+	 * @param rhs The ArrayList to move from.
+	 * @return A reference to this ArrayList.
+	 */
 	ArrayList& operator=(ArrayList<T>&& rhs) noexcept {
 		clear();
 		free((void*)elements);
@@ -113,6 +163,11 @@ public:
 		return *this;
 	}
 
+	/**
+	 * @brief Copy assignment operator.
+	 * @param rhs The ArrayList to copy from.
+	 * @return A reference to this ArrayList.
+	 */
 	ArrayList& operator=(const ArrayList<T>& rhs) noexcept {
 		if (&rhs != this) {
 			clear();
@@ -126,6 +181,11 @@ public:
 		return *this;
 	}
 
+	/**
+	 * @brief Adds an item to the end of the array.
+	 * @param item The item to copy into the array.
+	 * @return A reference to the newly added item.
+	 */
 	T& add(const T& item) {
 		if (length == allocated) {
 			allocated *= 2;
@@ -136,6 +196,11 @@ public:
 		return elements[length++];
 	}
 
+	/**
+	 * @brief Adds an item to the end of the array using move semantics.
+	 * @param item The item to move into the array.
+	 * @return A reference to the newly added item.
+	 */
 	T& add(T&& item) {
 		if (length == allocated) {
 			allocated *= 2;
@@ -146,7 +211,12 @@ public:
 		return elements[length++];
 	}
 
-	// Avoid using this function, it is slow
+	/**
+	 * @brief Adds an item to the beginning of the array.
+	 * @note This operation is slow as it requires shifting all existing elements.
+	 * @param item The item to copy into the array.
+	 * @return A reference to the newly added item.
+	 */
 	T& addFirst(const T& item) {
 		if (length == allocated) {
 			allocated *= 2;
@@ -162,6 +232,11 @@ public:
 		return elements[0];
 	}
 
+	/**
+	 * @brief Adds multiple items from a raw array.
+	 * @param values Pointer to the source array.
+	 * @param count Number of elements to add.
+	 */
 	void addMany(const T* values, int count) {
 		if (length + count > allocated) {
 			allocated = allocated * 2 + (((count >> 4) + 1) << 4);
@@ -172,6 +247,10 @@ public:
 		length += count;
 	}
 
+	/**
+	 * @brief Adds all elements from another ArrayList.
+	 * @param list The source ArrayList.
+	 */
 	void addMany(const ArrayList<T>& list) {
 		int count = list.size();
 		if (length + count > allocated) {
@@ -183,6 +262,10 @@ public:
 		length += count;
 	}
 
+	/**
+	 * @brief Adds data from a string view.
+	 * @param view The string view containing data to add.
+	 */
 	void addMany(std::string_view view) {
 		int count = (int)view.size();
 		if (length + count > allocated) {
@@ -193,6 +276,11 @@ public:
 		length += count;
 	}
 
+	/**
+	 * @brief Adds multiple copies of the same value.
+	 * @param value The value to copy.
+	 * @param count The number of copies to add.
+	 */
 	void addCopies(T value, int count) {
 		if (length + count > allocated) {
 			allocated = allocated * 2 + (((count >> 4) + 1) << 4);
@@ -203,30 +291,59 @@ public:
 		length += count;
 	}
 
+	/**
+	 * @brief Sets the element at a specific index.
+	 * @param i Index of the element to set.
+	 * @param item The new value.
+	 */
 	void set(int i, const T& item) {
 		if (i < length)
 			elements[i] = item;
 	}
 
+	/**
+	 * @brief Sets the element at a specific index using move semantics.
+	 * @param i Index of the element to set.
+	 * @param item The new value.
+	 */
 	void set(int i, T&& item) {
 		if (i < length)
 			elements[i] = std::move(item);
 	}
 
+	/**
+	 * @brief Initializes an element at a specific index using placement new.
+	 * @param i Index of the element to initialize.
+	 * @param item The value to initialize with.
+	 */
 	void initialize(int i, const T& item) {
 		if (i < length)
 			new (&elements[i]) T(item);
 	}
 
+	/**
+	 * @brief Initializes an element at a specific index using placement new and move semantics.
+	 * @param i Index of the element to initialize.
+	 * @param item The value to initialize with.
+	 */
 	void initialize(int i, T&& item) {
 		if (i < length)
 			new (&elements[i]) T(std::move(item));
 	}
 
+	/**
+	 * @brief Removes and returns the last element.
+	 * @return The removed element.
+	 */
 	T pop() {
 		return std::move(elements[--length]);
 	}
 
+	/**
+	 * @brief Removes an element by swapping it with the last element.
+	 * @note This does not preserve the order of elements but is O(1).
+	 * @param i Index of the element to remove.
+	 */
 	void unorderedRemove(int i) {
 		if (i < length && i >= 0)
 			set(i, std::move(elements[--length]));
@@ -274,6 +391,12 @@ public:
 		return true;
 	}
 
+	/**
+	 * @brief Returns a sub-array as a new ArrayList.
+	 * @param a Start index.
+	 * @param b End index.
+	 * @return New ArrayList containing the specified range.
+	 */
 	ArrayList<T> subscriptInPlace(int a, int b = 0) {
 		if (a < 0) a += length;
 		if (b <= 0) b += length;
@@ -281,7 +404,13 @@ public:
 		return ArrayList<T>(&elements[a], b - a);
 	}
 
-	inline int size() const { return length; }
+	inline int size() const override { return length; }
+
+	/**
+	 * @brief Gets a reference to the element at the specified index.
+	 * @param i Index of the element.
+	 * @return Reference to the element.
+	 */
 	inline T& get(int i) const {
 		if (i >= length || i < 0) {
 			printf("Out of bounds read of %i for ArrayList of length %i and allocated %i\n", i, length, allocated);
@@ -289,6 +418,10 @@ public:
 		return elements[i];
 	}
 
+	/**
+	 * @brief Returns a pointer to the internal memory buffer.
+	 * @return Pointer to the elements.
+	 */
 	T* getMemory() const {
 		return elements;
 	}
@@ -316,6 +449,11 @@ public:
 	const T* begin() const override { return elements; }
 	const T* end() const override { return &(elements[length]); }
 
+	/**
+	 * @brief Returns a Range for custom iteration using MonkeyIterator.
+	 * @tparam E Type to cast elements to.
+	 * @return Range of elements.
+	 */
 	template<class E>
 	Range<MonkeyIterator<T*, E>> rangeOf() {
 		return Range<MonkeyIterator<T*, E>>(
@@ -324,6 +462,13 @@ public:
 		);
 	}
 
+	/**
+	 * @brief Returns a Range for custom iteration over a sub-range.
+	 * @tparam E Type to cast elements to.
+	 * @param start Start index.
+	 * @param end End index.
+	 * @return Range of elements.
+	 */
 	template<class E>
 	Range<MonkeyIterator<T*, E>> rangeOf(int start, int end) {
 		return Range<MonkeyIterator<T*, E>>(
@@ -332,17 +477,24 @@ public:
 		);
 	}
 
-	inline void clear() {
+	/**
+	 * @brief Clears the ArrayList, destroying all elements.
+	 */
+	inline void clear() override {
 		for (int i = 0; i < length; i++)
 			elements[i].~T();
 		length = 0;
 	}
 
+	/**
+	 * @brief Adds a C-string to the array.
+	 * @param s The string to add.
+	 */
 	void addString(const T* s) {
 		addMany(s, strlen((const char*)s));
 	}
 
-	~ArrayList() {
+	~ArrayList() override {
 		clear();
 		free((void*)elements);
 	}

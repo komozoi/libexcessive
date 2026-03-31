@@ -145,8 +145,20 @@ private:
 	int index;
 };
 
+/**
+ * @brief A hash-based implementation of the Set interface.
+ *
+ * This class uses open addressing and a bitmask for presence tracking.
+ * It provides O(1) average time complexity for basic operations.
+ *
+ * @tparam K The type of elements in the set.
+ */
 template <class K>
 class HashSet: public Set<K, HashSetIterator<K>, HashSetConstIterator<K>> {
+	/**
+	 * @brief Allocates memory for keys and the presence mask.
+	 * @param cap The capacity to allocate for.
+	 */
 	void allocate(unsigned int cap) {
 		unsigned int maskSize = (cap + 63) / 64;
 		size_t totalSize = cap * sizeof(K) + maskSize * sizeof(uint64_t);
@@ -156,10 +168,20 @@ class HashSet: public Set<K, HashSetIterator<K>, HashSetConstIterator<K>> {
 			mask[i] = 0;
 	}
 
+	/**
+	 * @brief Checks if an element is present at the specified internal index.
+	 * @param index The internal index.
+	 * @return true if present, false otherwise.
+	 */
 	bool isPresent(unsigned int index) const {
 		return (mask[index >> 6] >> (index & 0x3F)) & 1;
 	}
 
+	/**
+	 * @brief Sets the presence flag for the specified internal index.
+	 * @param index The internal index.
+	 * @param present The presence flag value.
+	 */
 	void setPresent(unsigned int index, bool present) {
 		if (present)
 			mask[index >> 6] |= (1ULL << (index & 0x3F));
@@ -187,12 +209,21 @@ public:
 
 	int size() const override { return amountUsed; }
 
+	/**
+	 * @brief Constructs a HashSet with the specified initial capacity.
+	 * @param capacity Initial capacity.
+	 */
 	explicit HashSet(unsigned int capacity) : capacity(capacity) {
 		if (capacity == 0)
 			capacity = 1;
 		allocate(capacity);
 	}
 
+	/**
+	 * @brief Constructs a HashSet from a raw array.
+	 * @param src Pointer to the source array.
+	 * @param qty Number of elements to copy.
+	 */
 	explicit HashSet(const K* src, unsigned int qty) : capacity((qty * 7) / 5 + 1) {
 		if (capacity == 0)
 			capacity = 1;
@@ -202,12 +233,20 @@ public:
 			add(src[i]);
 	}
 
+	/**
+	 * @brief Copy constructor.
+	 * @param other The HashSet to copy from.
+	 */
 	HashSet(const HashSet<K>& other)
 			: capacity(other.capacity), amountUsed(0) {
 		allocate(capacity);
 		addFrom(other);
 	}
 
+	/**
+	 * @brief Move constructor.
+	 * @param other The HashSet to move from.
+	 */
 	HashSet(HashSet<K>&& other) noexcept
 			: capacity(other.capacity), amountUsed(other.amountUsed), keys(other.keys), mask(other.mask) {
 		other.amountUsed = 0;
@@ -216,6 +255,11 @@ public:
 		other.mask = nullptr;
 	}
 
+	/**
+	 * @brief Copy assignment operator.
+	 * @param other The HashSet to copy from.
+	 * @return Reference to this HashSet.
+	 */
 	HashSet& operator=(const HashSet<K>& other) {
 		if (&other == this)
 			return *this;
@@ -231,6 +275,11 @@ public:
 		return *this;
 	}
 
+	/**
+	 * @brief Move assignment operator.
+	 * @param other The HashSet to move from.
+	 * @return Reference to this HashSet.
+	 */
 	HashSet& operator=(HashSet<K>&& other) noexcept {
 		if (&other == this)
 			return *this;
@@ -267,6 +316,10 @@ public:
 		return false;
 	}
 
+	/**
+	 * @brief Adds all elements from another HashSet.
+	 * @param other The source HashSet.
+	 */
 	void addFrom(const HashSet<K>& other) {
 		for (uint32_t i = 0; i < other.capacity; i++) {
 			if (other.isPresent(i))
@@ -306,8 +359,24 @@ public:
 		return true;
 	}
 
+	/**
+	 * @brief Returns the current capacity of the hash set.
+	 * @return The capacity.
+	 */
 	int getCapacity() const { return capacity; }
+
+	/**
+	 * @brief Checks if an element is present at the specified index.
+	 * @param i The index to check.
+	 * @return true if present, false otherwise.
+	 */
 	bool presentAtIndex(int i) const { return isPresent(i); }
+
+	/**
+	 * @brief Returns a reference to the key at the specified index.
+	 * @param i The index.
+	 * @return Reference to the key.
+	 */
 	K& keyAtIndex(int i) const { return keys[i]; }
 
 	~HashSet() override {
@@ -330,10 +399,18 @@ public:
 		amountUsed = 0;
 	}
 
+	/**
+	 * @brief Checks if the hash set is full.
+	 * @return true if amountUsed >= capacity, false otherwise.
+	 */
 	bool isFull() {
 		return amountUsed >= capacity;
 	}
 
+	/**
+	 * @brief Returns all elements as an ArrayList.
+	 * @return ArrayList containing all elements of the set.
+	 */
 	ArrayList<K> toArrayList() const {
 		ArrayList<K> out(amountUsed);
 
@@ -345,6 +422,11 @@ public:
 	}
 
 private:
+	/**
+	 * @brief Locates the index for a given key.
+	 * @param key The key to locate.
+	 * @return The index of the key, or -1 if not found.
+	 */
 	int locate(K key) const {
 		// This number is probably prime.  I designed it to distribute the bits of the key around for
 		// better key distribution.
@@ -361,6 +443,10 @@ private:
 		return index;
 	}
 
+	/**
+	 * @brief Resizes the hash set to a new capacity.
+	 * @param newCapacity The new capacity.
+	 */
 	void resize(unsigned int newCapacity) {
 		K* oldKeys = keys;
 		uint64_t* oldMask = mask;

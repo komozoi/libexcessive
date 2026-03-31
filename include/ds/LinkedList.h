@@ -168,6 +168,15 @@ public:
 };
 
 
+/**
+ * @brief A doubly linked list implementation.
+ *
+ * This class provides a collection of elements where each element points to
+ * its predecessor and successor. It allows for efficient insertions and
+ * removals at both ends and at the current cursor position.
+ *
+ * @tparam T The type of elements stored in the list.
+ */
 template<class T>
 class LinkedList : public Container<T, T&, typename linkedlist_value_container_t<T>::Iterator, typename linkedlist_value_container_t<T>::ConstIterator> {
 public:
@@ -179,7 +188,17 @@ public:
 	Iterator end() override { return Iterator(last, true); }
 	ConstIterator begin() const override { return ConstIterator(first, first == nullptr); }
 	ConstIterator end() const override { return ConstIterator(last, true); }
+
+	/**
+	 * @brief Returns a constant iterator to the beginning of the list.
+	 * @return ConstIterator to the first element.
+	 */
 	ConstIterator cbegin() const { return ConstIterator(first, first == nullptr); }
+
+	/**
+	 * @brief Returns a constant iterator to the end of the list.
+	 * @return ConstIterator to the element following the last element.
+	 */
 	ConstIterator cend() const { return ConstIterator(last, true); }
 
 	/**
@@ -251,6 +270,11 @@ public:
 			first = last = cursor = newContainer;
 	}
 
+	/**
+	 * @brief Adds multiple items from a raw array.
+	 * @param items Pointer to the source array.
+	 * @param count Number of elements to add.
+	 */
 	void addMany(const T* items, int count) {
 		for (int i = 0; i < count; i++)
 			add(items[i]);
@@ -390,19 +414,28 @@ public:
 		return value;
 	}
 
+	/**
+	 * @brief Checks if the cursor points to a valid element.
+	 * @return true if valid, false otherwise.
+	 */
 	bool isCursorValid() {
 		return cursor != nullptr;
 	}
 
-	inline int size() const { return length; }
+	inline int size() const override { return length; }
 
+	/**
+	 * @brief Gets the element at the specified index.
+	 * @param i Index of the element.
+	 * @return Reference to the element.
+	 */
 	T& get(int i) const {
 		if (i >= length || i < 0)
 			printf("Out of bounds read of %i for LinkedList of length %i\n", i, length);
 		return findItem(i)->value;
 	}
 
-	~LinkedList() {
+	~LinkedList() override {
 		clear();
 	}
 
@@ -411,7 +444,7 @@ public:
 	 * Time complexity: O(size)
 	 * Other effects: Cursor is set to nullptr
 	 */
-	inline void clear() {
+	inline void clear() override {
 		length = 0;
 		cursor = first;
 		while (cursor) {
@@ -422,7 +455,16 @@ public:
 		first = last = cursor = nullptr;
 	}
 
+	/**
+	 * @brief Returns the internal cursor pointer.
+	 * @return Pointer to the current cursor node.
+	 */
 	inline linkedlist_value_container_t<T>* getRawCursor() { return cursor; }
+
+	/**
+	 * @brief Sets the internal cursor pointer.
+	 * @param newCursor Pointer to the new cursor node.
+	 */
 	inline void setRawCursor(linkedlist_value_container_t<T>* newCursor) { cursor = newCursor; }
 
 public:

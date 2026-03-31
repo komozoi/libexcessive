@@ -26,9 +26,22 @@
 #include <new>
 
 
+/**
+ * @brief A hash table implementation of the Map interface.
+ *
+ * This class uses open addressing and a bitmask for presence tracking.
+ * It provides O(1) average time complexity for basic operations.
+ *
+ * @tparam K The type of keys.
+ * @tparam T The type of values.
+ */
 template <class K, class T>
 class HashMap: public Map<K, T> {
 protected:
+	/**
+	 * @brief Allocates memory for keys, values, and the presence mask.
+	 * @param cap The capacity to allocate for.
+	 */
 	void allocate(unsigned int cap) {
 		unsigned int maskSize = (cap + 63) / 64;
 		size_t totalSize = cap * sizeof(K) + cap * sizeof(T) + maskSize * sizeof(uint64_t);
@@ -39,10 +52,20 @@ protected:
 			mask[i] = 0;
 	}
 
+	/**
+	 * @brief Checks if an element is present at the specified internal index.
+	 * @param index The internal index.
+	 * @return true if present, false otherwise.
+	 */
 	bool isPresent(unsigned int index) const {
 		return (mask[index >> 6] >> (index & 0x3F)) & 1;
 	}
 
+	/**
+	 * @brief Sets the presence flag for the specified internal index.
+	 * @param index The internal index.
+	 * @param present The presence flag value.
+	 */
 	void setPresent(unsigned int index, bool present) {
 		if (present)
 			mask[index >> 6] |= (1ULL << (index & 0x3F));
@@ -51,18 +74,32 @@ protected:
 	}
 
 public:
+	/**
+	 * @brief Constructs a HashMap with the specified initial capacity.
+	 * @param capacity Initial capacity.
+	 * @param allocator Allocator to use for memory management.
+	 */
 	explicit HashMap(unsigned int capacity, Allocator& allocator = defaultAllocator) : capacity(capacity), allocator(allocator) {
 		if (this->capacity == 0)
 			this->capacity = 1;
 		allocate(this->capacity);
 	}
 
+	/**
+	 * @brief Constructs a HashMap from another container of MapElements.
+	 * @tparam U1, U2, U3 Iterator types of the source container.
+	 * @param other The source container.
+	 */
 	template<typename U1, typename U2, typename U3>
 	HashMap(const Container<MapElement<K, T>, U1, U2, U3>& other) : capacity(other.getCapacity()), amountUsed(0), allocator(other.allocator) {
 		allocate(capacity);
 		putFrom(other);
 	}
 
+	/**
+	 * @brief Move constructor.
+	 * @param other The HashMap to move from.
+	 */
 	HashMap(HashMap<K, T>&& other) noexcept
 		: capacity(other.capacity), amountUsed(other.amountUsed), keys(other.keys), values(other.values), mask(other.mask), allocator(other.allocator) {
 		other.keys = nullptr;
@@ -72,6 +109,10 @@ public:
 		other.amountUsed = 0;
 	}
 
+	/**
+	 * @brief Copy constructor.
+	 * @param other The HashMap to copy from.
+	 */
 	HashMap(const HashMap<K, T>& other) : capacity(other.capacity), amountUsed(0), allocator(other.allocator) {
 		allocate(capacity);
 		for (unsigned int i = 0; i < capacity; i++) {
@@ -84,6 +125,11 @@ public:
 		}
 	}
 
+	/**
+	 * @brief Copy assignment operator.
+	 * @param other The HashMap to copy from.
+	 * @return Reference to this HashMap.
+	 */
 	virtual HashMap<K, T>& operator=(const HashMap<K, T>& other) {
 		if (&other != this) {
 			clear();
@@ -108,6 +154,11 @@ public:
 		return *this;
 	}
 
+	/**
+	 * @brief Move assignment operator.
+	 * @param other The HashMap to move from.
+	 * @return Reference to this HashMap.
+	 */
 	virtual HashMap<K, T>& operator=(HashMap<K, T>&& other) noexcept {
 		if (&other != this) {
 			clear();
@@ -293,7 +344,7 @@ public:
 		return oldValue;
 	}
 
-	virtual bool remove(K key, T& out) override {
+	bool remove(K key, T& out) override {
 		int idx = locate(key);
 		if (idx == -1 || !isPresent(idx))
 			return false;
@@ -322,7 +373,7 @@ public:
 		return true;
 	}
 
-	virtual T& putPtr(K key, T* value) override {
+	T& putPtr(K key, T* value) override {
 		int index = locate(key);
 		if ((index < 0) || (index >= (int)capacity)) {
 			abort();
@@ -349,7 +400,7 @@ public:
 		return values[index];
 	}
 
-	virtual T& put(K key, const T& value) override {
+	T& put(K key, const T& value) override {
 		int index = locate(key);
 		if ((index < 0) || (index >= (int)capacity))
 			abort();
@@ -396,18 +447,58 @@ public:
 		return values[index];
 	}
 
+	/**
+	 * @brief Adds elements from another container to this map.
+	 * @tparam U1, U2, U3 Iterator types of the source container.
+	 * @param other The source container.
+	 */
 	template<typename U1, typename U2, typename U3>
 	void putFrom(const Container<MapElement<K, T>, U1, U2, U3>& other) {
 		for (MapElement<K, T> e : other)
 			put(e.key, e.value);
 	}
 
+	/**
+	 * @brief Returns the current capacity of the hash map.
+	 * @return The capacity.
+	 */
 	int getCapacity() const { return capacity; }
-	int size() const { return amountUsed; }
+
+	int size() const override { return amountUsed; }
+
+	/**
+	 * @brief Checks if an element is present at the specified index.
+	 * @param i The index to check.
+	 * @return true if present, false otherwise.
+	 */
 	bool presentAtIndex(int i) const { return isPresent(i); }
+
+	/**
+	 * @brief Returns a constant reference to the value at the specified index.
+	 * @param i The index.
+	 * @return Constant reference to the value.
+	 */
 	const T& valueAtIndex(int i) const { return values[i]; }
+
+	/**
+	 * @brief Returns a constant reference to the key at the specified index.
+	 * @param i The index.
+	 * @return Constant reference to the key.
+	 */
 	const K& keyAtIndex(int i) const { return keys[i]; }
+
+	/**
+	 * @brief Returns a reference to the value at the specified index.
+	 * @param i The index.
+	 * @return Reference to the value.
+	 */
 	T& valueAtIndex(int i) { return values[i]; }
+
+	/**
+	 * @brief Returns a reference to the key at the specified index.
+	 * @param i The index.
+	 * @return Reference to the key.
+	 */
 	K& keyAtIndex(int i) { return keys[i]; }
 
 	~HashMap() override {
@@ -431,11 +522,21 @@ public:
 		amountUsed = 0;
 	}
 
+	/**
+	 * @brief Checks if the hash map is full.
+	 * @return true if amountUsed >= capacity, false otherwise.
+	 */
 	bool isFull() {
 		return amountUsed >= capacity;
 	}
 
 protected:
+	/**
+	 * @brief Locates the index for a given key.
+	 * @tparam U The type of the key to search for.
+	 * @param key The key to locate.
+	 * @return The index of the key, or -1 if not found.
+	 */
 	template<class U>
 	int locate(const U& key) const {
 		uint32_t hashedKey = (uint32_t)(((uint64_t)key * 7224373213449699941LU) >> 32);
@@ -453,6 +554,12 @@ protected:
 		return index;
 	}
 
+	/**
+	 * @brief Locates the index for a key that is a std::pair.
+	 * @tparam A, B Types in the pair.
+	 * @param key The pair key to locate.
+	 * @return The index of the key, or -1 if not found.
+	 */
 	template<class A, class B>
 	int locate(const std::pair<A,B>& key) const {
 		uint32_t h1 = (uint32_t)(((uint64_t)key.first  * 7224373213449699941LU) >> 32);

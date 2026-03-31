@@ -22,13 +22,32 @@
 #include "stdlib.h"
 
 
+/**
+ * @brief A priority queue that maintains a sorted array of limited size.
+ *
+ * This class keeps elements sorted by priority (lowest to highest). If the queue
+ * is full, adding a new element with a lower priority than the current highest
+ * priority will replace the highest priority element.
+ *
+ * @tparam T The type of values.
+ * @tparam P The type of priorities.
+ */
 template <class T, typename P>
 class ShortQueue {
 public:
+	/**
+	 * @brief Constructs a ShortQueue with the specified capacity.
+	 * @param count Maximum number of elements.
+	 */
 	explicit ShortQueue(int count) : count(count), numUsed(0) {
 		elements = (element_t*)malloc(sizeof(element_t) * count);
 	}
 
+	/**
+	 * @brief Inserts an element with the given priority.
+	 * @param value The value to insert.
+	 * @param priority The priority associated with the value.
+	 */
 	void insert(const T& value, const P& priority) {
 		// If full, we may need to remove the highest priority item
 		if (numUsed == count) {
@@ -56,10 +75,20 @@ public:
 		++numUsed;
 	}
 
+	/**
+	 * @brief Returns a constant reference to the value at the specified index.
+	 * @param i Index.
+	 * @return Reference to the value.
+	 */
 	const T& at(int i) const {
 		return elements[i].value;
 	}
 
+	/**
+	 * @brief Updates the priority of an element at the specified index.
+	 * @param i Index.
+	 * @param priority New priority.
+	 */
 	void updatePriorityAt(int i, const P& priority) {
 		if (i < 0 || i >= numUsed) {
 			// Invalid index; silently ignore or assert
@@ -87,18 +116,34 @@ public:
 		++numUsed;
 	}
 
+	/**
+	 * @brief Returns a reference to the element with the minimum priority.
+	 * @return Reference to the minimum value.
+	 */
 	T& getMin() {
 		return elements[0].value;
 	}
 
+	/**
+	 * @brief Returns the minimum priority value.
+	 * @return The minimum priority.
+	 */
 	const P& minPriority() const {
 		return elements[0].priority;
 	}
 
+	/**
+	 * @brief Returns a constant reference to the element with the minimum priority.
+	 * @return Constant reference to the minimum value.
+	 */
 	const T& getMin() const {
 		return elements[0].value;
 	}
 
+	/**
+	 * @brief Removes and returns the element with the minimum priority.
+	 * @return The minimum value.
+	 */
 	T deleteMin() {
 		if (numUsed == 0)
 			return T();
@@ -112,6 +157,12 @@ public:
 		return out;
 	}
 
+	/**
+	 * @brief Removes the minimum element and retrieves its value and priority.
+	 * @param valOut [out] The minimum value.
+	 * @param priorityOut [out] The minimum priority.
+	 * @return true if an element was removed, false if the queue was empty.
+	 */
 	bool deleteMin(T* valOut, P* priorityOut) {
 		if (numUsed == 0)
 			return false;
@@ -127,10 +178,18 @@ public:
 		return true;
 	}
 
+	/**
+	 * @brief Checks if the queue is empty.
+	 * @return true if empty, false otherwise.
+	 */
 	bool isEmpty() const {
 		return numUsed == 0;
 	}
 
+	/**
+	 * @brief Returns the number of elements in the queue.
+	 * @return The current size.
+	 */
 	int size() const {
 		return numUsed;
 	}

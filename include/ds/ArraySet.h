@@ -23,22 +23,42 @@
 #include "Set.h"
 
 
+/**
+ * @brief A set implementation using a sorted dynamic array.
+ *
+ * This class maintains elements in sorted order to allow binary search
+ * for contains and removal operations. Insertions take O(n) time.
+ *
+ * @tparam T The type of elements in the set.
+ */
 template<class T>
 class ArraySet: public Set<T> {
 public:
 
+	/**
+	 * @brief Constructs an empty ArraySet with a default initial capacity.
+	 */
 	ArraySet() {
 		allocated = 64;
 		length = 0;
 		elements = (T*)malloc(sizeof(T) * allocated);
 	}
 
+	/**
+	 * @brief Constructs an empty ArraySet with the specified initial capacity.
+	 * @param start_capacity Initial capacity.
+	 */
 	explicit ArraySet(int start_capacity) {
 		allocated = start_capacity;
 		length = 0;
 		elements = (T*)malloc(sizeof(T) * allocated);
 	}
 
+	/**
+	 * @brief Constructs an ArraySet from a raw array.
+	 * @param src Pointer to the source array.
+	 * @param size Number of elements to add.
+	 */
 	ArraySet(const T* src, int size) {
 		allocated = size;
 		length = 0;
@@ -55,6 +75,10 @@ public:
 		return addRaw(item);
 	}
 
+	/**
+	 * @brief Adds all elements from an ArrayList.
+	 * @param list The source ArrayList.
+	 */
 	void addFrom(const ArrayList<T>& list) {
 		int count = list.size();
 		if (length + count > allocated) {
@@ -65,6 +89,10 @@ public:
 			addRaw(list.get(i));
 	}
 
+	/**
+	 * @brief Adds all elements from another ArraySet.
+	 * @param list The source ArraySet.
+	 */
 	void addFrom(const ArraySet<T>& list) {
 		int count = list.size();
 		if (length + count > allocated) {
@@ -79,6 +107,10 @@ public:
 		return search(query, false) != -1;
 	}
 
+	/**
+	 * @brief Removes and returns the last element.
+	 * @return The removed element.
+	 */
 	T pop() {
 		return elements[--length];
 	}
@@ -91,10 +123,20 @@ public:
 		return true;
 	}
 
+	/**
+	 * @brief Removes the element at the specified index.
+	 * @param i Index of the element to remove.
+	 */
 	void removeAt(int i) {
 		memmove(&elements[i], &elements[i + 1], sizeof(T) * (--length - i));
 	}
 
+	/**
+	 * @brief Searches for an element using binary search.
+	 * @param query The element to search for.
+	 * @param returnNearest If true, returns the insertion index if not found.
+	 * @return The index of the element, or -1 (or insertion index) if not found.
+	 */
 	int search(T query, bool returnNearest = false) const {
 		int low = 0;
 		int high = length - 1;
@@ -134,13 +176,23 @@ public:
 		return true;
 	}
 
-	inline int size() const { return length; }
+	inline int size() const override { return length; }
+
+	/**
+	 * @brief Gets the element at the specified index.
+	 * @param i Index of the element.
+	 * @return Reference to the element.
+	 */
 	inline T& get(int i) const {
 		if (i >= length || i < 0)
 			printf("Out of bounds read of %i for ArraySet of length %i and allocated %i\n", i, length, allocated);
 		return elements[i];
 	}
 
+	/**
+	 * @brief Returns a pointer to the internal memory buffer.
+	 * @return Pointer to the elements.
+	 */
 	T* getMemory() const {
 		return elements;
 	}
@@ -155,10 +207,18 @@ public:
 
 	inline void clear() override { length = 0; }
 
+	/**
+	 * @brief Returns the maximum element in the set.
+	 * @return The maximum element.
+	 */
 	T maximum() const {
 		return elements[length - 1];
 	}
 
+	/**
+	 * @brief Returns the minimum element in the set.
+	 * @return The minimum element.
+	 */
 	T minimum() const {
 		return elements[0];
 	}
@@ -167,7 +227,11 @@ protected:
 
 private:
 
-	// Adds elements without checking if there's enough memory
+	/**
+	 * @brief Adds an element without checking if there's enough memory.
+	 * @param item The element to add.
+	 * @return true if already present, false otherwise.
+	 */
 	bool addRaw(T item) {
 		int insertionIndex = search(item, true);
 		if (insertionIndex < length) {

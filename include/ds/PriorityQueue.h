@@ -21,6 +21,16 @@
 
 #include <climits>
 
+/**
+ * @brief A fixed-capacity priority queue.
+ *
+ * This class implements a priority queue using a simple array and linear
+ * searches for the highest/lowest priority elements. It is designed for
+ * small, fixed-capacity use cases.
+ *
+ * @tparam T The type of elements.
+ * @tparam capacity The maximum number of elements the queue can hold.
+ */
 template <typename T, int capacity>
 class StaticPriorityQueue {
 public:
@@ -50,14 +60,16 @@ public:
 	}
 
 	/**
-	 * @return The highest priority item in the queue
+	 * @brief Returns the highest priority item.
+	 * @return The highest priority item in the queue.
 	 */
 	T& first() {
 		return content[firstIndex()];
 	}
 
 	/**
-	 * @return The lowest priority item in the queue
+	 * @brief Returns the lowest priority item.
+	 * @return The lowest priority item in the queue.
 	 */
 	T& last() {
 		return content[lastIndex()];
@@ -79,6 +91,11 @@ public:
 		return remove(lastIndex());
 	}
 
+	/**
+	 * @brief Removes the element at the specified internal index.
+	 * @param i Internal index.
+	 * @return The removed element.
+	 */
 	T& remove(int i) {
 		T& old = content[i];
 		if (priorities[i] == lowestPriority) {
@@ -89,6 +106,10 @@ public:
 		return old;
 	}
 
+	/**
+	 * @brief Finds the internal index of the lowest priority element.
+	 * @return Index of the lowest priority element, or -1 if empty.
+	 */
 	int lastIndex() {
 		if (size == 0)
 			return -1;
@@ -105,6 +126,10 @@ public:
 		return last;
 	}
 
+	/**
+	 * @brief Finds the internal index of the highest priority element.
+	 * @return Index of the highest priority element, or -1 if empty.
+	 */
 	int firstIndex() {
 		if (size == 0)
 			return -1;
@@ -118,18 +143,35 @@ public:
 		return first;
 	}
 
+	/**
+	 * @brief Returns a reference to the element at the specified internal index.
+	 * @param i Internal index.
+	 * @return Reference to the element.
+	 */
 	T& at(int i) {
 		return content[i];
 	}
 
+	/**
+	 * @brief Returns the priority of the element at the specified internal index.
+	 * @param i Internal index.
+	 * @return Priority of the element.
+	 */
 	int priorityAt(int i) {
 		return priorities[i];
 	}
 
+	/**
+	 * @brief Returns the number of elements in the queue.
+	 * @return The current size.
+	 */
 	int length() {
 		return size;
 	}
 
+	/**
+	 * @brief Sorts the internal array by priority (descending).
+	 */
 	void sort() {
 		for (int i = 1; i < size; i++) {
 			for (int j = 0; j < i; j++) {
@@ -146,16 +188,29 @@ public:
 		}
 	}
 
+	/**
+	 * @brief Returns the highest priority value present in the queue.
+	 * @return Highest priority, or INT_MIN if empty.
+	 */
 	int highestPriority() {
 		if (size == 0)
 			return INT_MIN;
 		return priorityAt(firstIndex());
 	}
 
+	/**
+	 * @brief Returns the fixed maximum capacity.
+	 * @return The capacity.
+	 */
 	int staticCapacity() {
 		return capacity;
 	}
 
+	/**
+	 * @brief Updates the priority of the element at the specified index.
+	 * @param i Internal index.
+	 * @param priority New priority value.
+	 */
 	void setPriority(int i, int priority) {
 		if (i >= size)
 			return;
@@ -164,6 +219,9 @@ public:
 		priorities[i] = priority;
 	}
 
+	/**
+	 * @brief Removes all elements from the queue.
+	 */
 	void clear() {
 		size = 0;
 		lowestPriority = INT_MAX;
