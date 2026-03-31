@@ -18,7 +18,10 @@
 #ifndef LIBEXCESSIVE_CONTAINER_H
 #define LIBEXCESSIVE_CONTAINER_H
 
-template <typename T, typename Iterator, typename ConstIterator>
+#include <iterator>
+
+
+template <typename T, typename R, typename Iterator, typename ConstIterator>
 class Container {
 public:
 	virtual Iterator begin() = 0;
@@ -38,7 +41,11 @@ public:
 	const_reverse_iterator crbegin() const { return const_reverse_iterator(end()); }
 	const_reverse_iterator crend() const { return const_reverse_iterator(begin()); }
 
-	virtual T& getElement(int i) {
+	virtual int size() const = 0;
+	int numUsed() const { return size(); }
+	virtual bool isEmpty() const { return size() == 0; }
+
+	virtual R getElement(int i) {
 		int count = 0;
 		for (auto it = begin(); it != end(); ++it) {
 			if (count == i) {
@@ -46,7 +53,7 @@ public:
 			}
 			count++;
 		}
-		return *begin();
+		throw std::out_of_range("Index out of bounds");
 	}
 
 	virtual int find(const T& item) {

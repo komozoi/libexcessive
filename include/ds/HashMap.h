@@ -20,7 +20,6 @@
 #define EXCESSIVE_HASHMAP_H
 
 
-#include "stdio.h"
 #include "stdint.h"
 #include "alloc/Allocator.h"
 #include "Map.h"
@@ -82,7 +81,7 @@ public:
 		return *this;
 	}
 
-	HashMap<K, T>& operator=(HashMap<K, T>&& other) noexcept {
+	virtual HashMap<K, T>& operator=(HashMap<K, T>&& other) noexcept {
 		if (entries) {
 			clear();
 			allocator.free(entries);
@@ -95,6 +94,104 @@ public:
 		other.capacity = 0;
 		other.amountUsed = 0;
 		return *this;
+	}
+
+	MapElement<K, T> getFirst(long& index) override {
+		for (unsigned int i = 0; i < capacity; i++) {
+			if (entries[i].present) {
+				index = i;
+				return {entries[i].key, *entries[i].value};
+			}
+		}
+		throw std::out_of_range("No elements in the map");
+	}
+
+	MapElement<K, T> getLast(long& index) override {
+		for (int i = (int)capacity - 1; i >= 0; i--) {
+			if (entries[i].present) {
+				index = i;
+				return {entries[i].key, *entries[i].value};
+			}
+		}
+		throw std::out_of_range("No elements in the map");
+	}
+
+	MapElement<K, T> getNext(long& index) override {
+		if (index < 0) return getFirst(index);
+		for (unsigned int i = index + 1; i < capacity; i++) {
+			if (entries[i].present) {
+				index = i;
+				return {entries[i].key, *entries[i].value};
+			}
+		}
+		throw std::out_of_range("No elements left");
+	}
+
+	MapElement<K, T> getPrevious(long& index) override {
+		if (index < 0) return getLast(index);
+		for (int i = (int)index - 1; i >= 0; i--) {
+			if (entries[i].present) {
+				index = i;
+				return {entries[i].key, *entries[i].value};
+			}
+		}
+		throw std::out_of_range("No elements left");
+	}
+
+	MapElement<K, T> getElementAtIndex(long index) override {
+		if (index >= 0 && index < (long)capacity && entries[index].present) {
+			return {entries[index].key, *entries[index].value};
+		}
+		throw std::out_of_range("Invalid index");
+	}
+
+	const MapElement<K, T> getFirst(long& index) const override {
+		for (unsigned int i = 0; i < capacity; i++) {
+			if (entries[i].present) {
+				index = i;
+				return {entries[i].key, *entries[i].value};
+			}
+		}
+		throw std::out_of_range("No elements in the map");
+	}
+
+	const MapElement<K, T> getLast(long& index) const override {
+		for (int i = (int)capacity - 1; i >= 0; i--) {
+			if (entries[i].present) {
+				index = i;
+				return {entries[i].key, *entries[i].value};
+			}
+		}
+		throw std::out_of_range("No elements in the map");
+	}
+
+	const MapElement<K, T> getNext(long& index) const override {
+		if (index < 0) return getFirst(index);
+		for (unsigned int i = index + 1; i < capacity; i++) {
+			if (entries[i].present) {
+				index = i;
+				return {entries[i].key, *entries[i].value};
+			}
+		}
+		throw std::out_of_range("No elements left");
+	}
+
+	const MapElement<K, T> getPrevious(long& index) const override {
+		if (index < 0) return getLast(index);
+		for (int i = (int)index - 1; i >= 0; i--) {
+			if (entries[i].present) {
+				index = i;
+				return {entries[i].key, *entries[i].value};
+			}
+		}
+		throw std::out_of_range("No elements left");
+	}
+
+	const MapElement<K, T> getElementAtIndex(long index) const override {
+		if (index >= 0 && index < (long)capacity && entries[index].present) {
+			return {entries[index].key, *entries[index].value};
+		}
+		throw std::out_of_range("Invalid index");
 	}
 
 	bool hasKey(K key) const override {
@@ -267,7 +364,7 @@ public:
 	}
 
 	int getCapacity() const { return capacity; }
-	unsigned int numUsed() const { return amountUsed; }
+	int size() const { return amountUsed; }
 	bool presentAtIndex(int i) const { return entries[i].present; }
 	const T& valueAtIndex(int i) const { return *entries[i].value; }
 	const K& keyAtIndex(int i) const { return entries[i].key; }

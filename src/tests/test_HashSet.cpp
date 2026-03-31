@@ -25,13 +25,13 @@
 TEST(HashSetTest, ConstructorCapacity) {
 	HashSet<int> s(10);
 	EXPECT_EQ(s.getCapacity(), 10);
-	EXPECT_EQ(s.numUsed(), 0);
+	EXPECT_EQ(s.size(), 0);
 }
 
 TEST(HashSetTest, ConstructorFromArray) {
 	int arr[] = {1, 2, 3, 2};
 	HashSet<int> s(arr, 4);
-	EXPECT_EQ(s.numUsed(), 3);
+	EXPECT_EQ(s.size(), 3);
 	EXPECT_TRUE(s.contains(1));
 	EXPECT_TRUE(s.contains(2));
 	EXPECT_TRUE(s.contains(3));
@@ -41,14 +41,14 @@ TEST(HashSetTest, Add) {
 	HashSet<int> s(5);
 	bool added = s.add(1);
 	EXPECT_FALSE(added); // new
-	EXPECT_EQ(s.numUsed(), 1);
+	EXPECT_EQ(s.size(), 1);
 	EXPECT_TRUE(s.contains(1));
 	added = s.add(1);
 	EXPECT_TRUE(added); // already present
-	EXPECT_EQ(s.numUsed(), 1);
+	EXPECT_EQ(s.size(), 1);
 	s.add(2);
 	s.add(3);
-	EXPECT_EQ(s.numUsed(), 3);
+	EXPECT_EQ(s.size(), 3);
 }
 
 TEST(HashSetTest, Contains) {
@@ -67,7 +67,7 @@ TEST(HashSetTest, Remove) {
 	s.add(3);
 	bool removed = s.remove(2);
 	EXPECT_TRUE(removed);
-	EXPECT_EQ(s.numUsed(), 2);
+	EXPECT_EQ(s.size(), 2);
 	EXPECT_FALSE(s.contains(2));
 	EXPECT_TRUE(s.contains(1));
 	EXPECT_TRUE(s.contains(3));
@@ -79,10 +79,10 @@ TEST(HashSetTest, Resize) {
 	HashSet<int> s(2);
 	s.add(1);
 	s.add(2);
-	EXPECT_EQ(s.numUsed(), 2);
+	EXPECT_EQ(s.size(), 2);
 	EXPECT_EQ(s.getCapacity(), 2);
 	s.add(3); // should resize to 4
-	EXPECT_EQ(s.numUsed(), 3);
+	EXPECT_EQ(s.size(), 3);
 	EXPECT_EQ(s.getCapacity(), 4);
 	EXPECT_TRUE(s.contains(1));
 	EXPECT_TRUE(s.contains(2));
@@ -94,7 +94,7 @@ TEST(HashSetTest, Clear) {
 	s.add(1);
 	s.add(2);
 	s.clear();
-	EXPECT_EQ(s.numUsed(), 0);
+	EXPECT_EQ(s.size(), 0);
 	EXPECT_FALSE(s.contains(1));
 	EXPECT_FALSE(s.contains(2));
 }
@@ -104,7 +104,7 @@ TEST(HashSetTest, CopyConstructor) {
 	s1.add(1);
 	s1.add(2);
 	HashSet<int> s2(s1);
-	EXPECT_EQ(s2.numUsed(), 2);
+	EXPECT_EQ(s2.size(), 2);
 	EXPECT_TRUE(s2.contains(1));
 	EXPECT_TRUE(s2.contains(2));
 	// Modify s1, s2 should not change
@@ -118,7 +118,7 @@ TEST(HashSetTest, CopyAssignment) {
 	s1.add(2);
 	HashSet<int> s2(3);
 	s2 = s1;
-	EXPECT_EQ(s2.numUsed(), 2);
+	EXPECT_EQ(s2.size(), 2);
 	EXPECT_TRUE(s2.contains(1));
 	EXPECT_TRUE(s2.contains(2));
 	// Modify s1, s2 should not change
@@ -131,10 +131,10 @@ TEST(HashSetTest, MoveConstructor) {
 	s1.add(1);
 	s1.add(2);
 	HashSet<int> s2(std::move(s1));
-	EXPECT_EQ(s2.numUsed(), 2);
+	EXPECT_EQ(s2.size(), 2);
 	EXPECT_TRUE(s2.contains(1));
 	EXPECT_TRUE(s2.contains(2));
-	EXPECT_EQ(s1.numUsed(), 0);
+	EXPECT_EQ(s1.size(), 0);
 	EXPECT_EQ(s1.getCapacity(), 0);
 }
 
@@ -144,10 +144,10 @@ TEST(HashSetTest, MoveAssignment) {
 	s1.add(2);
 	HashSet<int> s2(3);
 	s2 = std::move(s1);
-	EXPECT_EQ(s2.numUsed(), 2);
+	EXPECT_EQ(s2.size(), 2);
 	EXPECT_TRUE(s2.contains(1));
 	EXPECT_TRUE(s2.contains(2));
-	EXPECT_EQ(s1.numUsed(), 0);
+	EXPECT_EQ(s1.size(), 0);
 	EXPECT_EQ(s1.getCapacity(), 0);
 }
 
@@ -157,7 +157,7 @@ TEST(HashSetTest, AddFrom) {
 	s1.add(2);
 	HashSet<int> s2(5);
 	s2.addFrom(s1);
-	EXPECT_EQ(s2.numUsed(), 2);
+	EXPECT_EQ(s2.size(), 2);
 	EXPECT_TRUE(s2.contains(1));
 	EXPECT_TRUE(s2.contains(2));
 }
@@ -182,7 +182,7 @@ TEST(HashSetTest, RemoveAndReadd) {
 	EXPECT_FALSE(s.contains(2));
 	s.add(4);
 	EXPECT_TRUE(s.contains(4));
-	EXPECT_EQ(s.numUsed(), 3);
+	EXPECT_EQ(s.size(), 3);
 }
 
 TEST(HashSetTest, PresentAndKeyAtIndex) {
@@ -197,5 +197,30 @@ TEST(HashSetTest, PresentAndKeyAtIndex) {
 		}
 	}
 	EXPECT_EQ(count, 1);
+}
+
+TEST(HashSetTest, ContainerInterface) {
+    HashSet<int> s(5);
+    s.add(10);
+    s.add(20);
+    s.add(30);
+
+    Container<int, int&, HashSetIterator<int>, HashSetConstIterator<int>>* container = &s;
+    EXPECT_EQ(container->size(), 3);
+
+    // Test iteration
+    int count = 0;
+    bool found10 = false, found20 = false, found30 = false;
+    for (auto it = container->begin(); it != container->end(); ++it) {
+        count++;
+        if (*it == 10) found10 = true;
+        else if (*it == 20) found20 = true;
+        else if (*it == 30) found30 = true;
+    }
+    EXPECT_EQ(count, 3);
+    EXPECT_TRUE(found10 && found20 && found30);
+
+    // Test find
+    EXPECT_GE(container->find(20), 0);
 }
 

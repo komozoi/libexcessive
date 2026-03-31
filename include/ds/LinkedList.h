@@ -169,18 +169,18 @@ public:
 
 
 template<class T>
-class LinkedList : public Container<T, typename linkedlist_value_container_t<T>::Iterator, typename linkedlist_value_container_t<T>::ConstIterator> {
+class LinkedList : public Container<T, T&, typename linkedlist_value_container_t<T>::Iterator, typename linkedlist_value_container_t<T>::ConstIterator> {
 public:
 
-	typedef typename linkedlist_value_container_t<T>::Iterator iterator;
-	typedef typename linkedlist_value_container_t<T>::ConstIterator const_iterator;
+	typedef typename linkedlist_value_container_t<T>::Iterator Iterator;
+	typedef typename linkedlist_value_container_t<T>::ConstIterator ConstIterator;
 
-	iterator begin() override { return iterator(first, first == nullptr); }
-	iterator end() override { return iterator(last, true); }
-	const_iterator begin() const override { return const_iterator(first, first == nullptr); }
-	const_iterator end() const override { return const_iterator(last, true); }
-	const_iterator cbegin() const { return const_iterator(first, first == nullptr); }
-	const_iterator cend() const { return const_iterator(last, true); }
+	Iterator begin() override { return Iterator(first, first == nullptr); }
+	Iterator end() override { return Iterator(last, true); }
+	ConstIterator begin() const override { return ConstIterator(first, first == nullptr); }
+	ConstIterator end() const override { return ConstIterator(last, true); }
+	ConstIterator cbegin() const { return ConstIterator(first, first == nullptr); }
+	ConstIterator cend() const { return ConstIterator(last, true); }
 
 	/**
 	 * Creates an empty LinkedList.

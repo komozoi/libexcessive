@@ -38,7 +38,7 @@
  */
 
 template<class T>
-class ArrayList : public Container<T, T*, const T*> {
+class ArrayList : public Container<T, T&, T*, const T*> {
 public:
 
 	ArrayList() {

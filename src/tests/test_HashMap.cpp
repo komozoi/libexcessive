@@ -56,7 +56,7 @@ TEST(HashMapTest, RemoveEntry) {
 	EXPECT_TRUE(map.remove(7, removed));
 	EXPECT_EQ(removed, "hello");
 	EXPECT_FALSE(map.hasKey(7));
-	EXPECT_EQ(map.numUsed(), 0);
+	EXPECT_EQ(map.size(), 0);
 }
 
 TEST(HashMapTest, RemoveNonExistentKey) {
@@ -72,7 +72,7 @@ TEST(HashMapTest, ResizeOnFull) {
 	map.put(3, "three");  // Should trigger resize
 
 	EXPECT_EQ(map.getCapacity(), 4);
-	EXPECT_EQ(map.numUsed(), 3);
+	EXPECT_EQ(map.size(), 3);
 	EXPECT_EQ(map.get(3), "three");
 }
 
@@ -82,7 +82,7 @@ TEST(HashMapTest, ClearMap) {
 	map.put(2, "two");
 	map.clear();
 
-	EXPECT_EQ(map.numUsed(), 0);
+	EXPECT_EQ(map.size(), 0);
 	EXPECT_FALSE(map.hasKey(1));
 	EXPECT_FALSE(map.hasKey(2));
 }
@@ -137,4 +137,31 @@ TEST(HashMapTest, PairKeyInsertAndRetrieve) {
 	std::string* ptr = map.getPtr({3,4});
 	ASSERT_NE(ptr, nullptr);
 	EXPECT_EQ(*ptr, "beta");
+}
+
+TEST(HashMapTest, ContainerInterface) {
+    HashMap<int, std::string> map(8);
+    map.put(1, "one");
+    map.put(2, "two");
+    map.put(3, "three");
+
+    Container<MapElement<int, std::string>, MapElement<int, std::string>, MapElement<int, std::string>::Iterator, MapElement<int, std::string>::ConstIterator>* container = &map;
+    
+    EXPECT_EQ(container->size(), 3);
+    
+    // Test iteration
+    int count = 0;
+    for (auto it = container->begin(); it != container->end(); ++it) {
+        count++;
+        MapElement<int, std::string> elem = *it;
+        if (elem.key == 1) EXPECT_EQ(elem.value, "one");
+        else if (elem.key == 2) EXPECT_EQ(elem.value, "two");
+        else if (elem.key == 3) EXPECT_EQ(elem.value, "three");
+        else FAIL() << "Unexpected key: " << elem.key;
+    }
+    EXPECT_EQ(count, 3);
+
+    // Test getElement (indices are based on internal hash map order, but should be valid)
+    MapElement<int, std::string> e0 = container->getElement(0);
+    EXPECT_TRUE(e0.key == 1 || e0.key == 2 || e0.key == 3);
 }

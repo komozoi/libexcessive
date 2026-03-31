@@ -28,13 +28,75 @@
 
 
 template <class K>
-class HashSet: public Set<K> {
+class HashSet;
+
+template <class K>
+class HashSetIterator {
+public:
+	HashSetIterator(HashSet<K>* set, int index) : set(set), index(index) {}
+	K& operator*() { return set->keyAtIndex(index); }
+	HashSetIterator& operator++() {
+		index++;
+		while (index < (int)set->getCapacity() && !set->presentAtIndex(index))
+			index++;
+		if (index >= (int)set->getCapacity())
+			index = -1;
+		return *this;
+	}
+	bool operator==(const HashSetIterator& other) const { return set == other.set && index == other.index; }
+	bool operator!=(const HashSetIterator& other) const { return !(*this == other); }
+private:
+	HashSet<K>* set;
+	int index;
+};
+
+template <class K>
+class HashSetConstIterator {
+public:
+	HashSetConstIterator(const HashSet<K>* set, int index) : set(set), index(index) {}
+	const K& operator*() const { return set->keyAtIndex(index); }
+	HashSetConstIterator& operator++() {
+		index++;
+		while (index < (int)set->getCapacity() && !set->presentAtIndex(index))
+			index++;
+		if (index >= (int)set->getCapacity())
+			index = -1;
+		return *this;
+	}
+	bool operator==(const HashSetConstIterator& other) const { return set == other.set && index == other.index; }
+	bool operator!=(const HashSetConstIterator& other) const { return !(*this == other); }
+private:
+	const HashSet<K>* set;
+	int index;
+};
+
+template <class K>
+class HashSet: public Set<K, HashSetIterator<K>, HashSetConstIterator<K>> {
 private:
 	struct hashset_entry_s {
 		K key;
 		bool present;
 	};
 public:
+	typedef HashSetIterator<K> Iterator;
+	typedef HashSetConstIterator<K> ConstIterator;
+
+	Iterator begin() override {
+		for (unsigned int i = 0; i < capacity; i++)
+			if (entries[i].present) return Iterator(this, i);
+		return end();
+	}
+	Iterator end() override { return Iterator(this, -1); }
+
+	ConstIterator begin() const override {
+		for (unsigned int i = 0; i < capacity; i++)
+			if (entries[i].present) return ConstIterator(this, i);
+		return end();
+	}
+	ConstIterator end() const override { return ConstIterator(this, -1); }
+
+	int size() const override { return amountUsed; }
+
 	explicit HashSet(unsigned int capacity) : capacity(capacity) {
 		if (capacity == 0)
 			capacity = 1;
@@ -154,7 +216,6 @@ public:
 	}
 
 	int getCapacity() const { return capacity; }
-	unsigned int numUsed() const { return amountUsed; }
 	bool presentAtIndex(int i) const { return entries[i].present; }
 	K& keyAtIndex(int i) const { return entries[i].key; }
 

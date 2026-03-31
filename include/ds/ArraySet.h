@@ -19,13 +19,12 @@
 #ifndef EXCESSIVE_ARRAYSET_H
 #define EXCESSIVE_ARRAYSET_H
 
-#include "Container.h"
 #include "ArrayList.h"
 #include "Set.h"
 
 
 template<class T>
-class ArraySet: public Set<T>, public Container<T, T*, const T*> {
+class ArraySet: public Set<T> {
 public:
 
 	ArraySet() {

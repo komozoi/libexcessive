@@ -19,9 +19,11 @@
 #ifndef LIBEXCESSIVE_SET_H
 #define LIBEXCESSIVE_SET_H
 
+#include "Container.h"
 
-template<class T>
-class Set {
+
+template<class T, class Iterator = T*, class ConstIterator = const T*>
+class Set: public Container<T, T&, Iterator, ConstIterator> {
 public:
 	/**
 	 * Adds an item to the set

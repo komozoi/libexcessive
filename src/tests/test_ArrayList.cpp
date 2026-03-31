@@ -219,7 +219,7 @@ TEST(ArrayListTest, ContainerInterface) {
     list.add(20);
     list.add(30);
 
-    Container<int, int*, const int*>* container = &list;
+    Container<int, int&, int*, const int*>* container = &list;
     EXPECT_EQ(container->getElement(0), 10);
     EXPECT_EQ(container->getElement(1), 20);
     EXPECT_EQ(container->getElement(2), 30);
