@@ -63,12 +63,11 @@ class FdHandleData {
 public:
 	FdHandleData(int fd) : fd(fd), refs(0) {}
 
-	FdHandleData& operator++() {
+	void incRef() {
 		refs++;
-		return *this;
 	}
 
-	FdHandleData& operator--() {
+	void decRef() {
 		refs--;
 		if (refs <= 0 && fd >= 0) {
 			state.getFds()->remove(fd);
@@ -78,7 +77,6 @@ public:
 			} else
 				delete this;
 		}
-		return *this;
 	}
 
 	virtual ssize_t write(const void* value, size_t size) const {
@@ -344,11 +342,11 @@ static FdHandleData& getHandleData(int16_t fd) {
 
 
 FdHandle::FdHandle(int fd) : fd((int16_t)fd) {
-	++getHandleData((int16_t)fd);
+	getHandleData((int16_t)fd).incRef();
 }
 
 FdHandle::FdHandle(const FdHandle& other) : fd(other.fd) {
-	++getHandleData((int16_t)fd);
+	getHandleData((int16_t)fd).incRef();
 }
 
 FdHandle::FdHandle(FdHandle&& other) noexcept : fd(other.fd) {
@@ -449,12 +447,12 @@ std::lock_guard<std::mutex> FdHandle::getLock() const {
 
 FdHandle::~FdHandle() {
 	if (fd >= 0)
-		--getHandleData(fd);
+		getHandleData(fd).decRef();
 }
 
 FdHandle &FdHandle::operator=(FdHandle &&other) noexcept {
 	if (fd != -1)
-		--getHandleData(fd);
+		getHandleData(fd).decRef();
 	fd = other.fd;
 	other.fd = -1;
 	return *this;
@@ -553,7 +551,7 @@ FdTransaction::~FdTransaction() {
 MmapHandle::MmapHandle(FdHandleData &handleData, char *data, char *end)
 		: handleData(handleData), data(data), cursor(data), end(end) {
 	if (data)
-		++handleData;
+		handleData.incRef();
 }
 
 ssize_t MmapHandle::write(const void* value, size_t size) {
@@ -595,7 +593,7 @@ off_t MmapHandle::seek(off_t where, int whence) {
 MmapHandle::~MmapHandle() {
 	if (data) {
 		munmap(data, end - data);
-		--handleData;
+		handleData.decRef();
 	}
 }
 
