@@ -1,0 +1,52 @@
+name: PR Preview
+
+on:
+  pull_request:
+    branches: [ "master" ]
+    paths:
+      - 'docs/wiki/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Setup Ruby + Jekyll
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.1'   # compatible with GitHub Pages
+
+      - name: Build site
+        if: github.event.action != 'closed'
+        run: |
+          gem install jekyll jekyll-remote-theme just-the-docs
+
+          jekyll build --source docs/wiki --destination _site --config docs/wiki/_config.yml
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '_site'
+
+  deploy-preview:
+    if: github.event.pull_request.head.repo.fork == false
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: pr-${{ github.event.number }}
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

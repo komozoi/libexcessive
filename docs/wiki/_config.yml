@@ -1,0 +1,17 @@
+
+title: "LibExcessive: High-Performance Persistent Datastructures in C++"
+baseurl: /libexcessive
+description: Brief description of your wiki/docs
+
+theme: just-the-docs
+
+color_scheme: light
+search_enabled: true
+heading_anchors: true
+
+nav_external_links:
+  - title: Gitea
+    url: https://github.com/komozoi/excessive
+  - title: GitHub
+    url: https://github.com/komozoi/libexcessive
+

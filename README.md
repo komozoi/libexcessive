@@ -114,6 +114,16 @@ make
 And that's it - efficient and persistent data storage in less than 60 lines of code.  No extra installation steps
 or complex APIs.  It just works.
 
+## Documentation
+
+Full technical documentation is available at https://komozoi.github.io/libexcessive/
+
+- [FdHandle](https://komozoi.github.io/libexcessive/FdHandle.html) - Reference-counted file descriptors.
+- [MmapHandle](https://komozoi.github.io/libexcessive/MmapHandle.html) - High-performance memory mapping.
+- [BTree](https://komozoi.github.io/libexcessive/BTree.html) - On-disk sorted storage.
+- [FreeSpaceFile](https://komozoi.github.io/libexcessive/FreeSpaceFile.html) - On-disk space management.
+- [Bigint](https://komozoi.github.io/libexcessive/Bigint.html) - Fixed-width large integers.
+
 ## Overview
 
 LibExcessive is intended for large, data-heavy backend
@@ -121,20 +131,20 @@ applications such as servers and data processing tools where speed and reliabili
 design goals and features are:
 
 * Provide familiar, Java-like APIs and richer helper types, especially containers
-  * With less verbosity than Java APIs, thankfully.
+    * With less verbosity than Java APIs, thankfully.
 * Provide rich, threadsafe, and extremely efficient utilities for interacting with files
-  * Threadsafe file handles and transactions
-  * Mmap handles
-  * Open file reference counting
-  * Utilities for keeping data on-disk
-    * BTree
-    * Files with dynamically allocated regions
+    * Threadsafe file handles and transactions
+    * Mmap handles
+    * Open file reference counting
+    * Utilities for keeping data on-disk
+        * BTree
+        * Files with dynamically allocated regions
 * (planned) Utilities for building on-disk indexes and databases
 * Favor explicit memory and performance control. Many components are designed to be friendly to
   custom allocators and memory pools.
-  * Tracking memory separately for different components of an application, which helps
-    to find memory hogs
-  * Safer allocation and memory management with less heap fragmentation
+    * Tracking memory separately for different components of an application, which helps
+      to find memory hogs
+    * Safer allocation and memory management with less heap fragmentation
 * Small, focused algorithms and helpers for string handling, byte buffers, serialization, and more
 * Support modern C++ compilers from C++17 and up.
 
