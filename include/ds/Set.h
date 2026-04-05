@@ -40,7 +40,7 @@ public:
 	 * @param item Item to add.
 	 * @return `true` if item was already present, `false` otherwise.
 	 */
-	virtual bool add(T item) = 0;
+	virtual bool add(const T& item) = 0;
 
 	/**
 	 * @brief Adds multiple items from a raw array.
@@ -57,16 +57,14 @@ public:
 	 * @param query The element to check.
 	 * @return true if the element is present, false otherwise.
 	 */
-	virtual bool contains(T query) const = 0;
+	virtual bool contains(const T& query) const = 0;
 
 	/**
 	 * @brief Removes the specified element from the set.
 	 * @param key The element to remove.
 	 * @return true if the element was found and removed, false otherwise.
 	 */
-	virtual bool remove(T key) = 0;
-
-	virtual void clear() override = 0;
+	virtual bool remove(const T& key) = 0;
 
 	virtual ~Set() = default;
 };

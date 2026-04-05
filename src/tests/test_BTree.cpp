@@ -26,7 +26,7 @@
 template <class T, int N>
 class RAMBTree: public BTreeBase<T, N> {
 public:
-	RAMBTree(int (*compare)(const T &, const T &))
+	RAMBTree(int (*compare)(const T&, const T&))
 		: BTreeBase<T, N>(compare) {
 		nodes.add({{0, 0, 0, -1, 0, {}}, {}});
 	}

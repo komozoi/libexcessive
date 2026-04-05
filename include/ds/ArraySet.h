@@ -66,7 +66,7 @@ public:
 		Set<T>::addMany(src, size);
 	}
 
-	bool add(T item) override {
+	bool add(const T& item) override {
 		if (length == allocated) {
 			allocated *= 2;
 			if (allocated == 0) allocated = 8;
@@ -103,7 +103,7 @@ public:
 			addRaw(list.get(i));
 	}
 
-	bool contains(T query) const override {
+	bool contains(const T& query) const override {
 		return search(query, false) != -1;
 	}
 
@@ -115,7 +115,7 @@ public:
 		return elements[--length];
 	}
 
-	bool remove(T key) override {
+	bool remove(const T& key) override {
 		int i = search(key);
 		if (i == -1)
 			return false;
@@ -137,7 +137,7 @@ public:
 	 * @param returnNearest If true, returns the insertion index if not found.
 	 * @return The index of the element, or -1 (or insertion index) if not found.
 	 */
-	int search(T query, bool returnNearest = false) const {
+	int search(const T& query, bool returnNearest = false) const {
 		int low = 0;
 		int high = length - 1;
 		int result = 0;
@@ -223,8 +223,6 @@ public:
 		return elements[0];
 	}
 
-protected:
-
 private:
 
 	/**
@@ -232,7 +230,7 @@ private:
 	 * @param item The element to add.
 	 * @return true if already present, false otherwise.
 	 */
-	bool addRaw(T item) {
+	bool addRaw(const T& item) {
 		int insertionIndex = search(item, true);
 		if (insertionIndex < length) {
 			if (elements[insertionIndex] == item)

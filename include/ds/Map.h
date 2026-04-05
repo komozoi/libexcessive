@@ -169,7 +169,15 @@ public:
 	 * @return The value associated with the key.
 	 * @throws std::out_of_range if the key is not found.
 	 */
-	virtual T get(K key) const = 0;
+	virtual T get(const K& key) const = 0;
+
+	/**
+	 * @brief Retrieves the value associated with the given key.
+	 * @param key The key to look for.
+	 * @return A reference to the value associated with the key.
+	 * @throws std::out_of_range if the key is not found.
+	 */
+	virtual T& get(const K& key) = 0;
 
 	/**
 	 * @brief Retrieves the value associated with the given key, or a default value if not found.
@@ -177,28 +185,36 @@ public:
 	 * @param defaultValue The value to return if the key is not present.
 	 * @return The associated value or defaultValue.
 	 */
-	virtual T getOrDefault(K key, T defaultValue) const = 0;
+	virtual T getOrDefault(const K& key, T defaultValue) const = 0;
+
+	/**
+	 * @brief Retrieves a reverence to the value associated with the given key, or a default value if not found.
+	 * @param key The key to look for.
+	 * @param defaultValue The value to return if the key is not present.
+	 * @return The associated value or defaultValue.
+	 */
+	virtual T& getOrDefault(const K& key, T& defaultValue) = 0;
 
 	/**
 	 * @brief Retrieves a pointer to the value associated with the given key.
 	 * @param key The key to look for.
 	 * @return Pointer to the value, or nullptr if not found.
 	 */
-	virtual T* getPtr(K key) = 0;
+	virtual T* getPtr(const K& key) = 0;
 
 	/**
 	 * @brief Retrieves a constant pointer to the value associated with the given key.
 	 * @param key The key to look for.
 	 * @return Constant pointer to the value, or nullptr if not found.
 	 */
-	virtual const T* getPtr(K key) const = 0;
+	virtual const T* getPtr(const K& key) const = 0;
 
 	/**
 	 * @brief Checks if the map contains the specified key.
 	 * @param key The key to check.
 	 * @return true if the key is present, false otherwise.
 	 */
-	virtual bool hasKey(K key) const = 0;
+	virtual bool hasKey(const K& key) const = 0;
 
 	/**
 	 * @brief Associates a value with a key using a pointer.
@@ -206,7 +222,7 @@ public:
 	 * @param value Pointer to the value.
 	 * @return Reference to the newly associated value.
 	 */
-	virtual T& putPtr(K key, T* value) = 0;
+	virtual T& putPtr(const K& key, T* value) = 0;
 
 	/**
 	 * @brief Associates a value with a key.
@@ -214,7 +230,7 @@ public:
 	 * @param value The value to associate.
 	 * @return Reference to the newly associated value.
 	 */
-	virtual T& put(K key, const T& value) = 0;
+	virtual T& put(const K& key, const T& value) = 0;
 
 	/**
 	 * @brief Associates a value with a key using move semantics.
@@ -222,15 +238,19 @@ public:
 	 * @param value The value to move.
 	 * @return Reference to the newly associated value.
 	 */
-	virtual T& put(K key, T&& value) = 0;
+	virtual T& put(const K& key, T&& value) = 0;
 
 	/**
-	 * @brief Removes the entry with the specified key.
+	 * Removes the entry with the specified key.
+	 * Note that this method will not compile if T does not have
+	 * a zero-args constructor; in this case use the other remove() method
+	 * which returns a bool [bool remove(const K& key, T& out)] or use
+	 * [bool drop(const K& key)] if you do not need the removed value.
 	 * @param key The key to remove.
 	 * @return The value that was associated with the key.
 	 * @throws std::out_of_range if the key is not found.
 	 */
-	virtual T remove(K key) = 0;
+	virtual T remove(const K& key) = 0;
 
 	/**
 	 * @brief Removes the entry with the specified key and retrieves its value.
@@ -238,7 +258,14 @@ public:
 	 * @param out [out] The value that was associated with the key.
 	 * @return true if the key was found and removed, false otherwise.
 	 */
-	virtual bool remove(K key, T& out) = 0;
+	virtual bool remove(const K& key, T& out) = 0;
+
+	/**
+	 * @brief Removes the entry with the specified key and destroys its value.
+	 * @param key The key to remove.
+	 * @return true if the key was found and removed, false otherwise.
+	 */
+	virtual bool drop(const K& key) = 0;
 
 	/**
 	 * @brief Gets the first element and its index.

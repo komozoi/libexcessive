@@ -499,8 +499,6 @@ public:
 		free((void*)elements);
 	}
 
-protected:
-
 private:
 	int length, allocated;
 	T* elements;

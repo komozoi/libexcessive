@@ -25,6 +25,23 @@
 #include <algorithm>
 
 
+class DestructorCounter {
+public:
+	static int count;
+
+	DestructorCounter() { }
+	DestructorCounter(const DestructorCounter&) { }
+	DestructorCounter(DestructorCounter&&) noexcept { }
+	DestructorCounter& operator=(const DestructorCounter&) { return *this; }
+	DestructorCounter& operator=(DestructorCounter&&) noexcept { return *this; }
+	~DestructorCounter() {
+		count++;
+	}
+};
+
+int DestructorCounter::count = 0;
+
+
 TEST(HashMapTest, InsertAndRetrieve) {
 	HashMap<int, std::string> map(8);
 	map.put(1, "apple");
@@ -216,4 +233,137 @@ TEST(HashMapTest, ConstReverseIteration) {
         count++;
     }
     EXPECT_EQ(count, 3);
+}
+
+TEST(HashMapDropTest, BasicRemoval) {
+    HashMap<int, std::string> map(8);
+    map.put(1, "one");
+    map.put(2, "two");
+
+    EXPECT_TRUE(map.hasKey(1));
+    EXPECT_TRUE(map.drop(1));
+    EXPECT_FALSE(map.hasKey(1));
+    EXPECT_EQ(map.size(), 1);
+    EXPECT_EQ(map.get(2), "two");
+}
+
+TEST(HashMapDropTest, ReturnValue) {
+    HashMap<int, std::string> map(8);
+    map.put(1, "one");
+
+    EXPECT_TRUE(map.drop(1));
+    EXPECT_FALSE(map.drop(1));
+    EXPECT_FALSE(map.drop(2));
+}
+
+TEST(HashMapDropTest, KeepsOrganization) {
+    // We want to force a collision to test if the chain is fixed.
+    // Since HashMap uses linear probing: index = hashedKey % capacity.
+    // If we have two keys that hash to the same index (or consecutive ones),
+    // removing the first one should not break access to the second one.
+
+    // For a capacity of 4, if we find two keys with same (hash % 4).
+    HashMap<int, int> map(4);
+
+    // We need to find two keys k1, k2 such that (h(k1)%4) == (h(k2)%4)
+    // excessive_hash(int k) returns (uint64_t)k.
+    // hashedKey = (uint32_t)((k * 7224373213449699941LU) >> 32)
+
+    auto getIdx = [&](int k) {
+        uint64_t h = (uint64_t)k;
+        uint32_t hashedKey = (uint32_t)((h * 7224373213449699941LU) >> 32);
+        return hashedKey % 4;
+    };
+
+    int k1 = 0, k2 = 0;
+    bool found = false;
+    for (int i = 0; i < 100 && !found; ++i) {
+        for (int j = i + 1; j < 100; ++j) {
+            if (getIdx(i) == getIdx(j)) {
+                k1 = i;
+                k2 = j;
+                found = true;
+                break;
+            }
+        }
+    }
+    ASSERT_TRUE(found);
+
+    map.put(k1, 100);
+    map.put(k2, 200);
+
+    // Verify they are in the same chain (one right after another or wrapped)
+    int idx1 = -1;
+    for(int i=0; i<4; ++i) {
+        if (map.presentAtIndex(i) && map.keyAtIndex(i) == k1) idx1 = i;
+    }
+    int idx2 = -1;
+    for(int i=0; i<4; ++i) {
+        if (map.presentAtIndex(i) && map.keyAtIndex(i) == k2) idx2 = i;
+    }
+
+    // idx2 should be (idx1 + 1) % 4 if they collided.
+    ASSERT_NE(idx1, -1);
+    ASSERT_NE(idx2, -1);
+    EXPECT_EQ(idx2, (idx1 + 1) % 4);
+
+    // Now drop k1. k2 should still be found.
+    EXPECT_TRUE(map.drop(k1));
+    EXPECT_FALSE(map.hasKey(k1));
+    EXPECT_TRUE(map.hasKey(k2));
+    EXPECT_EQ(map.get(k2), 200);
+}
+
+TEST(HashMapDropTest, DestructorCalled) {
+    DestructorCounter::count = 0;
+    {
+        HashMap<int, DestructorCounter> map(8);
+        map.put(1, DestructorCounter());
+        // One for the temp object, one for the copy into the map.
+        // Actually put(K, T) takes by const ref.
+        // so: 1. Temporary DestructorCounter() created.
+        //     2. map.put copies it into map.
+        //     3. Temporary is destroyed at end of statement.
+
+        int initial_count = DestructorCounter::count;
+        map.drop(1);
+        // Should increment count by 1 (the one in the map).
+        EXPECT_EQ(DestructorCounter::count, initial_count + 1);
+    }
+}
+
+TEST(HashMapDropTest, AmountUsedCorrect) {
+    HashMap<int, int> map(16);
+    // Force some re-insertions by using keys that collide.
+    // Capacity 16.
+    auto getIdx = [&](int k) {
+        uint64_t h = (uint64_t)k;
+        uint32_t hashedKey = (uint32_t)((h * 7224373213449699941LU) >> 32);
+        return hashedKey % 16;
+    };
+
+    // Find keys that collide at same index
+    ArrayList<int> keys;
+    int targetIdx = (int)getIdx(0);
+    keys.add(0);
+    for (int i = 1; keys.size() < 5; ++i) {
+        if ((int)getIdx(i) == targetIdx) {
+            keys.add(i);
+        }
+    }
+
+    for (int i = 0; i < keys.size(); ++i) {
+        map.put(keys.get(i), i);
+    }
+
+    int initialSize = map.size();
+    EXPECT_EQ(initialSize, 5);
+
+    // Drop the first one, which should trigger re-insertion of others.
+    map.drop(keys.get(0));
+
+    EXPECT_EQ(map.size(), initialSize - 1);
+    for (int i = 1; i < keys.size(); ++i) {
+        EXPECT_TRUE(map.hasKey(keys.get(i)));
+    }
 }

@@ -280,42 +280,56 @@ public:
 		throw std::out_of_range("Invalid index");
 	}
 
-	bool hasKey(K key) const override {
+	bool hasKey(const K& key) const override {
 		int idx = locate(key);
 		if (idx == -1)
 			return false;
 		return isPresent(idx);
 	}
 
-	T* getPtr(K key) override {
+	T* getPtr(const K& key) override {
 		int idx = locate(key);
 		if (idx == -1 || !isPresent(idx))
 			return nullptr;
 		return &values[idx];
 	}
 
-	const T* getPtr(K key) const override {
+	const T* getPtr(const K& key) const override {
 		int idx = locate(key);
 		if (idx == -1 || !isPresent(idx))
 			return nullptr;
 		return &values[idx];
 	}
 
-	T get(K key) const override {
+	T& get(const K& key) override {
 		int idx = locate(key);
 		if (idx == -1 || !isPresent(idx))
-			return T();
+			throw std::out_of_range("Key not found in map");
 		return values[idx];
 	}
 
-	T getOrDefault(K key, T defaultValue) const override {
+	T get(const K& key) const override {
+		int idx = locate(key);
+		if (idx == -1 || !isPresent(idx))
+			throw std::out_of_range("Key not found in map");
+		return values[idx];
+	}
+
+	T& getOrDefault(const K& key, T& defaultValue) override {
 		int idx = locate(key);
 		if (idx == -1 || !isPresent(idx))
 			return defaultValue;
 		return values[idx];
 	}
 
-	T remove(K key) override {
+	T getOrDefault(const K& key, T defaultValue) const override {
+		int idx = locate(key);
+		if (idx == -1 || !isPresent(idx))
+			return defaultValue;
+		return values[idx];
+	}
+
+	T remove(const K& key) override {
 		int idx = locate(key);
 		if (idx == -1 || !isPresent(idx))
 			return T();
@@ -344,7 +358,7 @@ public:
 		return oldValue;
 	}
 
-	bool remove(K key, T& out) override {
+	bool remove(const K& key, T& out) override {
 		int idx = locate(key);
 		if (idx == -1 || !isPresent(idx))
 			return false;
@@ -373,7 +387,35 @@ public:
 		return true;
 	}
 
-	T& putPtr(K key, T* value) override {
+	bool drop(const K& key) override {
+		int idx = locate(key);
+		if (idx == -1 || !isPresent(idx))
+			return false;
+
+		values[idx].~T();
+		keys[idx].~K();
+		setPresent(idx, false);
+		amountUsed--;
+
+		// Fix any broken parts of the hashmap
+		idx = (idx + 1) % capacity;
+		while (isPresent(idx)) {
+			K tempKey = std::move(keys[idx]);
+			T tempValue = std::move(values[idx]);
+			keys[idx].~K();
+			values[idx].~T();
+			setPresent(idx, false);
+			amountUsed--;
+
+			put(std::move(tempKey), std::move(tempValue));
+
+			idx = (idx + 1) % capacity;
+		}
+
+		return true;
+	}
+
+	T& putPtr(const K& key, T* value) override {
 		int index = locate(key);
 		if ((index < 0) || (index >= (int)capacity)) {
 			abort();
@@ -400,7 +442,7 @@ public:
 		return values[index];
 	}
 
-	T& put(K key, const T& value) override {
+	T& put(const K& key, const T& value) override {
 		int index = locate(key);
 		if ((index < 0) || (index >= (int)capacity))
 			abort();
@@ -423,7 +465,7 @@ public:
 		return values[index];
 	}
 
-	T& put(K key, T&& value) override {
+	T& put(const K& key, T&& value) override {
 		int index = locate(key);
 		if ((index < 0) || (index >= (int)capacity)) {
 			abort();

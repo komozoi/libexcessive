@@ -20,7 +20,6 @@
 #define EXCESSIVE_HASHSET_H
 
 
-#include "stdio.h"
 #include "alloc/StaticAllocator.h"
 #include "alloc/SlabAllocator.h"
 #include "ArrayList.h"
@@ -300,7 +299,7 @@ public:
 		return *this;
 	}
 
-	bool add(K key) override {
+	bool add(const K& key) override {
 		int index = locate(key);
 
 		if (index == -1) {
@@ -327,14 +326,14 @@ public:
 		}
 	}
 
-	bool contains(K key) const override {
+	bool contains(const K& key) const override {
 		int idx = locate(key);
 		if (idx == -1)
 			return false;
 		return isPresent(idx);
 	}
 
-	bool remove(K key) override {
+	bool remove(const K& key) override {
 		int idx = locate(key);
 		if (idx == -1 || !isPresent(idx))
 			return false;
@@ -427,7 +426,7 @@ private:
 	 * @param key The key to locate.
 	 * @return The index of the key, or -1 if not found.
 	 */
-	int locate(K key) const {
+	int locate(const K& key) const {
 		// This number is probably prime.  I designed it to distribute the bits of the key around for
 		// better key distribution.
 		uint32_t hashedKey = (uint32_t)(key * 7224373213449699941LU);
