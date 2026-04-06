@@ -180,179 +180,179 @@ TEST(HashMapTest, PairKeyInsertAndRetrieve) {
 }
 
 TEST(HashMapTest, ContainerInterface) {
-    HashMap<int, std::string> map(8);
-    map.put(1, "one");
-    map.put(2, "two");
-    map.put(3, "three");
+	HashMap<int, std::string> map(8);
+	map.put(1, "one");
+	map.put(2, "two");
+	map.put(3, "three");
 
-    Container<MapElement<int, std::string>, MapElement<int, std::string>, MapElement<int, std::string>::Iterator, MapElement<int, std::string>::ConstIterator>* container = &map;
+	Container<MapElement<int, std::string>, MapElement<int, std::string>, MapElement<int, std::string>::Iterator, MapElement<int, std::string>::ConstIterator>* container = &map;
 
-    EXPECT_EQ(container->size(), 3);
+	EXPECT_EQ(container->size(), 3);
 
-    // Test iteration
-    int count = 0;
-    for (MapElement<int, std::string> elem: *container) {
-        count++;
-        if (elem.key == 1) EXPECT_EQ(elem.value, "one");
-        else if (elem.key == 2) EXPECT_EQ(elem.value, "two");
-        else if (elem.key == 3) EXPECT_EQ(elem.value, "three");
-        else FAIL() << "Unexpected key: " << elem.key;
-    }
-    EXPECT_EQ(count, 3);
+	// Test iteration
+	int count = 0;
+	for (MapElement<int, std::string> elem: *container) {
+		count++;
+		if (elem.key == 1) EXPECT_EQ(elem.value, "one");
+		else if (elem.key == 2) EXPECT_EQ(elem.value, "two");
+		else if (elem.key == 3) EXPECT_EQ(elem.value, "three");
+		else FAIL() << "Unexpected key: " << elem.key;
+	}
+	EXPECT_EQ(count, 3);
 
-    // Test getElement (indices are based on internal hash map order, but should be valid)
-    MapElement<int, std::string> e0 = container->getElement(0);
-    EXPECT_TRUE(e0.key == 1 || e0.key == 2 || e0.key == 3);
+	// Test getElement (indices are based on internal hash map order, but should be valid)
+	MapElement<int, std::string> e0 = container->getElement(0);
+	EXPECT_TRUE(e0.key == 1 || e0.key == 2 || e0.key == 3);
 }
 
 TEST(HashMapTest, ReverseIteration) {
-    HashMap<int, int> map(10);
-    map.put(1, 100);
-    map.put(2, 200);
-    map.put(3, 300);
+	HashMap<int, int> map(10);
+	map.put(1, 100);
+	map.put(2, 200);
+	map.put(3, 300);
 
-    ArrayList<int> forwardKeys;
-    ArrayList<int> forwardValues;
-    for (const MapElement<int, int>& elem : map) {
-        forwardKeys.add(elem.key);
-        forwardValues.add(elem.value);
-    }
-    std::reverse(forwardKeys.begin(), forwardKeys.end());
-    std::reverse(forwardValues.begin(), forwardValues.end());
+	ArrayList<int> forwardKeys;
+	ArrayList<int> forwardValues;
+	for (const MapElement<int, int>& elem : map) {
+		forwardKeys.add(elem.key);
+		forwardValues.add(elem.value);
+	}
+	std::reverse(forwardKeys.begin(), forwardKeys.end());
+	std::reverse(forwardValues.begin(), forwardValues.end());
 
-    int count = 0;
-    for (HashMap<int, int>::reverse_iterator it = map.rbegin(); it != map.rend(); ++it) {
-        EXPECT_EQ((*it).key, forwardKeys.get(count));
-        EXPECT_EQ((*it).value, forwardValues.get(count));
-        count++;
-    }
-    EXPECT_EQ(count, 3);
+	int count = 0;
+	for (HashMap<int, int>::reverse_iterator it = map.rbegin(); it != map.rend(); ++it) {
+		EXPECT_EQ((*it).key, forwardKeys.get(count));
+		EXPECT_EQ((*it).value, forwardValues.get(count));
+		count++;
+	}
+	EXPECT_EQ(count, 3);
 }
 
 TEST(HashMapTest, ConstReverseIteration) {
-    HashMap<int, int> map(10);
-    map.put(1, 100);
-    map.put(2, 200);
-    map.put(3, 300);
-    const HashMap<int, int>& cmap = map;
+	HashMap<int, int> map(10);
+	map.put(1, 100);
+	map.put(2, 200);
+	map.put(3, 300);
+	const HashMap<int, int>& cmap = map;
 
-    ArrayList<int> forwardKeys;
-    ArrayList<int> forwardValues;
-    for (const MapElement<int, int>& elem : cmap) {
-        forwardKeys.add(elem.key);
-        forwardValues.add(elem.value);
-    }
-    std::reverse(forwardKeys.begin(), forwardKeys.end());
-    std::reverse(forwardValues.begin(), forwardValues.end());
+	ArrayList<int> forwardKeys;
+	ArrayList<int> forwardValues;
+	for (const MapElement<int, int>& elem : cmap) {
+		forwardKeys.add(elem.key);
+		forwardValues.add(elem.value);
+	}
+	std::reverse(forwardKeys.begin(), forwardKeys.end());
+	std::reverse(forwardValues.begin(), forwardValues.end());
 
-    int count = 0;
-    for (HashMap<int, int>::const_reverse_iterator it = cmap.crbegin(); it != cmap.crend(); ++it) {
-        EXPECT_EQ((*it).key, forwardKeys.get(count));
-        EXPECT_EQ((*it).value, forwardValues.get(count));
-        count++;
-    }
-    EXPECT_EQ(count, 3);
+	int count = 0;
+	for (HashMap<int, int>::const_reverse_iterator it = cmap.crbegin(); it != cmap.crend(); ++it) {
+		EXPECT_EQ((*it).key, forwardKeys.get(count));
+		EXPECT_EQ((*it).value, forwardValues.get(count));
+		count++;
+	}
+	EXPECT_EQ(count, 3);
 }
 
 TEST(HashMapDropTest, BasicRemoval) {
-    HashMap<int, std::string> map(8);
-    map.put(1, "one");
-    map.put(2, "two");
+	HashMap<int, std::string> map(8);
+	map.put(1, "one");
+	map.put(2, "two");
 
-    EXPECT_TRUE(map.hasKey(1));
-    EXPECT_TRUE(map.drop(1));
-    EXPECT_FALSE(map.hasKey(1));
-    EXPECT_EQ(map.size(), 1);
-    EXPECT_EQ(map.get(2), "two");
+	EXPECT_TRUE(map.hasKey(1));
+	EXPECT_TRUE(map.drop(1));
+	EXPECT_FALSE(map.hasKey(1));
+	EXPECT_EQ(map.size(), 1);
+	EXPECT_EQ(map.get(2), "two");
 }
 
 TEST(HashMapDropTest, ReturnValue) {
-    HashMap<int, std::string> map(8);
-    map.put(1, "one");
+	HashMap<int, std::string> map(8);
+	map.put(1, "one");
 
-    EXPECT_TRUE(map.drop(1));
-    EXPECT_FALSE(map.drop(1));
-    EXPECT_FALSE(map.drop(2));
+	EXPECT_TRUE(map.drop(1));
+	EXPECT_FALSE(map.drop(1));
+	EXPECT_FALSE(map.drop(2));
 }
 
 TEST(HashMapDropTest, KeepsOrganization) {
-    // We want to force a collision to test if the chain is fixed.
-    // Since HashMap uses linear probing: index = hashedKey % capacity.
-    // If we have two keys that hash to the same index (or consecutive ones),
-    // removing the first one should not break access to the second one.
+	// We want to force a collision to test if the chain is fixed.
+	// Since HashMap uses linear probing: index = hashedKey % capacity.
+	// If we have two keys that hash to the same index (or consecutive ones),
+	// removing the first one should not break access to the second one.
 
-    // For a capacity of 4, if we find two keys with same (hash % 4).
-    HashMap<int, int> map(4);
+	// For a capacity of 4, if we find two keys with same (hash % 4).
+	HashMap<int, int> map(4);
 
-    // We need to find two keys k1, k2 such that (h(k1)%4) == (h(k2)%4)
-    struct GetIdx {
-        uint32_t operator()(int k) {
-            uint32_t hashedKey = (uint32_t)std::hash<int>{}(k);
-            return hashedKey % 4;
-        }
-    } getIdx;
+	// We need to find two keys k1, k2 such that (h(k1)%4) == (h(k2)%4)
+	struct GetIdx {
+		uint32_t operator()(int k) {
+		    uint32_t hashedKey = (uint32_t)std::hash<int>{}(k);
+		    return hashedKey % 4;
+		}
+	} getIdx;
 
-    int k1 = 0, k2 = 0;
-    bool found = false;
-    for (int i = 0; i < 100 && !found; ++i) {
-        for (int j = i + 1; j < 100; ++j) {
-            if (getIdx(i) == getIdx(j)) {
-                k1 = i;
-                k2 = j;
-                found = true;
-                break;
-            }
-        }
-    }
-    ASSERT_TRUE(found);
+	int k1 = 0, k2 = 0;
+	bool found = false;
+	for (int i = 0; i < 100 && !found; ++i) {
+		for (int j = i + 1; j < 100; ++j) {
+		    if (getIdx(i) == getIdx(j)) {
+		        k1 = i;
+		        k2 = j;
+		        found = true;
+		        break;
+		    }
+		}
+	}
+	ASSERT_TRUE(found);
 
-    map.put(k1, 100);
-    map.put(k2, 200);
+	map.put(k1, 100);
+	map.put(k2, 200);
 
-    // Verify they are in the same chain (one right after another or wrapped)
-    int idx1 = -1;
-    for(int i=0; i<4; ++i) {
-        if (map.presentAtIndex(i) && map.keyAtIndex(i) == k1) idx1 = i;
-    }
-    int idx2 = -1;
-    for(int i=0; i<4; ++i) {
-        if (map.presentAtIndex(i) && map.keyAtIndex(i) == k2) idx2 = i;
-    }
+	// Verify they are in the same chain (one right after another or wrapped)
+	int idx1 = -1;
+	for(int i=0; i<4; ++i) {
+		if (map.presentAtIndex(i) && map.keyAtIndex(i) == k1) idx1 = i;
+	}
+	int idx2 = -1;
+	for(int i=0; i<4; ++i) {
+		if (map.presentAtIndex(i) && map.keyAtIndex(i) == k2) idx2 = i;
+	}
 
-    // idx2 should be (idx1 + 1) % 4 if they collided.
-    ASSERT_NE(idx1, -1);
-    ASSERT_NE(idx2, -1);
-    EXPECT_EQ(idx2, (idx1 + 1) % 4);
+	// idx2 should be (idx1 + 1) % 4 if they collided.
+	ASSERT_NE(idx1, -1);
+	ASSERT_NE(idx2, -1);
+	EXPECT_EQ(idx2, (idx1 + 1) % 4);
 
-    // Now drop k1. k2 should still be found.
-    EXPECT_TRUE(map.drop(k1));
-    EXPECT_FALSE(map.hasKey(k1));
-    EXPECT_TRUE(map.hasKey(k2));
-    EXPECT_EQ(map.get(k2), 200);
+	// Now drop k1. k2 should still be found.
+	EXPECT_TRUE(map.drop(k1));
+	EXPECT_FALSE(map.hasKey(k1));
+	EXPECT_TRUE(map.hasKey(k2));
+	EXPECT_EQ(map.get(k2), 200);
 }
 
 TEST(HashMapDropTest, DestructorCalled) {
-    DestructorCounter::count = 0;
-    {
-        HashMap<int, DestructorCounter> map(8);
-        map.put(1, DestructorCounter());
-        // One for the temp object, one for the copy into the map.
-        // Actually put(K, T) takes by const ref.
-        // so: 1. Temporary DestructorCounter() created.
-        //     2. map.put copies it into map.
-        //     3. Temporary is destroyed at end of statement.
+	DestructorCounter::count = 0;
+	{
+		HashMap<int, DestructorCounter> map(8);
+		map.put(1, DestructorCounter());
+		// One for the temp object, one for the copy into the map.
+		// Actually put(K, T) takes by const ref.
+		// so: 1. Temporary DestructorCounter() created.
+		//     2. map.put copies it into map.
+		//     3. Temporary is destroyed at end of statement.
 
-        int initial_count = DestructorCounter::count;
-        map.drop(1);
-        // Should increment count by 1 (the one in the map).
-        EXPECT_EQ(DestructorCounter::count, initial_count + 1);
-    }
+		int initial_count = DestructorCounter::count;
+		map.drop(1);
+		// Should increment count by 1 (the one in the map).
+		EXPECT_EQ(DestructorCounter::count, initial_count + 1);
+	}
 }
 
 TEST(HashMapDropTest, AmountUsedCorrect) {
-    HashMap<int, int> map(16);
-    // Force some re-insertions by using keys that collide.
-    // Capacity 16.
+	HashMap<int, int> map(16);
+	// Force some re-insertions by using keys that collide.
+	// Capacity 16.
 	struct GetIdx {
 		uint32_t operator()(int k) {
 			uint32_t hashedKey = (uint32_t)std::hash<int>{}(k);
@@ -360,28 +360,28 @@ TEST(HashMapDropTest, AmountUsedCorrect) {
 		}
 	} getIdx;
 
-    // Find keys that collide
-    ArrayList<int> keys;
-    int targetIdx = (int)getIdx(0);
-    keys.add(0);
-    for (int i = 1; keys.size() < 5; ++i) {
-        if ((int)getIdx(i) == targetIdx) {
-            keys.add(i);
-        }
-    }
+	// Find keys that collide
+	ArrayList<int> keys;
+	int targetIdx = (int)getIdx(0);
+	keys.add(0);
+	for (int i = 1; keys.size() < 5; ++i) {
+		if ((int)getIdx(i) == targetIdx) {
+		    keys.add(i);
+		}
+	}
 
-    for (int i = 0; i < keys.size(); ++i) {
-        map.put(keys.get(i), i);
-    }
+	for (int i = 0; i < keys.size(); ++i) {
+		map.put(keys.get(i), i);
+	}
 
-    int initialSize = map.size();
-    EXPECT_EQ(initialSize, 5);
+	int initialSize = map.size();
+	EXPECT_EQ(initialSize, 5);
 
-    // Drop the first one, which should trigger re-insertion of others.
-    map.drop(keys.get(0));
+	// Drop the first one, which should trigger re-insertion of others.
+	map.drop(keys.get(0));
 
-    EXPECT_EQ(map.size(), initialSize - 1);
-    for (int i = 1; i < keys.size(); ++i) {
-        EXPECT_TRUE(map.hasKey(keys.get(i)));
-    }
+	EXPECT_EQ(map.size(), initialSize - 1);
+	for (int i = 1; i < keys.size(); ++i) {
+		EXPECT_TRUE(map.hasKey(keys.get(i)));
+	}
 }

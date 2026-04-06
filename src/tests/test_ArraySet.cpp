@@ -180,28 +180,28 @@ TEST(ArraySetTest, GetMemory) {
 }
 
 TEST(ArraySetTest, ReverseIteration) {
-    int arr[] = {1, 2, 3};
-    ArraySet<int> set(arr, 3);
-    std::vector<int> expected{3, 2, 1};
-    
-    int count = 0;
-    for (ArraySet<int>::reverse_iterator it = set.rbegin(); it != set.rend(); ++it) {
-        EXPECT_EQ(*it, expected[count]);
-        count++;
-    }
-    EXPECT_EQ(count, 3);
+	int arr[] = {1, 2, 3};
+	ArraySet<int> set(arr, 3);
+	std::vector<int> expected{3, 2, 1};
+
+	int count = 0;
+	for (ArraySet<int>::reverse_iterator it = set.rbegin(); it != set.rend(); ++it) {
+		EXPECT_EQ(*it, expected[count]);
+		count++;
+	}
+	EXPECT_EQ(count, 3);
 }
 
 TEST(ArraySetTest, ConstReverseIteration) {
-    int arr[] = {1, 2, 3};
-    ArraySet<int> set(arr, 3);
-    const ArraySet<int>& cset = set;
-    
-    ArrayList<int> expected{3, 2, 1};
-    int count = 0;
-    for (ArraySet<int>::const_reverse_iterator it = cset.crbegin(); it != cset.crend(); ++it) {
-        EXPECT_EQ(*it, expected.get(count));
-        count++;
-    }
-    EXPECT_EQ(count, 3);
+	int arr[] = {1, 2, 3};
+	ArraySet<int> set(arr, 3);
+	const ArraySet<int>& cset = set;
+
+	ArrayList<int> expected{3, 2, 1};
+	int count = 0;
+	for (ArraySet<int>::const_reverse_iterator it = cset.crbegin(); it != cset.crend(); ++it) {
+		EXPECT_EQ(*it, expected.get(count));
+		count++;
+	}
+	EXPECT_EQ(count, 3);
 }

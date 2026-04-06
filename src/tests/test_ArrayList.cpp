@@ -214,41 +214,41 @@ TEST(ArrayListTest, ExportMemoryTransfersOwnership) {
 }
 
 TEST(ArrayListTest, ContainerInterface) {
-    ArrayList<int> list;
-    list.add(10);
-    list.add(20);
-    list.add(30);
+	ArrayList<int> list;
+	list.add(10);
+	list.add(20);
+	list.add(30);
 
-    Container<int, int&, int*, const int*>* container = &list;
-    EXPECT_EQ(container->getElement(0), 10);
-    EXPECT_EQ(container->getElement(1), 20);
-    EXPECT_EQ(container->getElement(2), 30);
+	Container<int, int&, int*, const int*>* container = &list;
+	EXPECT_EQ(container->getElement(0), 10);
+	EXPECT_EQ(container->getElement(1), 20);
+	EXPECT_EQ(container->getElement(2), 30);
 
-    EXPECT_EQ(container->find(20), 1);
-    EXPECT_EQ(container->find(40), -1);
+	EXPECT_EQ(container->find(20), 1);
+	EXPECT_EQ(container->find(40), -1);
 }
 
 TEST(ArrayListTest, ReverseIteration) {
-    ArrayList<int> list{1, 2, 3, 4, 5};
-    ArrayList<int> expected{5, 4, 3, 2, 1};
-    
-    int count = 0;
-    for (ArrayList<int>::reverse_iterator it = list.rbegin(); it != list.rend(); ++it) {
-        EXPECT_EQ(*it, expected.get(count));
-        count++;
-    }
-    EXPECT_EQ(count, 5);
+	ArrayList<int> list{1, 2, 3, 4, 5};
+	ArrayList<int> expected{5, 4, 3, 2, 1};
+
+	int count = 0;
+	for (ArrayList<int>::reverse_iterator it = list.rbegin(); it != list.rend(); ++it) {
+		EXPECT_EQ(*it, expected.get(count));
+		count++;
+	}
+	EXPECT_EQ(count, 5);
 }
 
 TEST(ArrayListTest, ConstReverseIteration) {
-    ArrayList<int> list{1, 2, 3};
-    const ArrayList<int>& clist = list;
-    
-    ArrayList<int> expected{3, 2, 1};
-    int count = 0;
-    for (ArrayList<int>::const_reverse_iterator it = clist.crbegin(); it != clist.crend(); ++it) {
-        EXPECT_EQ(*it, expected.get(count));
-        count++;
-    }
-    EXPECT_EQ(count, 3);
+	ArrayList<int> list{1, 2, 3};
+	const ArrayList<int>& clist = list;
+
+	ArrayList<int> expected{3, 2, 1};
+	int count = 0;
+	for (ArrayList<int>::const_reverse_iterator it = clist.crbegin(); it != clist.crend(); ++it) {
+		EXPECT_EQ(*it, expected.get(count));
+		count++;
+	}
+	EXPECT_EQ(count, 3);
 }

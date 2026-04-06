@@ -200,71 +200,71 @@ TEST(HashSetTest, PresentAndKeyAtIndex) {
 }
 
 TEST(HashSetTest, ContainerInterface) {
-    HashSet<int> s(5);
-    s.add(10);
-    s.add(20);
-    s.add(30);
+	HashSet<int> s(5);
+	s.add(10);
+	s.add(20);
+	s.add(30);
 
-    Container<int, int&, HashSetIterator<int>, HashSetConstIterator<int>>* container = &s;
-    EXPECT_EQ(container->size(), 3);
+	Container<int, int&, HashSetIterator<int>, HashSetConstIterator<int>>* container = &s;
+	EXPECT_EQ(container->size(), 3);
 
-    // Test iteration
-    int count = 0;
-    bool found10 = false, found20 = false, found30 = false;
-    for (int element: *container) {
-        count++;
-        if (element == 10) found10 = true;
-        else if (element == 20) found20 = true;
-        else if (element == 30) found30 = true;
-    }
-    EXPECT_EQ(count, 3);
-    EXPECT_TRUE(found10 && found20 && found30);
+	// Test iteration
+	int count = 0;
+	bool found10 = false, found20 = false, found30 = false;
+	for (int element: *container) {
+		count++;
+		if (element == 10) found10 = true;
+		else if (element == 20) found20 = true;
+		else if (element == 30) found30 = true;
+	}
+	EXPECT_EQ(count, 3);
+	EXPECT_TRUE(found10 && found20 && found30);
 
-    // Test find
-    EXPECT_GE(container->find(20), 0);
+	// Test find
+	EXPECT_GE(container->find(20), 0);
 }
 
 TEST(HashSetTest, ReverseIteration) {
-    HashSet<int> set(10);
-    set.add(10);
-    set.add(20);
-    set.add(30);
-    
-    // Collect all elements via normal iteration
-    ArrayList<int> forward;
-    for (int val : set) {
-        forward.add(val);
-    }
-    std::reverse(forward.begin(), forward.end());
-    
-    int count = 0;
-    for (HashSet<int>::reverse_iterator it = set.rbegin(); it != set.rend(); ++it) {
-        EXPECT_EQ(*it, forward.get(count));
-        count++;
-    }
-    EXPECT_EQ(count, 3);
+	HashSet<int> set(10);
+	set.add(10);
+	set.add(20);
+	set.add(30);
+
+	// Collect all elements via normal iteration
+	ArrayList<int> forward;
+	for (int val : set) {
+		forward.add(val);
+	}
+	std::reverse(forward.begin(), forward.end());
+
+	int count = 0;
+	for (HashSet<int>::reverse_iterator it = set.rbegin(); it != set.rend(); ++it) {
+		EXPECT_EQ(*it, forward.get(count));
+		count++;
+	}
+	EXPECT_EQ(count, 3);
 }
 
 TEST(HashSetTest, ConstReverseIteration) {
-    HashSet<int> set(10);
-    set.add(10);
-    set.add(20);
-    set.add(30);
-    const HashSet<int>& cset = set;
-    
-    // Collect all elements via normal iteration
-    ArrayList<int> forward;
-    for (int val : cset) {
-        forward.add(val);
-    }
-    std::reverse(forward.begin(), forward.end());
-    
-    int count = 0;
-    for (HashSet<int>::const_reverse_iterator it = cset.crbegin(); it != cset.crend(); ++it) {
-        EXPECT_EQ(*it, forward.get(count));
-        count++;
-    }
-    EXPECT_EQ(count, 3);
+	HashSet<int> set(10);
+	set.add(10);
+	set.add(20);
+	set.add(30);
+	const HashSet<int>& cset = set;
+
+	// Collect all elements via normal iteration
+	ArrayList<int> forward;
+	for (int val : cset) {
+		forward.add(val);
+	}
+	std::reverse(forward.begin(), forward.end());
+
+	int count = 0;
+	for (HashSet<int>::const_reverse_iterator it = cset.crbegin(); it != cset.crend(); ++it) {
+		EXPECT_EQ(*it, forward.get(count));
+		count++;
+	}
+	EXPECT_EQ(count, 3);
 }
 
 TEST(HashSetStringTest, AddAndContains) {

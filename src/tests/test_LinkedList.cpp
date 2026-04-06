@@ -19,123 +19,123 @@
 #include "ds/ArrayList.h"
 
 TEST(LinkedListTest, BasicOps) {
-    LinkedList<int> list;
-    EXPECT_EQ(list.size(), 0);
+	LinkedList<int> list;
+	EXPECT_EQ(list.size(), 0);
 
-    list.add(10);
-    list.add(20);
-    list.add(30);
+	list.add(10);
+	list.add(20);
+	list.add(30);
 
-    EXPECT_EQ(list.size(), 3);
-    EXPECT_EQ(list.get(0), 10);
-    EXPECT_EQ(list.get(1), 20);
-    EXPECT_EQ(list.get(2), 30);
+	EXPECT_EQ(list.size(), 3);
+	EXPECT_EQ(list.get(0), 10);
+	EXPECT_EQ(list.get(1), 20);
+	EXPECT_EQ(list.get(2), 30);
 }
 
 TEST(LinkedListTest, Iteration) {
-    LinkedList<int> list;
-    list.add(1);
-    list.add(2);
-    list.add(3);
+	LinkedList<int> list;
+	list.add(1);
+	list.add(2);
+	list.add(3);
 
-    int count = 0;
-    int expected[] = {1, 2, 3};
+	int count = 0;
+	int expected[] = {1, 2, 3};
 
-    // This is how it's currently done with cursor
-    list.resetCursor();
-    while (list.isCursorValid()) {
-        EXPECT_EQ(list.next(), expected[count++]);
-    }
-    EXPECT_EQ(count, 3);
+	// This is how it's currently done with cursor
+	list.resetCursor();
+	while (list.isCursorValid()) {
+		EXPECT_EQ(list.next(), expected[count++]);
+	}
+	EXPECT_EQ(count, 3);
 }
 
 TEST(LinkedListTest, StandardIterator) {
-    LinkedList<int> list;
-    list.add(1);
-    list.add(2);
-    list.add(3);
+	LinkedList<int> list;
+	list.add(1);
+	list.add(2);
+	list.add(3);
 
-    int count = 0;
-    int expected[] = {1, 2, 3};
-    for (int val : list) {
-        EXPECT_EQ(val, expected[count++]);
-    }
-    EXPECT_EQ(count, 3);
+	int count = 0;
+	int expected[] = {1, 2, 3};
+	for (int val : list) {
+		EXPECT_EQ(val, expected[count++]);
+	}
+	EXPECT_EQ(count, 3);
 }
 
 TEST(LinkedListTest, ConstIterator) {
-    LinkedList<int> list;
-    list.add(1);
-    list.add(2);
-    list.add(3);
+	LinkedList<int> list;
+	list.add(1);
+	list.add(2);
+	list.add(3);
 
-    const LinkedList<int>& clist = list;
-    int count = 0;
-    int expected[] = {1, 2, 3};
-    for (int val : clist) {
-        EXPECT_EQ(val, expected[count++]);
-    }
-    EXPECT_EQ(count, 3);
+	const LinkedList<int>& clist = list;
+	int count = 0;
+	int expected[] = {1, 2, 3};
+	for (int val : clist) {
+		EXPECT_EQ(val, expected[count++]);
+	}
+	EXPECT_EQ(count, 3);
 }
 
 TEST(LinkedListTest, IteratorMutation) {
-    LinkedList<int> list;
-    list.add(1);
-    list.add(2);
-    list.add(3);
+	LinkedList<int> list;
+	list.add(1);
+	list.add(2);
+	list.add(3);
 
-    for (int& val : list) {
-        val *= 10;
-    }
+	for (int& val : list) {
+		val *= 10;
+	}
 
-    EXPECT_EQ(list.get(0), 10);
-    EXPECT_EQ(list.get(1), 20);
-    EXPECT_EQ(list.get(2), 30);
+	EXPECT_EQ(list.get(0), 10);
+	EXPECT_EQ(list.get(1), 20);
+	EXPECT_EQ(list.get(2), 30);
 }
 
 TEST(LinkedListTest, BidirectionalIterator) {
-    LinkedList<int> list;
-    list.add(1);
-    list.add(2);
-    list.add(3);
+	LinkedList<int> list;
+	list.add(1);
+	list.add(2);
+	list.add(3);
 
-    LinkedList<int>::Iterator it = list.begin();
-    EXPECT_EQ(*it, 1);
-    ++it;
-    EXPECT_EQ(*it, 2);
-    --it;
-    EXPECT_EQ(*it, 1);
+	LinkedList<int>::Iterator it = list.begin();
+	EXPECT_EQ(*it, 1);
+	++it;
+	EXPECT_EQ(*it, 2);
+	--it;
+	EXPECT_EQ(*it, 1);
 
-    LinkedList<int>::Iterator it_end = list.end();
-    --it_end;
-    EXPECT_EQ(*it_end, 3);
+	LinkedList<int>::Iterator it_end = list.end();
+	--it_end;
+	EXPECT_EQ(*it_end, 3);
 }
 
 TEST(LinkedListTest, ReverseIteration) {
-    LinkedList<int> list;
-    list.add(1);
-    list.add(2);
-    list.add(3);
+	LinkedList<int> list;
+	list.add(1);
+	list.add(2);
+	list.add(3);
 
-    int count = 0;
-    int expected[] = {3, 2, 1};
-    for (LinkedList<int>::reverse_iterator it = list.rbegin(); it != list.rend(); ++it) {
-        EXPECT_EQ(*it, expected[count++]);
-    }
-    EXPECT_EQ(count, 3);
+	int count = 0;
+	int expected[] = {3, 2, 1};
+	for (LinkedList<int>::reverse_iterator it = list.rbegin(); it != list.rend(); ++it) {
+		EXPECT_EQ(*it, expected[count++]);
+	}
+	EXPECT_EQ(count, 3);
 }
 
 TEST(LinkedListTest, ConstReverseIteration) {
-    LinkedList<int> list;
-    list.add(1);
-    list.add(2);
-    list.add(3);
+	LinkedList<int> list;
+	list.add(1);
+	list.add(2);
+	list.add(3);
 
-    const LinkedList<int>& clist = list;
-    int expected[] = {3, 2, 1};
-    int count = 0;
-    for (LinkedList<int>::const_reverse_iterator it = clist.crbegin(); it != clist.crend(); ++it) {
-        EXPECT_EQ(*it, expected[count++]);
-    }
-    EXPECT_EQ(count, 3);
+	const LinkedList<int>& clist = list;
+	int expected[] = {3, 2, 1};
+	int count = 0;
+	for (LinkedList<int>::const_reverse_iterator it = clist.crbegin(); it != clist.crend(); ++it) {
+		EXPECT_EQ(*it, expected[count++]);
+	}
+	EXPECT_EQ(count, 3);
 }
