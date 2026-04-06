@@ -186,14 +186,13 @@ TEST(HashMapTest, ContainerInterface) {
     map.put(3, "three");
 
     Container<MapElement<int, std::string>, MapElement<int, std::string>, MapElement<int, std::string>::Iterator, MapElement<int, std::string>::ConstIterator>* container = &map;
-    
+
     EXPECT_EQ(container->size(), 3);
-    
+
     // Test iteration
     int count = 0;
-    for (auto it = container->begin(); it != container->end(); ++it) {
+    for (MapElement<int, std::string> elem: *container) {
         count++;
-        MapElement<int, std::string> elem = *it;
         if (elem.key == 1) EXPECT_EQ(elem.value, "one");
         else if (elem.key == 2) EXPECT_EQ(elem.value, "two");
         else if (elem.key == 3) EXPECT_EQ(elem.value, "three");
@@ -211,18 +210,18 @@ TEST(HashMapTest, ReverseIteration) {
     map.put(1, 100);
     map.put(2, 200);
     map.put(3, 300);
-    
+
     ArrayList<int> forwardKeys;
     ArrayList<int> forwardValues;
-    for (auto elem : map) {
+    for (const MapElement<int, int>& elem : map) {
         forwardKeys.add(elem.key);
         forwardValues.add(elem.value);
     }
     std::reverse(forwardKeys.begin(), forwardKeys.end());
     std::reverse(forwardValues.begin(), forwardValues.end());
-    
+
     int count = 0;
-    for (auto it = map.rbegin(); it != map.rend(); ++it) {
+    for (HashMap<int, int>::reverse_iterator it = map.rbegin(); it != map.rend(); ++it) {
         EXPECT_EQ((*it).key, forwardKeys.get(count));
         EXPECT_EQ((*it).value, forwardValues.get(count));
         count++;
@@ -236,18 +235,18 @@ TEST(HashMapTest, ConstReverseIteration) {
     map.put(2, 200);
     map.put(3, 300);
     const HashMap<int, int>& cmap = map;
-    
+
     ArrayList<int> forwardKeys;
     ArrayList<int> forwardValues;
-    for (auto elem : cmap) {
+    for (const MapElement<int, int>& elem : cmap) {
         forwardKeys.add(elem.key);
         forwardValues.add(elem.value);
     }
     std::reverse(forwardKeys.begin(), forwardKeys.end());
     std::reverse(forwardValues.begin(), forwardValues.end());
-    
+
     int count = 0;
-    for (auto it = cmap.crbegin(); it != cmap.crend(); ++it) {
+    for (HashMap<int, int>::const_reverse_iterator it = cmap.crbegin(); it != cmap.crend(); ++it) {
         EXPECT_EQ((*it).key, forwardKeys.get(count));
         EXPECT_EQ((*it).value, forwardValues.get(count));
         count++;
@@ -361,7 +360,7 @@ TEST(HashMapDropTest, AmountUsedCorrect) {
 		}
 	} getIdx;
 
-    // Find keys that collide at same index
+    // Find keys that collide
     ArrayList<int> keys;
     int targetIdx = (int)getIdx(0);
     keys.add(0);

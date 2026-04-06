@@ -143,7 +143,7 @@ TEST(ArrayListTest, PrepareIncreaseCapacity) {
 
 TEST(ArrayListTest, SubscriptInPlacePositiveRange) {
 	ArrayList<int> list{1,2,3,4,5};
-	auto sub = list.subscriptInPlace(1,4);
+	ArrayList<int> sub = list.subscriptInPlace(1,4);
 
 	ASSERT_EQ(sub.size(), 3);
 	EXPECT_EQ(sub.get(0), 2);
@@ -152,7 +152,7 @@ TEST(ArrayListTest, SubscriptInPlacePositiveRange) {
 
 TEST(ArrayListTest, SubscriptInPlaceNegativeIndices) {
 	ArrayList<int> list{1,2,3,4,5};
-	auto sub = list.subscriptInPlace(-4,-1);
+	ArrayList<int> sub = list.subscriptInPlace(-4,-1);
 
 	ASSERT_EQ(sub.size(), 3);
 	EXPECT_EQ(sub.get(0), 2);
@@ -233,7 +233,7 @@ TEST(ArrayListTest, ReverseIteration) {
     ArrayList<int> expected{5, 4, 3, 2, 1};
     
     int count = 0;
-    for (auto it = list.rbegin(); it != list.rend(); ++it) {
+    for (ArrayList<int>::reverse_iterator it = list.rbegin(); it != list.rend(); ++it) {
         EXPECT_EQ(*it, expected.get(count));
         count++;
     }
@@ -246,7 +246,7 @@ TEST(ArrayListTest, ConstReverseIteration) {
     
     ArrayList<int> expected{3, 2, 1};
     int count = 0;
-    for (auto it = clist.crbegin(); it != clist.crend(); ++it) {
+    for (ArrayList<int>::const_reverse_iterator it = clist.crbegin(); it != clist.crend(); ++it) {
         EXPECT_EQ(*it, expected.get(count));
         count++;
     }

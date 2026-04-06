@@ -99,14 +99,14 @@ TEST(LinkedListTest, BidirectionalIterator) {
     list.add(2);
     list.add(3);
 
-    auto it = list.begin();
+    LinkedList<int>::Iterator it = list.begin();
     EXPECT_EQ(*it, 1);
     ++it;
     EXPECT_EQ(*it, 2);
     --it;
     EXPECT_EQ(*it, 1);
 
-    auto it_end = list.end();
+    LinkedList<int>::Iterator it_end = list.end();
     --it_end;
     EXPECT_EQ(*it_end, 3);
 }
@@ -119,7 +119,7 @@ TEST(LinkedListTest, ReverseIteration) {
 
     int count = 0;
     int expected[] = {3, 2, 1};
-    for (auto it = list.rbegin(); it != list.rend(); ++it) {
+    for (LinkedList<int>::reverse_iterator it = list.rbegin(); it != list.rend(); ++it) {
         EXPECT_EQ(*it, expected[count++]);
     }
     EXPECT_EQ(count, 3);
@@ -134,7 +134,7 @@ TEST(LinkedListTest, ConstReverseIteration) {
     const LinkedList<int>& clist = list;
     int expected[] = {3, 2, 1};
     int count = 0;
-    for (auto it = clist.crbegin(); it != clist.crend(); ++it) {
+    for (LinkedList<int>::const_reverse_iterator it = clist.crbegin(); it != clist.crend(); ++it) {
         EXPECT_EQ(*it, expected[count++]);
     }
     EXPECT_EQ(count, 3);

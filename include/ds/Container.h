@@ -130,7 +130,7 @@ public:
 	 */
 	virtual R getElement(int i) {
 		int count = 0;
-		for (auto it = begin(); it != end(); ++it) {
+		for (Iterator it = begin(); it != end(); ++it) {
 			if (count == i) {
 				return *it;
 			}
@@ -146,7 +146,7 @@ public:
 	 */
 	virtual int find(const T& item) {
 		int index = 0;
-		for (auto it = begin(); it != end(); ++it) {
+		for (Iterator it = begin(); it != end(); ++it) {
 			if (compare(*it, item)) {
 				return index;
 			}

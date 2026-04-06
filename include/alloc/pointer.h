@@ -356,7 +356,7 @@ private:
 		sp_pointer_details_t* old = details;
 
 		size_t total = sizeof(sp_pointer_details_t) + sizeof(T);
-		auto* block = (sp_pointer_details_t*)operator new(total);
+		sp_pointer_details_t* block = (sp_pointer_details_t*)operator new(total);
 
 		block->refs.store(1, std::memory_order_relaxed);
 

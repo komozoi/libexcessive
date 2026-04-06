@@ -190,7 +190,7 @@ TEST(UnsignedFixedWidthBigIntTest, SignedDiv_PositiveByPositive) {
 	uint256_t a(10);
 	uint256_t b(2);
 
-	auto result = a.sdiv(b);
+	uint256_t result = a.sdiv(b);
 	EXPECT_EQ(result, uint256_t(5));
 }
 
@@ -198,7 +198,7 @@ TEST(UnsignedFixedWidthBigIntTest, SignedDiv_NegativeByPositive) {
 	uint256_t a = -uint256_t(10);
 	uint256_t b(2);
 
-	auto result = a.sdiv(b);
+	uint256_t result = a.sdiv(b);
 	EXPECT_EQ(result, -uint256_t(5));
 }
 
@@ -206,7 +206,7 @@ TEST(UnsignedFixedWidthBigIntTest, SignedDiv_PositiveByNegative) {
 	uint256_t a(10);
 	uint256_t b = -uint256_t(2);
 
-	auto result = a.sdiv(b);
+	uint256_t result = a.sdiv(b);
 	EXPECT_EQ(result, -uint256_t(5));
 }
 
@@ -214,7 +214,7 @@ TEST(UnsignedFixedWidthBigIntTest, SignedDiv_NegativeByNegative) {
 	uint256_t a = -uint256_t(10);
 	uint256_t b = -uint256_t(2);
 
-	auto result = a.sdiv(b);
+	uint256_t result = a.sdiv(b);
 	EXPECT_EQ(result, uint256_t(5));
 }
 
@@ -222,7 +222,7 @@ TEST(UnsignedFixedWidthBigIntTest, SignedMod_PositiveByPositive) {
 	uint256_t a(10);
 	uint256_t b(3);
 
-	auto result = a.smod(b);
+	uint256_t result = a.smod(b);
 	EXPECT_EQ(result, uint256_t(1));
 }
 
@@ -230,7 +230,7 @@ TEST(UnsignedFixedWidthBigIntTest, SignedMod_NegativeByPositive) {
 	uint256_t a = -uint256_t(10);
 	uint256_t b(3);
 
-	auto result = a.smod(b);
+	uint256_t result = a.smod(b);
 	EXPECT_EQ(result, -uint256_t(1));
 }
 
@@ -238,7 +238,7 @@ TEST(UnsignedFixedWidthBigIntTest, SignedMod_PositiveByNegative) {
 	uint256_t a(10);
 	uint256_t b = -uint256_t(3);
 
-	auto result = a.smod(b);
+	uint256_t result = a.smod(b);
 	EXPECT_EQ(result, uint256_t(1));
 }
 
@@ -246,7 +246,7 @@ TEST(UnsignedFixedWidthBigIntTest, SignedMod_NegativeByNegative) {
 	uint256_t a = -uint256_t(10);
 	uint256_t b = -uint256_t(3);
 
-	auto result = a.smod(b);
+	uint256_t result = a.smod(b);
 	EXPECT_EQ(result, -uint256_t(1));
 }
 
