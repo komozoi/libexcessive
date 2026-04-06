@@ -20,6 +20,7 @@
 #include "ds/HashSet.h"
 #include "ds/ArrayList.h"
 #include <algorithm>
+#include <string>
 
 TEST(HashSetTest, ConstructorCapacity) {
 	HashSet<int> s(10);
@@ -264,5 +265,23 @@ TEST(HashSetTest, ConstReverseIteration) {
         count++;
     }
     EXPECT_EQ(count, 3);
+}
+
+TEST(HashSetStringTest, AddAndContains) {
+	HashSet<std::string> set(10);
+	set.add("apple");
+	set.add("banana");
+
+	EXPECT_TRUE(set.contains("apple"));
+	EXPECT_TRUE(set.contains("banana"));
+	EXPECT_FALSE(set.contains("cherry"));
+}
+
+TEST(HashSetStringTest, Remove) {
+	HashSet<std::string> set(10);
+	set.add("apple");
+	EXPECT_TRUE(set.contains("apple"));
+	EXPECT_TRUE(set.remove("apple"));
+	EXPECT_FALSE(set.contains("apple"));
 }
 

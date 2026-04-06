@@ -429,7 +429,7 @@ private:
 	int locate(const K& key) const {
 		// This number is probably prime.  I designed it to distribute the bits of the key around for
 		// better key distribution.
-		uint32_t hashedKey = (uint32_t)(key * 7224373213449699941LU);
+		uint32_t hashedKey = (uint32_t)std::hash<K>{}(key);
 		int startIndex = (hashedKey % capacity);
 		int index = startIndex;
 		while (isPresent(index)) {

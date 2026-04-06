@@ -581,7 +581,7 @@ protected:
 	 */
 	template<class U>
 	int locate(const U& key) const {
-		uint32_t hashedKey = (uint32_t)(((uint64_t)key * 7224373213449699941LU) >> 32);
+		uint32_t hashedKey = (uint32_t)std::hash<K>{}(key);
 		int startIndex = (hashedKey % capacity);
 		int index = startIndex;
 

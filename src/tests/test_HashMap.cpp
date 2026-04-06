@@ -141,6 +141,26 @@ TEST(HashMapTest, AssignmentOperators) {
 	EXPECT_EQ(c.get(5), "five");
 }
 
+TEST(HashMapStringTest, PutAndGet) {
+	HashMap<std::string, int> map(10);
+	map.put("hello", 1);
+	map.put("world", 2);
+
+	EXPECT_EQ(map.get("hello"), 1);
+	EXPECT_EQ(map.get("world"), 2);
+	EXPECT_TRUE(map.hasKey("hello"));
+	EXPECT_TRUE(map.hasKey("world"));
+	EXPECT_FALSE(map.hasKey("notfound"));
+}
+
+TEST(HashMapStringTest, Overwrite) {
+	HashMap<std::string, int> map(10);
+	map.put("test", 100);
+	EXPECT_EQ(map.get("test"), 100);
+	map.put("test", 200);
+	EXPECT_EQ(map.get("test"), 200);
+}
+
 TEST(HashMapTest, PairKeyInsertAndRetrieve) {
 	HashMap<std::pair<int,int>, std::string> map(8);
 
@@ -266,14 +286,12 @@ TEST(HashMapDropTest, KeepsOrganization) {
     HashMap<int, int> map(4);
 
     // We need to find two keys k1, k2 such that (h(k1)%4) == (h(k2)%4)
-    // excessive_hash(int k) returns (uint64_t)k.
-    // hashedKey = (uint32_t)((k * 7224373213449699941LU) >> 32)
-
-    auto getIdx = [&](int k) {
-        uint64_t h = (uint64_t)k;
-        uint32_t hashedKey = (uint32_t)((h * 7224373213449699941LU) >> 32);
-        return hashedKey % 4;
-    };
+    struct GetIdx {
+        uint32_t operator()(int k) {
+            uint32_t hashedKey = (uint32_t)std::hash<int>{}(k);
+            return hashedKey % 4;
+        }
+    } getIdx;
 
     int k1 = 0, k2 = 0;
     bool found = false;
@@ -336,11 +354,12 @@ TEST(HashMapDropTest, AmountUsedCorrect) {
     HashMap<int, int> map(16);
     // Force some re-insertions by using keys that collide.
     // Capacity 16.
-    auto getIdx = [&](int k) {
-        uint64_t h = (uint64_t)k;
-        uint32_t hashedKey = (uint32_t)((h * 7224373213449699941LU) >> 32);
-        return hashedKey % 16;
-    };
+	struct GetIdx {
+		uint32_t operator()(int k) {
+			uint32_t hashedKey = (uint32_t)std::hash<int>{}(k);
+			return hashedKey % 16;
+		}
+	} getIdx;
 
     // Find keys that collide at same index
     ArrayList<int> keys;
