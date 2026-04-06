@@ -221,9 +221,9 @@ TEST(HashMapTest, ReverseIteration) {
 	std::reverse(forwardValues.begin(), forwardValues.end());
 
 	int count = 0;
-	for (HashMap<int, int>::reverse_iterator it = map.rbegin(); it != map.rend(); ++it) {
-		EXPECT_EQ((*it).key, forwardKeys.get(count));
-		EXPECT_EQ((*it).value, forwardValues.get(count));
+	for (MapElement<int, int> element: map.reverse()) {
+		EXPECT_EQ(element.key, forwardKeys.get(count));
+		EXPECT_EQ(element.value, forwardValues.get(count));
 		count++;
 	}
 	EXPECT_EQ(count, 3);
@@ -246,9 +246,9 @@ TEST(HashMapTest, ConstReverseIteration) {
 	std::reverse(forwardValues.begin(), forwardValues.end());
 
 	int count = 0;
-	for (HashMap<int, int>::const_reverse_iterator it = cmap.crbegin(); it != cmap.crend(); ++it) {
-		EXPECT_EQ((*it).key, forwardKeys.get(count));
-		EXPECT_EQ((*it).value, forwardValues.get(count));
+	for (const MapElement<int, int>& elem : cmap.reverse()) {
+		EXPECT_EQ(elem.key, forwardKeys.get(count));
+		EXPECT_EQ(elem.value, forwardValues.get(count));
 		count++;
 	}
 	EXPECT_EQ(count, 3);

@@ -119,8 +119,8 @@ TEST(LinkedListTest, ReverseIteration) {
 
 	int count = 0;
 	int expected[] = {3, 2, 1};
-	for (LinkedList<int>::reverse_iterator it = list.rbegin(); it != list.rend(); ++it) {
-		EXPECT_EQ(*it, expected[count++]);
+	for (int& val : list.reverse()) {
+		EXPECT_EQ(val, expected[count++]);
 	}
 	EXPECT_EQ(count, 3);
 }
@@ -134,8 +134,8 @@ TEST(LinkedListTest, ConstReverseIteration) {
 	const LinkedList<int>& clist = list;
 	int expected[] = {3, 2, 1};
 	int count = 0;
-	for (LinkedList<int>::const_reverse_iterator it = clist.crbegin(); it != clist.crend(); ++it) {
-		EXPECT_EQ(*it, expected[count++]);
+	for (const int& val : clist.reverse()) {
+		EXPECT_EQ(val, expected[count++]);
 	}
 	EXPECT_EQ(count, 3);
 }

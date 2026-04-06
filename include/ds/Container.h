@@ -110,6 +110,27 @@ public:
 	 */
 	const_reverse_iterator crend() const { return const_reverse_iterator(cbegin()); }
 
+	struct reverse_range {
+		Container& container;
+
+		reverse_iterator begin() { return container.rbegin(); }
+		reverse_iterator end() { return container.rend(); }
+		const_reverse_iterator cbegin() const { return container.crbegin(); }
+		const_reverse_iterator cend() const { return container.crend(); }
+	};
+
+	struct const_reverse_range {
+		const Container& container;
+
+		const_reverse_iterator begin() const { return container.rbegin(); }
+		const_reverse_iterator end() const { return container.rend(); }
+		const_reverse_iterator cbegin() const { return container.crbegin(); }
+		const_reverse_iterator cend() const { return container.crend(); }
+	};
+
+	const_reverse_range reverse() const { return const_reverse_range{*this}; }
+	reverse_range reverse() { return reverse_range{*this}; }
+
 	/**
 	 * @brief Returns the number of elements in the container.
 	 * @return Number of elements.

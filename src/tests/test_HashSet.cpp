@@ -238,8 +238,8 @@ TEST(HashSetTest, ReverseIteration) {
 	std::reverse(forward.begin(), forward.end());
 
 	int count = 0;
-	for (HashSet<int>::reverse_iterator it = set.rbegin(); it != set.rend(); ++it) {
-		EXPECT_EQ(*it, forward.get(count));
+	for (int& element: set.reverse()) {
+		EXPECT_EQ(element, forward.get(count));
 		count++;
 	}
 	EXPECT_EQ(count, 3);
@@ -260,8 +260,8 @@ TEST(HashSetTest, ConstReverseIteration) {
 	std::reverse(forward.begin(), forward.end());
 
 	int count = 0;
-	for (HashSet<int>::const_reverse_iterator it = cset.crbegin(); it != cset.crend(); ++it) {
-		EXPECT_EQ(*it, forward.get(count));
+	for (const int& element : cset.reverse()) {
+		EXPECT_EQ(element, forward.get(count));
 		count++;
 	}
 	EXPECT_EQ(count, 3);

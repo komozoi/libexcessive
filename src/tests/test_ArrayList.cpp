@@ -233,8 +233,8 @@ TEST(ArrayListTest, ReverseIteration) {
 	ArrayList<int> expected{5, 4, 3, 2, 1};
 
 	int count = 0;
-	for (ArrayList<int>::reverse_iterator it = list.rbegin(); it != list.rend(); ++it) {
-		EXPECT_EQ(*it, expected.get(count));
+	for (int element: list.reverse()) {
+		EXPECT_EQ(element, expected.get(count));
 		count++;
 	}
 	EXPECT_EQ(count, 5);
@@ -246,8 +246,8 @@ TEST(ArrayListTest, ConstReverseIteration) {
 
 	ArrayList<int> expected{3, 2, 1};
 	int count = 0;
-	for (ArrayList<int>::const_reverse_iterator it = clist.crbegin(); it != clist.crend(); ++it) {
-		EXPECT_EQ(*it, expected.get(count));
+	for (int element: clist.reverse()) {
+		EXPECT_EQ(element, expected.get(count));
 		count++;
 	}
 	EXPECT_EQ(count, 3);

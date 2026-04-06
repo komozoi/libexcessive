@@ -185,8 +185,8 @@ TEST(ArraySetTest, ReverseIteration) {
 	std::vector<int> expected{3, 2, 1};
 
 	int count = 0;
-	for (ArraySet<int>::reverse_iterator it = set.rbegin(); it != set.rend(); ++it) {
-		EXPECT_EQ(*it, expected[count]);
+	for (int element: set.reverse()) {
+		EXPECT_EQ(element, expected[count]);
 		count++;
 	}
 	EXPECT_EQ(count, 3);
@@ -199,8 +199,8 @@ TEST(ArraySetTest, ConstReverseIteration) {
 
 	ArrayList<int> expected{3, 2, 1};
 	int count = 0;
-	for (ArraySet<int>::const_reverse_iterator it = cset.crbegin(); it != cset.crend(); ++it) {
-		EXPECT_EQ(*it, expected.get(count));
+	for (int element: cset.reverse()) {
+		EXPECT_EQ(element, expected.get(count));
 		count++;
 	}
 	EXPECT_EQ(count, 3);
