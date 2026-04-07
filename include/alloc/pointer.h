@@ -32,7 +32,7 @@
  * standard shared ownership, unique ownership, and Copy-On-Write (COW) semantics.
  */
 enum SpPointerType {
-	UNIQUE,         /**< Sole owner of the object. Copying a UNIQUE pointer converts it and the copy to COPY_ON_WRITE. */
+	UNIQUE,         /**< Sole owner of the object. Copying a UNIQUE pointer creates a COPY_ON_WRITE copy; the original remains UNIQUE. */
 	SHARED,         /**< Standard shared ownership. Multiple pointers share the same object; mutations affect all. */
 	COPY_ON_WRITE,  /**< Sharing is permitted, but `mut()` will trigger a deep copy if other references exist. */
 	NULLPTR         /**< Represents an empty or null pointer. */
@@ -167,6 +167,17 @@ public:
 	}
 
 	/**
+	 * @brief Templated move constructor. Allows conversion from sp<U> to sp<T> if U* is convertible to T*.
+	 * @tparam U The type of the object managed by the source sp instance.
+	 * @param other The source sp instance.
+	 */
+	template<typename U, typename = typename std::enable_if<std::is_convertible<U*, T*>::value>::type>
+	sp(sp<U>&& other) noexcept : details((sp_pointer_details_t*)other.details), type(other.type) {
+		other.details = nullptr;
+		other.type = NULLPTR;
+	}
+
+	/**
 	 * @brief Move assignment operator. Transfers ownership without changing reference counts.
 	 * @param other The source `sp` instance.
 	 * @return Reference to this `sp` instance.
@@ -177,9 +188,25 @@ public:
 	}
 
 	/**
+	 * @brief Templated move assignment operator. Allows conversion from sp<U> to sp<T> if U* is convertible to T*.
+	 * @tparam U The type of the object managed by the source sp instance.
+	 * @param other The source sp instance.
+	 * @return Reference to this sp instance.
+	 */
+	template<typename U, typename = typename std::enable_if<std::is_convertible<U*, T*>::value>::type>
+	sp& operator=(sp<U>&& other) noexcept {
+		reset();
+		details = (sp_pointer_details_t*)other.details;
+		type = other.type;
+		other.details = nullptr;
+		other.type = NULLPTR;
+		return *this;
+	}
+
+	/**
 	 * @brief Copy constructor. Increments the reference count.
 	 *
-	 * If the source pointer is `UNIQUE`, both pointers become `COPY_ON_WRITE`.
+	 * If the source pointer is `UNIQUE`, the new copy becomes `COPY_ON_WRITE`.
 	 * @param other The source `sp` instance.
 	 */
 	sp(sp const& other) {
@@ -187,9 +214,19 @@ public:
 	}
 
 	/**
+	 * @brief Templated copy constructor. Allows conversion from sp<U> to sp<T> if U* is convertible to T*.
+	 * @tparam U The type of the object managed by the source sp instance.
+	 * @param other The source sp instance.
+	 */
+	template<typename U, typename = typename std::enable_if<std::is_convertible<U*, T*>::value>::type>
+	sp(sp<U> const& other) {
+		acquire_from_templated_copy(other);
+	}
+
+	/**
 	 * @brief Copy assignment operator. Increments the reference count and releases current ownership.
 	 *
-	 * If the source pointer is `UNIQUE`, both pointers become `COPY_ON_WRITE`.
+	 * If the source pointer is `UNIQUE`, the new copy becomes `COPY_ON_WRITE`.
 	 * @param other The source `sp` instance.
 	 * @return Reference to this `sp` instance.
 	 */
@@ -198,6 +235,19 @@ public:
 			reset();
 			acquire_from_copy(other);
 		}
+		return *this;
+	}
+
+	/**
+	 * @brief Templated copy assignment operator. Allows conversion from sp<U> to sp<T> if U* is convertible to T*.
+	 * @tparam U The type of the object managed by the source sp instance.
+	 * @param other The source sp instance.
+	 * @return Reference to this sp instance.
+	 */
+	template<typename U, typename = typename std::enable_if<std::is_convertible<U*, T*>::value>::type>
+	sp& operator=(sp<U> const& other) {
+		reset();
+		acquire_from_templated_copy(other);
 		return *this;
 	}
 
@@ -301,6 +351,9 @@ private:
 	 */
 	sp(sp_pointer_details_t* d, SpPointerType t) : details(d), type(t) {}
 
+	template<typename U>
+	friend class sp;
+
 	// ---------- Internals ----------
 
 	/**
@@ -314,7 +367,28 @@ private:
 			return;
 
 		if (other.type == UNIQUE) {
-			// UNIQUE copied -> becomes COW
+			// UNIQUE copied -> copy becomes COW, original stays UNIQUE
+			type = COPY_ON_WRITE;
+		} else
+			type = other.type;
+
+		details->refs.fetch_add(1, std::memory_order_relaxed);
+	}
+
+	/**
+	 * @brief Shared logic for templated copy construction and assignment.
+	 * Handles reference counting and type transitions.
+	 * @tparam U The type of the object managed by the source sp instance.
+	 * @param other The source sp instance.
+	 */
+	template<typename U>
+	void acquire_from_templated_copy(sp<U> const& other) {
+		details = (sp_pointer_details_t*)other.details;
+		if (!details)
+			return;
+
+		if (other.type == UNIQUE) {
+			// UNIQUE copied -> copy becomes COW, original stays UNIQUE
 			type = COPY_ON_WRITE;
 		} else
 			type = other.type;
