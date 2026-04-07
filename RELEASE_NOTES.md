@@ -1,4 +1,50 @@
-# Release Notes - v0.2.0 (Changes since v0.1.0)
+
+# Release Notes - v0.2.1
+
+This release was focused on ease of use and API improvements.  Some features were added but this was primarily
+to support API changes and upgrades.  There should be no breaking changes; only added conveniences and
+addition of features that should have been previously available.
+
+## New Features
+
+- **Polymorphic Smart Pointers**:
+    - Added templated move/copy constructors and assignment operators to `sp<T>`.
+    - Allows seamless conversion from `sp<Derived>` to `sp<Base>` while maintaining correct reference counting and ownership semantics.
+- **Enhanced C-String Support in Hash Containers**:
+    - Implemented specializations for `const char*` and `char*` keys in `HashMap` and `HashSet`.
+    - These containers now correctly hash and compare string content instead of pointer addresses.
+- **Improved Hash Support for std::string and other STL types**:
+    - `HashMap` and `HashSet` now natively support `std::string` as a key type, automatically leveraging `std::hash<std::string>`.
+    - Other STL types should also be supported by specializations of `std::hash<T>` for their key type.
+- **New Container Features**:
+    - Added `reverse()` method to `Container` interface, returning a reverse iterator for convenient backwards traversal.
+    - Standardized `Map` and `Set` APIs to use references where possible, improving performance and reducing unnecessary copying.
+- **New Hash Function**:
+    - Added an AVX2-accelerated `excessiveFastHash` for fast hashing without dependencies on compatible hardware.
+    - This hash is deliberately not randomized per run to keep hashes consistent across runs.
+
+## Improvements
+
+- **`sp<T>` Ownership Logic**:
+    - Refined `UNIQUE` pointer behavior: copying a `UNIQUE` pointer now correctly creates a `COPY_ON_WRITE` copy while the original remains `UNIQUE`.
+    - Updated documentation and comments in `pointer.h` to reflect these ownership transitions.
+    - This was the original intended behavior but there was some documentation confusion.
+- **Code Quality & Maintenance**:
+    - Removed most usages of the `auto` keyword in favor of explicit types to improve code clarity.
+    - Fixed a bug in `btree_node_t` where a default constructor was causing compiler ambiguity.
+    - Standardized indentation and code style across several test suites.
+
+## Testing
+
+- **New Hash Quality Suite**:
+    - Added comprehensive tests for `excessiveFastHash` validating:
+        - **Speed**: Processing 5MiB of data in under 12ms (achieving 0.7 GiB/s locally, 1.39 in CI).
+        - **Collision Resistance**: Zero collisions found across all 140,608 combinations of 3-letter strings.
+        - **Avalanche Effect**: Average bit difference exceeding 31 bits for both random mutations and single-bit changes.
+- **Smart Pointer Conversion Tests**:
+    - Added `SpConversionTest` to verify polymorphic assignments and move operations for `sp<T>`.
+
+# Release Notes - v0.2.0
 
 ## Breaking Changes
 
