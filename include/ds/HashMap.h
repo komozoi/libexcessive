@@ -24,6 +24,7 @@
 #include "alloc/Allocator.h"
 #include "Map.h"
 #include <new>
+#include "hash.h"
 
 
 /**
@@ -581,12 +582,12 @@ protected:
 	 */
 	template<class U>
 	int locate(const U& key) const {
-		uint32_t hashedKey = (uint32_t)std::hash<K>{}(key);
+		uint32_t hashedKey = (uint32_t)obviousHashFunction(key);
 		int startIndex = (hashedKey % capacity);
 		int index = startIndex;
 
 		while (isPresent(index)) {
-			if (keys[index] == key)
+			if (obviousCompareFunction(keys[index], key) == 0)
 				break;
 			index = (index + 1) % capacity;
 			if (index == startIndex)
@@ -604,8 +605,8 @@ protected:
 	 */
 	template<class A, class B>
 	int locate(const std::pair<A,B>& key) const {
-		uint32_t h1 = (uint32_t)(((uint64_t)key.first  * 7224373213449699941LU) >> 32);
-		uint32_t h2 = (uint32_t)(((uint64_t)key.second * 23428012901LU) >> 2);
+		uint32_t h1 = (uint32_t)((obviousHashFunction(key.first)  * 7224373213449699941LU) >> 32);
+		uint32_t h2 = (uint32_t)((obviousHashFunction(key.second) * 23428012901LU) >> 2);
 
 		uint32_t hashedKey = h1 ^ (h2 * 91);
 
@@ -613,7 +614,7 @@ protected:
 		int index = startIndex;
 
 		while (isPresent(index)) {
-			if (keys[index] == key)
+			if (obviousCompareFunction(keys[index], key) == 0)
 				break;
 			index = (index + 1) % capacity;
 			if (index == startIndex)

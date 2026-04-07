@@ -24,6 +24,7 @@
 #include "alloc/SlabAllocator.h"
 #include "ArrayList.h"
 #include "Set.h"
+#include "hash.h"
 
 
 template <class K>
@@ -429,16 +430,43 @@ private:
 	int locate(const K& key) const {
 		// This number is probably prime.  I designed it to distribute the bits of the key around for
 		// better key distribution.
-		uint32_t hashedKey = (uint32_t)std::hash<K>{}(key);
+		uint32_t hashedKey = (uint32_t)obviousHashFunction(key);
 		int startIndex = (hashedKey % capacity);
 		int index = startIndex;
 		while (isPresent(index)) {
-			if (keys[index] == key)
+			if (obviousCompareFunction(keys[index], key) == 0)
 				break;
 			index = (index + 1) % capacity;
 			if (index == startIndex)
 				return -1;
 		}
+		return index;
+	}
+
+	/**
+	 * @brief Locates the index for a key that is a std::pair.
+	 * @tparam A, B Types in the pair.
+	 * @param key The pair key to locate.
+	 * @return The index of the key, or -1 if not found.
+	 */
+	template<class A, class B>
+	int locate(const std::pair<A,B>& key) const {
+		uint32_t h1 = (uint32_t)((obviousHashFunction(key.first)  * 7224373213449699941LU) >> 32);
+		uint32_t h2 = (uint32_t)((obviousHashFunction(key.second) * 23428012901LU) >> 2);
+
+		uint32_t hashedKey = h1 ^ (h2 * 91);
+
+		int startIndex = (hashedKey % capacity);
+		int index = startIndex;
+
+		while (isPresent(index)) {
+			if (obviousCompareFunction(keys[index], key) == 0)
+				break;
+			index = (index + 1) % capacity;
+			if (index == startIndex)
+				return -1;
+		}
+
 		return index;
 	}
 

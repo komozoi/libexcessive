@@ -285,3 +285,20 @@ TEST(HashSetStringTest, Remove) {
 	EXPECT_FALSE(set.contains("apple"));
 }
 
+
+TEST(HashSetTest, ConstCharKey) {
+	HashSet<const char*> set(8);
+	const char* key1 = "apple";
+	char* key2_buf = (char*)malloc(6);
+	strcpy(key2_buf, "apple");
+	const char* key2 = key2_buf;
+
+	ASSERT_NE(key1, key2);
+	ASSERT_STREQ(key1, key2);
+
+	set.add(key1);
+	EXPECT_TRUE(set.contains(key1));
+	EXPECT_TRUE(set.contains(key2));
+
+	free(key2_buf);
+}

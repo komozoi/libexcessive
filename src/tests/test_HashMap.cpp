@@ -331,6 +331,30 @@ TEST(HashMapDropTest, KeepsOrganization) {
 	EXPECT_EQ(map.get(k2), 200);
 }
 
+TEST(HashMapTest, ConstCharKey) {
+	HashMap<const char*, int> map(8);
+	const char* key1 = "apple";
+	char* key2_buf = (char*)malloc(6);
+	strcpy(key2_buf, "apple");
+	const char* key2 = key2_buf;
+
+	// key1 and key2 have the same content but different addresses
+	ASSERT_NE(key1, key2);
+	ASSERT_STREQ(key1, key2);
+
+	map.put(key1, 100);
+
+	EXPECT_TRUE(map.hasKey(key1));
+	EXPECT_EQ(map.get(key1), 100);
+
+	// This is expected to fail if HashMap uses pointer equality and hashing
+	EXPECT_TRUE(map.hasKey(key2)) << "HashMap should find key by content, not pointer address";
+	if (map.hasKey(key2)) {
+		EXPECT_EQ(map.get(key2), 100);
+	}
+	free(key2_buf);
+}
+
 TEST(HashMapDropTest, DestructorCalled) {
 	DestructorCounter::count = 0;
 	{
