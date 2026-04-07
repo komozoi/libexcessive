@@ -20,7 +20,7 @@ include(FetchContent)
 FetchContent_Declare(
         excessive
         GIT_REPOSITORY https://gitea.com/komozoi/excessive.git
-        GIT_TAG v0.1.0
+        GIT_TAG v0.2.1
         GIT_SHALLOW TRUE
         GIT_PROGRESS ON
         SYSTEM
