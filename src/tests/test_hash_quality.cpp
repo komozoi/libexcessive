@@ -57,7 +57,7 @@ TEST(HashQualityTest, SpeedTest) {
 
 #endif
 
-TEST(HashQualityTest, ThreeLetterCollisions) {
+TEST(HashQualityTest, ThreeLetterCollisionsBlockHash) {
     HashSet<size_t> hashes(52 * 52 * 52 + 500);
     int collisions = 0;
     std::string letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -78,7 +78,28 @@ TEST(HashQualityTest, ThreeLetterCollisions) {
     EXPECT_LT(collisions, 15) << "Found too many collisions in 3-letter strings";
 }
 
-TEST(HashQualityTest, BitDiffTest) {
+TEST(HashQualityTest, ThreeLetterCollisionsStringHash) {
+    HashSet<size_t> hashes(52 * 52 * 52 + 500);
+    int collisions = 0;
+    std::string letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+    for (char c1 : letters) {
+        for (char c2 : letters) {
+            for (char c3 : letters) {
+                char s[8] = {c1, c2, c3, 0};
+                size_t h = obviousHashFunction((char*)s);
+                if (hashes.add(h)) {
+                    collisions++;
+                }
+            }
+        }
+    }
+
+    printf("[          ] Found %d collisions in %u 3-letter strings\n", collisions, (unsigned int)(52 * 52 * 52));
+    EXPECT_LT(collisions, 15) << "Found too many collisions in 3-letter strings";
+}
+
+TEST(HashQualityTest, BitDiffTestBlockHash) {
     const int numPairs = 100000;
     std::mt19937_64 rng(12345);
     std::uniform_int_distribution<uint64_t> distWord(0, (uint64_t)-1);
@@ -116,7 +137,7 @@ TEST(HashQualityTest, BitDiffTest) {
     EXPECT_GT(avgDiffBits, 24) << "Average bit difference too low";
 }
 
-TEST(HashQualityTest, SingleBitMutationDiffTest) {
+TEST(HashQualityTest, SingleBitMutationDiffTestBlockHash) {
     const int numPairs = 100000;
     std::mt19937_64 rng(54321);
     std::uniform_int_distribution<uint64_t> distWord(0, (uint64_t)-1);
@@ -150,4 +171,41 @@ TEST(HashQualityTest, SingleBitMutationDiffTest) {
     double avgDiffBits = static_cast<double>(totalDiffBits) / numPairs;
     printf("[          ] Average bit difference (single bit mutation): %.2f\n", avgDiffBits);
     EXPECT_GT(avgDiffBits, 24) << "Average bit difference too low for single bit mutation";
+}
+
+TEST(HashQualityTest, SingleBitMutationDiffTestStringHash) {
+    const int numPairs = 100000;
+    std::mt19937_64 rng(54321);
+    std::uniform_int_distribution<uint64_t> distWord(0, (uint64_t)-1);
+    std::uniform_int_distribution<size_t> distLen(1, 7); // in characters
+
+    long totalDiffBits = 0;
+
+    for (int i = 0; i < numPairs; ++i) {
+        size_t len = distLen(rng);
+        ArrayList<uint8_t> s1((int)len + 1);
+        for (size_t j = 0; j < len; ++j) s1.add(distWord(rng));
+        s1.add(0);
+
+        ArrayList<uint8_t> s2 = s1;
+
+        // mutate a single random bit
+        std::uniform_int_distribution<size_t> posDist(0, len - 1);
+        std::uniform_int_distribution<int> bitDist(0, 7);
+
+        size_t pos = posDist(rng);
+        int bit = bitDist(rng);
+
+        s2.set((int)pos, s2.get((int)pos) ^ (1 << bit));
+
+        size_t h1 = obviousHashFunction((char*)s1.getMemory());
+        size_t h2 = obviousHashFunction((char*)s2.getMemory());
+
+        size_t diff = h1 ^ h2;
+        totalDiffBits += std::bitset<64>(diff).count();
+    }
+
+    double avgDiffBits = static_cast<double>(totalDiffBits) / numPairs;
+    printf("[          ] Average bit difference (single bit mutation): %.2f\n", avgDiffBits);
+    EXPECT_GT(avgDiffBits, 4) << "Average bit difference too low for single bit mutation";
 }

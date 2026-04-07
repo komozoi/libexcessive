@@ -33,6 +33,7 @@ size_t obviousHashFunction(const T& value) {
 	return std::hash<T>{}(value);
 }
 
+size_t obviousHashFunction(char* value);
 size_t obviousHashFunction(const char* value);
 
 

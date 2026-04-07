@@ -55,13 +55,25 @@ size_t excessiveFastHash(const void* data, size_t size) {
 size_t obviousHashFunction(const char* value) {
 	size_t l = strlen(value);
 	size_t hash = excessiveFastHash(value, l / 8);
-	for (; *value; value++)
-		hash = (hash << 5) + hash * *value;
+	value = &value[l & ~7];
+	l &= 7;
+	if (l) {
+		for (int i = 0; i < 8; i++) {
+			// Add input
+			hash ^= value[i % l] * 0x9E3779B185EBCA87ULL;
 
+			// Mix bits in hash
+			hash ^= ((hash << 27) | (hash >> 37)) * 7224373213449699941LU;
+		}
+	}
+
+	// Final mixing
 	return hash ^ ((hash >> 17) * 0x165667B1U);
 }
 
-
+size_t obviousHashFunction(char* value) {
+	return obviousHashFunction((const char*)value);
+}
 
 int obviousCompareFunction(const char* a, const char* b) {
 	return strcmp(a, b);
