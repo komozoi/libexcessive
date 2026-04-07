@@ -58,11 +58,6 @@ struct btree_node_header_t {
  */
 template <class T, int N = 63>
 struct btree_node_t {
-	/**
-	 * @brief Default constructor for btree_node_t.
-	 */
-	btree_node_t() = default;
-
 	btree_node_header_t<N> header; /**< Node header containing metadata and child offsets. */
 	T elements[N];                 /**< Array of elements in the node. */
 };
