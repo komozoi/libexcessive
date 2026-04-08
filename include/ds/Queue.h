@@ -19,8 +19,118 @@
 #ifndef EXCESSIVE_QUEUE_H
 #define EXCESSIVE_QUEUE_H
 
+#include "Container.h"
 #include "alloc/SlabAllocator.h"
+#include <iterator>
 
+/**
+ * @brief Internal node structure for the queue.
+ */
+template <typename T>
+struct excessive_queue_element_t {
+	excessive_queue_element_t(const T& value, excessive_queue_element_t* previous, excessive_queue_element_t* next)
+	: previous(previous), next(next), value(value) {}
+
+	excessive_queue_element_t(T&& value, excessive_queue_element_t* previous, excessive_queue_element_t* next)
+		: previous(previous), next(next), value(value) {}
+
+	excessive_queue_element_t* previous;
+	excessive_queue_element_t* next;
+	T value;
+};
+
+/**
+ * @brief Iterator class for the queue.
+ */
+template <typename T>
+class QueueIterator {
+public:
+
+	using iterator_category = std::bidirectional_iterator_tag;
+	using value_type = T;
+	using difference_type = std::ptrdiff_t;
+	using pointer = T*;
+	using reference = T&;
+
+	QueueIterator(excessive_queue_element_t<T>* element) : current(element) {}
+
+	T& operator*() const { return current->value; }
+	T* operator->() { return &current->value; }
+
+	QueueIterator& operator++() {
+		if (current) current = current->next;
+		return *this;
+	}
+
+	QueueIterator operator++(int) {
+		QueueIterator tmp = *this;
+		++(*this);
+		return tmp;
+	}
+
+	QueueIterator& operator--() {
+		if (current) current = current->previous;
+		return *this;
+	}
+
+	QueueIterator operator--(int) {
+		QueueIterator tmp = *this;
+		--(*this);
+		return tmp;
+	}
+
+	bool operator==(const QueueIterator& other) const { return current == other.current; }
+	bool operator!=(const QueueIterator& other) const { return current != other.current; }
+
+private:
+	excessive_queue_element_t<T>* current;
+};
+
+/**
+ * @brief Constant iterator class for the queue.
+ */
+template <typename T>
+class QueueConstIterator {
+public:
+	using iterator_category = std::bidirectional_iterator_tag;
+	using value_type = const T;
+	using difference_type = std::ptrdiff_t;
+	using pointer = const T*;
+	using reference = const T&;
+
+	QueueConstIterator(const excessive_queue_element_t<T>* element) : current(element) {}
+
+	const T& operator*() const { return current->value; }
+	const T* operator->() const { return &current->value; }
+
+	QueueConstIterator& operator++() {
+		if (current) current = current->next;
+		return *this;
+	}
+
+	QueueConstIterator operator++(int) {
+		QueueConstIterator tmp = *this;
+		++(*this);
+		return tmp;
+	}
+
+	QueueConstIterator& operator--() {
+		if (current) current = current->previous;
+		return *this;
+	}
+
+	QueueConstIterator operator--(int) {
+		QueueConstIterator tmp = *this;
+		--(*this);
+		return tmp;
+	}
+
+	bool operator==(const QueueConstIterator& other) const { return current == other.current; }
+	bool operator!=(const QueueConstIterator& other) const { return current != other.current; }
+
+private:
+	const excessive_queue_element_t<T>* current;
+};
 
 /**
  * @brief A linked-list based queue implementation.
@@ -31,27 +141,16 @@
  * @tparam T The type of elements.
  */
 template <class T>
-class Queue {
-	/**
-	 * @brief Internal node structure for the queue.
-	 */
-	class QueueElement {
-	public:
-		/**
-		 * @brief Constructs a queue element.
-		 * @param value The value to store.
-		 * @param previous Pointer to the previous element.
-		 * @param next Pointer to the next element.
-		 */
-		QueueElement(T value, QueueElement* previous, QueueElement* next)
-			: value(value), previous(previous), next(next) {}
-
-		T value;
-		QueueElement* previous;
-		QueueElement* next;
-	};
-
+class Queue : public Container<T, T&, QueueIterator<T>, QueueConstIterator<T>> {
 public:
+
+	using Iterator = QueueIterator<T>;
+	using ConstIterator = QueueConstIterator<T>;
+
+	Iterator begin() override { return Iterator(first); }
+	Iterator end() override { return Iterator(nullptr); }
+	ConstIterator begin() const override { return ConstIterator(first); }
+	ConstIterator end() const override { return ConstIterator(nullptr); }
 
 	/**
 	 * @brief Constructs an empty queue.
@@ -63,7 +162,7 @@ public:
 	 * @param other The queue to copy from.
 	 */
 	Queue(const Queue& other) {
-		QueueElement* element = other.first;
+		excessive_queue_element_t<T>* element = other.first;
 		while (element) {
 			add(element->value);
 			element = element->next;
@@ -103,12 +202,12 @@ public:
 	 */
 	inline Queue& operator=(const Queue& rhs) {
 		if (&rhs != this) {
-			slab.freeAll();
+			allocator.freeAll();
 			n = 0;
 			first = nullptr;
 			last = nullptr;
 
-			QueueElement *element = rhs.first;
+			excessive_queue_element_t<T>* element = rhs.first;
 			while (element) {
 				add(element->value);
 				element = element->next;
@@ -123,7 +222,7 @@ public:
 	 * @param value The element to add.
 	 */
 	void add(const T& value) {
-		QueueElement* newLast = allocator.allocate(QueueElement(value, last, nullptr));
+		excessive_queue_element_t<T>* newLast = allocator.allocate(excessive_queue_element_t<T>(value, last, nullptr));
 		if (first == nullptr)
 			first = newLast;
 		else
@@ -137,7 +236,7 @@ public:
 	 * @param value The element to move into the queue.
 	 */
 	void add(T&& value) {
-		QueueElement* newLast = allocator.allocate(QueueElement(value, last, nullptr));
+		excessive_queue_element_t<T>* newLast = allocator.allocate(excessive_queue_element_t<T>(value, last, nullptr));
 		if (first == nullptr)
 			first = newLast;
 		else
@@ -166,7 +265,15 @@ public:
 	 * @brief Checks if the queue is empty.
 	 * @return true if empty, false otherwise.
 	 */
-	bool empty() {
+	bool empty() const {
+		return first == nullptr;
+	}
+
+	/**
+	 * @brief Checks if the queue is empty.
+	 * @return true if empty, false otherwise.
+	 */
+	bool isEmpty() const override {
 		return first == nullptr;
 	}
 
@@ -174,7 +281,7 @@ public:
 	 * @brief Returns the number of elements in the queue.
 	 * @return The size.
 	 */
-	int size() {
+	int size() const override {
 		return n;
 	}
 
@@ -184,7 +291,7 @@ public:
 	 */
 	T pop() {
 		T tmp = std::move(first->value);
-		QueueElement* oldFirst = first;
+		excessive_queue_element_t<T>* oldFirst = first;
 		first = first->next;
 		if (first)
 			first->previous = nullptr;
@@ -214,8 +321,8 @@ public:
 	/**
 	 * @brief Removes all elements from the queue.
 	 */
-	void clear() {
-		QueueElement* elem = first;
+	void clear() override {
+		excessive_queue_element_t<T>* elem = first;
 		while (elem) {
 			elem->value.~T();
 			elem = elem->next;
@@ -228,6 +335,7 @@ public:
 
 		first = nullptr;
 		last = nullptr;
+		n = 0;
 	}
 
 	~Queue() {
@@ -235,8 +343,8 @@ public:
 	}
 
 private:
-	QueueElement* first = nullptr;
-	QueueElement* last = nullptr;
+	excessive_queue_element_t<T>* first = nullptr;
+	excessive_queue_element_t<T>* last = nullptr;
 
 	int n = 0;
 
