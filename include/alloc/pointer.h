@@ -55,19 +55,49 @@ struct compressed_pointer_details {
 /**
  * @struct sp_pointer_details_t
  * @brief Internal control block for `sp<T>`, managing the reference count and object storage.
- *
- * This structure is allocated at the start of a single contiguous memory block that also
- * contains the managed object of type `T`.
  */
 struct sp_pointer_details_t {
 	std::atomic<uint32_t> refs; /**< Atomic reference counter. */
+
+	virtual ~sp_pointer_details_t() = default;
 
 	/**
 	 * @brief Returns a pointer to the managed object stored immediately after this control block.
 	 * @return A void pointer to the start of the object's memory.
 	 */
-	void* getPtr() {
-		return &this[1];
+	virtual void* getPtr() = 0;
+
+	/**
+	 * @brief Performs a deep copy of the managed object into a new control block.
+	 * @return A pointer to the new `sp_pointer_details_t`.
+	 */
+	virtual sp_pointer_details_t* copy() = 0;
+};
+
+/**
+ * @struct sp_pointer_details_concrete_t
+ * @brief Concrete implementation of `sp_pointer_details_t` for a specific type `U`.
+ * @tparam U The actual type of the managed object.
+ */
+template<typename U>
+struct sp_pointer_details_concrete_t : public sp_pointer_details_t {
+	U data;
+
+	template<typename... Args>
+	sp_pointer_details_concrete_t(Args&&... args) : data(std::forward<Args>(args)...) {
+		refs.store(1, std::memory_order_relaxed);
+	}
+
+	void* getPtr() override {
+		return &data;
+	}
+
+	sp_pointer_details_t* copy() override {
+		if constexpr (std::is_copy_constructible<U>::value) {
+			return new sp_pointer_details_concrete_t<U>(data);
+		} else {
+			return nullptr;
+		}
 	}
 };
 
@@ -104,12 +134,7 @@ public:
 	 */
 	template<typename... Args>
 	explicit sp(SpPointerType type, Args&&... args) : type(type) {
-		size_t total = sizeof(sp_pointer_details_t) + sizeof(T);
-		details = (sp_pointer_details_t*)operator new(total);
-
-		details->refs.store(1, std::memory_order_relaxed);
-
-		new (details->getPtr()) T(std::forward<Args>(args)...);
+		details = new sp_pointer_details_concrete_t<T>(std::forward<Args>(args)...);
 	}
 
 	/**
@@ -120,12 +145,7 @@ public:
 	 */
 	template<typename... Args>
 	static sp<T> create(Args&&... args) {
-		size_t total = sizeof(sp_pointer_details_t) + sizeof(T);
-		sp_pointer_details_t* block = (sp_pointer_details_t*)operator new(total);
-
-		block->refs.store(1, std::memory_order_relaxed);
-
-		new (block->getPtr()) T(std::forward<Args>(args)...);
+		sp_pointer_details_t* block = new sp_pointer_details_concrete_t<T>(std::forward<Args>(args)...);
 
 		return {block, UNIQUE};
 	}
@@ -137,12 +157,7 @@ public:
 	 */
 	template<typename U>
 	explicit sp(U&& value) : type(UNIQUE) {
-		size_t total = sizeof(sp_pointer_details_t) + sizeof(T);
-		details = (sp_pointer_details_t*)operator new(total);
-
-		details->refs.store(1, std::memory_order_relaxed);
-
-		new (details->getPtr()) T(std::forward<U>(value));
+		details = new sp_pointer_details_concrete_t<T>(std::forward<U>(value));
 	}
 
 	/**
@@ -150,12 +165,7 @@ public:
 	 * @param value The value to initialize the managed object with.
 	 */
 	explicit sp(const T& value) : type(UNIQUE) {
-		size_t total = sizeof(sp_pointer_details_t) + sizeof(T);
-		details = (sp_pointer_details_t*)operator new(total);
-
-		details->refs.store(1, std::memory_order_relaxed);
-
-		new (details->getPtr()) T(value);
+		details = new sp_pointer_details_concrete_t<T>(value);
 	}
 
 	/**
@@ -404,10 +414,7 @@ private:
 			return;
 
 		if (details->refs.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-			// destroy object
-			T* obj = (T*)details->getPtr();
-			obj->~T();
-			operator delete(details);
+			delete details;
 		}
 
 		details = nullptr;
@@ -429,21 +436,12 @@ private:
 		// Need deep copy
 		sp_pointer_details_t* old = details;
 
-		size_t total = sizeof(sp_pointer_details_t) + sizeof(T);
-		sp_pointer_details_t* block = (sp_pointer_details_t*)operator new(total);
-
-		block->refs.store(1, std::memory_order_relaxed);
-
-		new (block->getPtr()) T(*(T*)old->getPtr());
-
-		details = block;
+		details = old->copy();
 		type = SHARED;
 
 		// drop old ref
 		if (old->refs.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-			T* obj = (T*)old->getPtr();
-			obj->~T();
-			operator delete(old);
+			delete old;
 		}
 	}
 };

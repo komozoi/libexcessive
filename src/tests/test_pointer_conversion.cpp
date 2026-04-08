@@ -22,12 +22,15 @@
 
 class Base {
 public:
+    virtual int mutate() = 0;
+    virtual int getValue() const = 0;
+
     virtual ~Base() = default;
-    virtual int getValue() const { return 1; }
 };
 
 class Derived : public Base {
 public:
+    int mutate() override { return 1; }
     int getValue() const override { return 2; }
 };
 
@@ -48,6 +51,26 @@ TEST(SpConversionTest, derivedToBaseCopy) {
     EXPECT_TRUE(b);
     EXPECT_EQ(b->getValue(), 2);
     EXPECT_EQ(d->getValue(), 2);
+}
+
+TEST(SpConversionTest, derivedToBaseMoveWithMutation) {
+    sp<Derived> d = sp<Derived>::create();
+    EXPECT_TRUE(d);
+    sp<Base> b = std::move(d);
+    EXPECT_TRUE(b);
+    EXPECT_FALSE(d);
+    EXPECT_EQ(b->getValue(), 2);
+    EXPECT_EQ(b.mut().mutate(), 1);
+}
+
+TEST(SpConversionTest, derivedToBaseCopyWithMutation) {
+    sp<Derived> d = sp<Derived>::create();
+    EXPECT_TRUE(d);
+    sp<Base> b = d;
+    EXPECT_TRUE(b);
+    EXPECT_EQ(b->getValue(), 2);
+    EXPECT_EQ(d->getValue(), 2);
+    EXPECT_EQ(b.mut().mutate(), 1);
 }
 
 TEST(SpConversionTest, derivedToBaseAssignmentMove) {
