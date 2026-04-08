@@ -317,14 +317,17 @@ public:
 	}
 
 	/**
-	 * @brief Adds all elements from another HashSet.
-	 * @param other The source HashSet.
+	 * @brief Adds elements from another container.
+	 * @param container the source container
 	 */
-	void addFrom(const HashSet<K>& other) {
-		for (uint32_t i = 0; i < other.capacity; i++) {
-			if (other.isPresent(i))
-				add(other.keys[i]);
+	template<class U>
+	void addFrom(const U& container) {
+		unsigned int count = container.size();
+		if (amountUsed + count > capacity * 0.75) {
+			resize(capacity * 2 + count);
 		}
+		for (const K& key : container)
+			add(key);
 	}
 
 	bool contains(const K& key) const override {

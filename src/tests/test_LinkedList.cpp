@@ -139,3 +139,14 @@ TEST(LinkedListTest, ConstReverseIteration) {
 	}
 	EXPECT_EQ(count, 3);
 }
+
+TEST(LinkedListTest, AddManyGeneric) {
+	LinkedList<int> list;
+	ArrayList<int> alist{1, 2, 3};
+	list.addMany(alist);
+
+	EXPECT_EQ(list.size(), 3);
+	EXPECT_EQ(list.get(0), 1);
+	EXPECT_EQ(list.get(1), 2);
+	EXPECT_EQ(list.get(2), 3);
+}

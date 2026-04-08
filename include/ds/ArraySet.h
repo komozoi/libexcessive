@@ -76,31 +76,18 @@ public:
 	}
 
 	/**
-	 * @brief Adds all elements from an ArrayList.
-	 * @param list The source ArrayList.
+	 * @brief Adds elements from another container.
+	 * @param container the source container
 	 */
-	void addFrom(const ArrayList<T>& list) {
-		int count = list.size();
+	template<class U>
+	void addFrom(const U& container) {
+		int count = container.size();
 		if (length + count > allocated) {
 			allocated = allocated * 2 + (((count >> 4) + 1) << 4);
-			elements = (T*)realloc(elements, sizeof(T) * allocated);
+			elements = (T*)realloc((void*)elements, sizeof(T) * allocated);
 		}
-		for (int i = 0; i < count; i++)
-			addRaw(list.get(i));
-	}
-
-	/**
-	 * @brief Adds all elements from another ArraySet.
-	 * @param list The source ArraySet.
-	 */
-	void addFrom(const ArraySet<T>& list) {
-		int count = list.size();
-		if (length + count > allocated) {
-			allocated = allocated * 2 + (((count >> 4) + 1) << 4);
-			elements = (T*)realloc(elements, sizeof(T) * allocated);
-		}
-		for (int i = 0; i < count; i++)
-			addRaw(list.get(i));
+		for (const T& item : container)
+			addRaw(item);
 	}
 
 	bool contains(const T& query) const override {

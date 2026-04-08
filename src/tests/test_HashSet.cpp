@@ -99,6 +99,20 @@ TEST(HashSetTest, Clear) {
 	EXPECT_FALSE(s.contains(2));
 }
 
+TEST(HashSetTest, AddFromGeneric) {
+	HashSet<int> s(5);
+	ArrayList<int> list{1, 2, 3};
+	s.addFrom(list);
+	EXPECT_EQ(s.size(), 3);
+	EXPECT_TRUE(s.contains(1));
+	EXPECT_TRUE(s.contains(2));
+	EXPECT_TRUE(s.contains(3));
+
+	HashSet<int> s2(5);
+	s2.addFrom(s);
+	EXPECT_EQ(s2.size(), 3);
+}
+
 TEST(HashSetTest, CopyConstructor) {
 	HashSet<int> s1(5);
 	s1.add(1);

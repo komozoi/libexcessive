@@ -17,6 +17,7 @@
 
 
 #include <ds/ArrayList.h>
+#include <ds/LinkedList.h>
 #include <gtest/gtest.h>
 
 TEST(ArrayListTest, DefaultConstruction) {
@@ -78,6 +79,18 @@ TEST(ArrayListTest, AddManyArrayList) {
 	ArrayList<int> a{1,2};
 	ArrayList<int> b{3,4};
 	a.addMany(b);
+
+	ASSERT_EQ(a.size(), 4);
+	EXPECT_EQ(a.get(2), 3);
+	EXPECT_EQ(a.get(3), 4);
+}
+
+TEST(ArrayListTest, AddManyGeneric) {
+	ArrayList<int> a{1,2};
+	LinkedList<int> b;
+	b.add(3);
+	b.add(4);
+	a.addMany(b); // LinkedList to ArrayList
 
 	ASSERT_EQ(a.size(), 4);
 	EXPECT_EQ(a.get(2), 3);

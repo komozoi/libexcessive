@@ -248,18 +248,18 @@ public:
 	}
 
 	/**
-	 * @brief Adds all elements from another ArrayList.
-	 * @param list The source ArrayList.
+	 * @brief Adds all elements from another container.
+	 * @param container the source container
 	 */
-	void addMany(const ArrayList<T>& list) {
-		int count = list.size();
+	template<class U>
+	void addMany(const U& container) {
+		int count = container.size();
 		if (length + count > allocated) {
 			allocated = allocated * 2 + (((count >> 4) + 1) << 4);
 			elements = (T*)realloc((void*)elements, sizeof(T) * allocated);
 		}
-		for (int i = 0; i < count; i++)
-			new (&elements[length + i]) T(list.get(i));
-		length += count;
+		for (const T& item: container)
+			new (&elements[length++]) T(item);
 	}
 
 	/**

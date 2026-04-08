@@ -134,6 +134,20 @@ TEST(ArraySetTest, Clear) {
 	EXPECT_EQ(s.size(), 0);
 }
 
+TEST(ArraySetTest, AddFromGeneric) {
+	ArraySet<int> s;
+	ArrayList<int> list{1, 2, 3};
+	s.addFrom(list);
+	EXPECT_EQ(s.size(), 3);
+	EXPECT_EQ(s.get(0), 1);
+	EXPECT_EQ(s.get(1), 2);
+	EXPECT_EQ(s.get(2), 3);
+
+	ArraySet<int> s2;
+	s2.addFrom(s);
+	EXPECT_EQ(s2.size(), 3);
+}
+
 TEST(ArraySetTest, MinMax) {
 	ArraySet<int> s;
 	s.add(3);

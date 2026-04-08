@@ -246,6 +246,16 @@ public:
 	}
 
 	/**
+	 * @brief Adds all elements from another container.
+	 * @param container The source container.
+	 */
+	template<class U>
+	void addMany(const U& container) {
+		for (const T& item : container)
+			add(item);
+	}
+
+	/**
 	 * @brief Updates the value of the last element.
 	 * @param value New value for the last element.
 	 */

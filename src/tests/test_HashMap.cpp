@@ -107,6 +107,21 @@ TEST(HashMapTest, ClearMap) {
 	EXPECT_FALSE(map.hasKey(2));
 }
 
+TEST(HashMapTest, PutFromGeneric) {
+	ArrayList<MapElement<int, int>> list;
+	int k1 = 1, v1 = 10;
+	int k2 = 2, v2 = 20;
+	list.add({k1, v1});
+	list.add({k2, v2});
+
+	HashMap<int, int> map2(5);
+	map2.putFrom(list);
+
+	EXPECT_EQ(map2.size(), 2);
+	EXPECT_EQ(map2.get(1), 10);
+	EXPECT_EQ(map2.get(2), 20);
+}
+
 TEST(HashMapTest, CopyConstructor) {
 	HashMap<int, std::string> original(4);
 	original.put(10, "ten");

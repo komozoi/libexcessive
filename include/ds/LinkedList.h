@@ -281,6 +281,16 @@ public:
 	}
 
 	/**
+	 * @brief Adds all elements from another container.
+	 * @param container The source container.
+	 */
+	template<class U>
+	void addMany(const U& container) {
+		for (const T& item : container)
+			add(item);
+	}
+
+	/**
 	 * Adds an element to the start of the list
 	 * Time complexity: O(1)
 	 * Other effects: If the list is empty before calling this function, then the cursor will be set to the new element.
