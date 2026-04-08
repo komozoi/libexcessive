@@ -150,3 +150,67 @@ TEST(LinkedListTest, AddManyGeneric) {
 	EXPECT_EQ(list.get(1), 2);
 	EXPECT_EQ(list.get(2), 3);
 }
+
+TEST(LinkedListTest, CopyConstructor) {
+	LinkedList<int> list1;
+	list1.add(1);
+	list1.add(2);
+	list1.add(3);
+
+	LinkedList<int> list2 = list1;
+
+	EXPECT_EQ(list2.size(), 3);
+	EXPECT_EQ(list2.get(0), 1);
+	EXPECT_EQ(list2.get(1), 2);
+	EXPECT_EQ(list2.get(2), 3);
+
+	// Ensure deep copy
+	list1.set(0, 10);
+	EXPECT_EQ(list1.get(0), 10);
+	EXPECT_EQ(list2.get(0), 1);
+}
+
+TEST(LinkedListTest, MoveConstructor) {
+	LinkedList<int> list1;
+	list1.add(1);
+	list1.add(2);
+
+	LinkedList<int> list2 = std::move(list1);
+
+	EXPECT_EQ(list2.size(), 2);
+	EXPECT_EQ(list2.get(0), 1);
+	EXPECT_EQ(list2.get(1), 2);
+	EXPECT_EQ(list1.size(), 0);
+}
+
+TEST(LinkedListTest, CopyAssignment) {
+	LinkedList<int> list1;
+	list1.add(1);
+
+	LinkedList<int> list2;
+	list2.add(10);
+	list2.add(20);
+
+	list2 = list1;
+
+	EXPECT_EQ(list2.size(), 1);
+	EXPECT_EQ(list2.get(0), 1);
+
+	// Ensure deep copy
+	list1.set(0, 100);
+	EXPECT_EQ(list2.get(0), 1);
+}
+
+TEST(LinkedListTest, MoveAssignment) {
+	LinkedList<int> list1;
+	list1.add(1);
+
+	LinkedList<int> list2;
+	list2.add(10);
+
+	list2 = std::move(list1);
+
+	EXPECT_EQ(list2.size(), 1);
+	EXPECT_EQ(list2.get(0), 1);
+	EXPECT_EQ(list1.size(), 0);
+}

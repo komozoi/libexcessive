@@ -210,6 +210,26 @@ public:
 	}
 
 	/**
+	 * @brief Copy constructor for deep copying.
+	 * @param other The LinkedList to copy from.
+	 */
+	LinkedList(const LinkedList<T>& other) : length(0), first(nullptr), last(nullptr), cursor(nullptr) {
+		for (const T& item : other) {
+			add(item);
+		}
+	}
+
+	/**
+	 * @brief Move constructor.
+	 * @param other The LinkedList to move from.
+	 */
+	LinkedList(LinkedList<T>&& other) noexcept : length(other.length), first(other.first), last(other.last), cursor(other.cursor) {
+		other.length = 0;
+		other.first = other.last = other.cursor = nullptr;
+	}
+
+
+	/**
 	 * Loads the C array at src of size size.
 	 * Time Complexity: O(size)
 	 * Other effects: Cursor is set to the beginning of the list
@@ -234,6 +254,39 @@ public:
 			last->next = nullptr;
 		}
 		length = size;
+	}
+
+	/**
+	 * @brief Copy assignment operator.
+	 * @param other The LinkedList to copy from.
+	 * @return Reference to this LinkedList.
+	 */
+	LinkedList<T>& operator=(const LinkedList<T>& other) {
+		if (this != &other) {
+			clear();
+			for (const T& item : other) {
+				add(item);
+			}
+		}
+		return *this;
+	}
+
+	/**
+	 * @brief Move assignment operator.
+	 * @param other The LinkedList to move from.
+	 * @return Reference to this LinkedList.
+	 */
+	LinkedList<T>& operator=(LinkedList<T>&& other) noexcept {
+		if (this != &other) {
+			clear();
+			length = other.length;
+			first = other.first;
+			last = other.last;
+			cursor = other.cursor;
+			other.length = 0;
+			other.first = other.last = other.cursor = nullptr;
+		}
+		return *this;
 	}
 
 	/**
