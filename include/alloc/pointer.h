@@ -151,7 +151,7 @@ public:
 	}
 
 	/**
-	 * @brief Static factory method to create a new `UNIQUE` managed object.
+	 * @brief Static factory method to create a new `SHARED` managed object.
 	 * @tparam Args Variadic template for constructor arguments.
 	 * @param args Arguments for `T`'s constructor.
 	 * @return A new `sp<T>` instance managing the created object.
@@ -160,7 +160,7 @@ public:
 	static sp<T> create(Args&&... args) {
 		sp_pointer_details_t* block = new sp_pointer_details_concrete_t<T>(std::forward<Args>(args)...);
 
-		return {block, UNIQUE};
+		return {block, SHARED};
 	}
 
 	/**
