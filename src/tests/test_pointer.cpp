@@ -266,3 +266,48 @@ TEST(SpTest, StressTestComplexReferenceCounting) {
 
 	EXPECT_EQ(constructed, destroyed);
 }
+
+struct Collapsible {
+	bool collapsed;
+	Collapsible() : collapsed(false) {}
+	explicit Collapsible(const sp<Collapsible>&) : collapsed(true) {}
+};
+
+struct CollapsibleBase {
+	bool collapsed;
+	CollapsibleBase() : collapsed(false) {}
+	explicit CollapsibleBase(const sp<Collapsible>&) : collapsed(true) {}
+	virtual ~CollapsibleBase() = default;
+};
+
+struct CollapsibleDerived : public CollapsibleBase {
+	CollapsibleDerived() = default;
+};
+
+TEST(SpTest, DoesNotCollapseOnCopy) {
+	sp<Collapsible> a = sp<Collapsible>::create();
+	sp<Collapsible> b(a);
+
+	EXPECT_FALSE(b->collapsed) << "Constructor sp(U&&) was incorrectly used instead of copy constructor";
+}
+
+TEST(SpTest, DoesNotCollapseOnMove) {
+	sp<Collapsible> a = sp<Collapsible>::create();
+	sp<Collapsible> b(std::move(a));
+
+	EXPECT_FALSE(b->collapsed) << "Constructor sp(U&&) was incorrectly used instead of move constructor";
+}
+
+TEST(SpTest, DoesNotCollapseOnTemplatedCopy) {
+	sp<CollapsibleDerived> d = sp<CollapsibleDerived>::create();
+	sp<CollapsibleBase> b(d);
+
+	EXPECT_FALSE(b->collapsed) << "Constructor sp(U&&) was incorrectly used instead of templated copy constructor";
+}
+
+TEST(SpTest, DoesNotCollapseOnTemplatedMove) {
+	sp<CollapsibleDerived> d = sp<CollapsibleDerived>::create();
+	sp<CollapsibleBase> b(std::move(d));
+
+	EXPECT_FALSE(b->collapsed) << "Constructor sp(U&&) was incorrectly used instead of templated move constructor";
+}

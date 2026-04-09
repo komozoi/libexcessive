@@ -102,6 +102,19 @@ struct sp_pointer_details_concrete_t : public sp_pointer_details_t {
 };
 
 // Originally based on https://codereview.stackexchange.com/a/163857
+template<class T>
+class sp;
+
+/**
+ * @brief Trait to check if a type is a specialization of `sp`.
+ */
+template<typename T>
+struct is_sp : std::false_type {};
+
+template<typename T>
+struct is_sp<sp<T>> : std::true_type {};
+
+
 /**
  * @class sp
  * @tparam T The type of the object being managed.
@@ -155,7 +168,7 @@ public:
 	 * @tparam U Type of the value to be moved.
 	 * @param value The value to initialize the managed object with.
 	 */
-	template<typename U>
+	template<typename U, typename = typename std::enable_if<!is_sp<typename std::decay<U>::type>::value>::type>
 	explicit sp(U&& value) : type(UNIQUE) {
 		details = new sp_pointer_details_concrete_t<T>(std::forward<U>(value));
 	}
