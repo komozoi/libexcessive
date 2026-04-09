@@ -216,53 +216,53 @@ TEST(SpTest, StressTestComplexReferenceCounting) {
 	destroyed = 0;
 
 	{
-		// Block A - start as UNIQUE
+		// Initial state: Start with a UNIQUE pointer.
 		sp<Tracker> a(SpPointerType::UNIQUE);
 
-		// Copy UNIQUE, becomes COW (per current acquire_from_copy)
+		// Copy UNIQUE to another instance; results in Copy-On-Write (COW) semantics.
 		sp<Tracker> b = a;
 
-		// getWritableCopy(), another COW to same block
+		// Create another COW reference to the same memory block.
 		sp<Tracker> c = a.getWritableCopy();
 
-		// Inner scope with more aliases + mutations
+		// Inner scope to test alias management and mutation-triggered detaches.
 		{
-			sp<Tracker> d = c;                    // copy COW, another COW, refs=4 on block A
+			sp<Tracker> d = c;                    // Reference count increases on original block.
 
-			// Trigger COW detach on b (COW + shared)
-			b.mut();                              //, new block B, b becomes SHARED
+			// Mutate COW handle to trigger detachment into a new SHARED block.
+			b.mut();
 
-			// Trigger COW detach on c
-			c.mut();                              //, new block C, c becomes SHARED
+			// Mutate second handle, detaching it from the original.
+			c.mut();
 
-			// Trigger COW detach on d (still pointing at old block A)
-			d.mut();                              //, new block D, d becomes SHARED
+			// Mutate final alias to ensure the original block is properly handled.
+			d.mut();
 
-			// Now we have 4 independent blocks (A,B,C,D)
+			// All handles now manage independent or newly SHARED blocks.
 
-			// Move a SHARED pointer
-			sp<Tracker> e = std::move(c);         // e takes block C, c becomes null
+			// Transfer ownership of a SHARED pointer.
+			sp<Tracker> e = std::move(c);
 
-			// Copy a SHARED pointer
-			sp<Tracker> f = e;                    // refs on block C now 2
+			// Reference a SHARED block.
+			sp<Tracker> f = e;
 
-			// Mutate SHARED (no detach, just write)
+			// Perform an in-place mutation on a SHARED block.
 			f.mut();
 
-			// Reset while shared
-			e.reset();                            // drops one ref on block C
+			// Reset a SHARED handle.
+			e.reset();
 
-			// New independent UNIQUE + copy + mutate
+			// Create a new independent chain.
 			sp<Tracker> g(SpPointerType::UNIQUE);
 			sp<Tracker> h = g;
-			h.mut();                              // triggers detach, block E for h (SHARED)
+			h.mut();                              // Detach occurs.
 
-			// Cross-block assignment (releases old, acquires new)
-			b = h;                                // b releases block B, takes block E (now SHARED)
-		}  // d, e, f, g, h destruct here, should clean up blocks B, C (now 1), D, E
+			// Cross-block assignment: release old reference and acquire new.
+			b = h;
+		}  // Scope exit: cleanup of local handles and their associated blocks.
 
-		// Final releases of remaining pointers
-	}  // a, b destruct, block A and remaining block E
+		// Final destruction of top-level pointers.
+	}  // Automatic cleanup of remaining blocks.
 
 	EXPECT_EQ(constructed, destroyed);
 }

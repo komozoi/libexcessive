@@ -19,6 +19,7 @@
 #include "fs/FdHandle.h"
 
 #include <mutex>
+#include <atomic>
 #include <sys/poll.h>
 #include "fcntl.h"
 #include "unistd.h"
@@ -39,6 +40,7 @@ class FdHandleState {
 public:
 	DefaultAllocator allocator;
 	HashMap<int16_t, FdHandleData*>* fileDescriptors = nullptr;
+	std::mutex mutex;
 
 	Map<int16_t, FdHandleData*>* getFds() {
 		if (fileDescriptors == nullptr)
@@ -71,11 +73,7 @@ public:
 		refs--;
 		if (refs <= 0 && fd >= 0) {
 			state.getFds()->remove(fd);
-			if (slab.contains(this)) {
-				this->~FdHandleData();
-				slab.free(this);
-			} else
-				delete this;
+			destroy();
 		}
 	}
 
@@ -110,17 +108,19 @@ public:
 				newWrite->size += size;
 
 				writeQueue.setLast(newWrite);
+				return;
 			}
 		} else if (last && ((off_t)(where + size) == last->where)) {
 			// Merge them
 			queued_write_t* newWrite = (queued_write_t*)realloc(last, size + last->size + sizeof(queued_write_t));
 			if (newWrite) {
-				memmove(&newWrite->content[newWrite->size], newWrite->content, size);
+				memmove(&newWrite->content[size], newWrite->content, newWrite->size);
 				memcpy(newWrite->content, value, size);
 				newWrite->size += size;
 				newWrite->where = where;
 
 				writeQueue.setLast(newWrite);
+				return;
 			}
 		}
 
@@ -186,10 +186,17 @@ public:
 		}
 	}
 
-	// Writes all changes to disk, but does not execute any queued operations
+	/**
+	 * @brief Writes all pending changes to disk.
+	 * 
+	 * This method should be overridden by subclasses to provide specific 
+	 * synchronization logic (e.g., calling syncfs or fsync).
+	 */
 	virtual void sync() { }
 
-	// Executes all queued operations, then calls sync(), which writes changes to the disk.
+	/**
+	 * @brief Executes all queued operations and synchronizes changes to disk.
+	 */
 	void flush() {
 		flushWrites();
 		sync();
@@ -200,6 +207,14 @@ public:
 	virtual bool isStream() const { return false; }
 	virtual void markToClose() {}
 	virtual bool getShouldClose() const { return false; }
+
+	virtual void destroy() {
+		if (slab.contains(this)) {
+			this->~FdHandleData();
+			slab.free(this);
+		} else
+			delete this;
+	}
 
 	virtual ~FdHandleData() {
 		if (fd >= 0) {
@@ -217,7 +232,7 @@ public:
 	}
 
 private:
-	int refs;
+	std::atomic<int> refs;
 
 	Queue<queued_write_t*> writeQueue;
 };
@@ -377,12 +392,14 @@ FdHandle FdHandle::open(const char* path, int mode, int flag) {
 
 	if (fd != -1) {
 		FileHandleData* handleData = new FileHandleData(fd, isNew);
+		std::lock_guard<std::mutex> lock(state.mutex);
 		state.getFds()->put((int16_t) fd, handleData);
 	}
 	return FdHandle(fd);
 }
 
 FdHandle FdHandle::from(int fd) {
+	std::lock_guard<std::mutex> lock(state.mutex);
 	if (!state.getFds()->hasKey(fd)) {
 		SocketHandleData* handleData = new(slab.allocate<SocketHandleData>()) SocketHandleData(fd);
 		state.getFds()->put((int16_t) fd, handleData);
@@ -437,8 +454,11 @@ void FdHandle::flush() const {
 }
 
 void FdHandle::close() {
-	delete state.getFds()->remove(fd);
-	fd = -1;
+	if (fd >= 0) {
+		getHandleData(fd).markToClose();
+		getHandleData(fd).decRef();
+		fd = -1;
+	}
 }
 
 std::lock_guard<std::mutex> FdHandle::getLock() const {
@@ -511,7 +531,6 @@ int FdHandle::numReferences() const {
 
 FdTransaction::FdTransaction(const FdHandle& handle) : handleData(getHandleData(handle.getFd())) {
 	handleData.mutex.lock();
-	//handleData.flush();
 }
 
 ssize_t FdTransaction::write(const void* value, size_t size) const {
@@ -543,7 +562,6 @@ bool FdTransaction::isStream() const {
 }
 
 FdTransaction::~FdTransaction() {
-	//handleData.flush();
 	handleData.mutex.unlock();
 }
 
@@ -599,9 +617,8 @@ MmapHandle::~MmapHandle() {
 
 FdHandleState::~FdHandleState() {
 	if (fileDescriptors) {
-		for (int i = 0; i < fileDescriptors->getCapacity(); i++)
-			if (fileDescriptors->presentAtIndex(i))
-				delete fileDescriptors->valueAtIndex(i);
+		for (MapElement<int16_t, FdHandleData*> entry: *fileDescriptors)
+			entry.value->destroy();
 		delete fileDescriptors;
 	}
 }
