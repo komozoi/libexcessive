@@ -19,6 +19,33 @@
 #include <gtest/gtest.h>
 #include "ds/ArraySet.h"
 
+namespace {
+struct AddressTracker {
+	AddressTracker* self;
+	int value;
+	AddressTracker(int v = 0) : value(v) { self = this; }
+	AddressTracker(const AddressTracker& other) : value(other.value) { self = this; }
+	AddressTracker(AddressTracker&& other) noexcept : value(other.value) { self = this; }
+	AddressTracker& operator=(const AddressTracker& other) { value = other.value; self = this; return *this; }
+	AddressTracker& operator=(AddressTracker&& other) noexcept { value = other.value; self = this; return *this; }
+	bool isConsistent() const { return self == this; }
+	bool operator<(const AddressTracker& other) const { return value < other.value; }
+	bool operator==(const AddressTracker& other) const { return value == other.value; }
+};
+
+struct DestructionTracker {
+	static int destructedCount;
+	bool* destroyed;
+	DestructionTracker(bool* d = nullptr) : destroyed(d) {}
+	~DestructionTracker() {
+		if (destroyed) *destroyed = true;
+		destructedCount++;
+	}
+	bool operator<(const DestructionTracker& other) const { return this < &other; }
+	bool operator==(const DestructionTracker& other) const { return this == &other; }
+};
+int DestructionTracker::destructedCount = 0;
+}
 
 TEST(ArraySetTest, DefaultConstructor) {
 	ArraySet<int> s;
@@ -204,6 +231,50 @@ TEST(ArraySetTest, ReverseIteration) {
 		count++;
 	}
 	EXPECT_EQ(count, 3);
+}
+
+TEST(ArraySetTest, CopyConstructor) {
+	ArraySet<int> s1;
+	s1.add(1);
+	s1.add(2);
+	ArraySet<int> s2 = s1;
+	EXPECT_EQ(s2.size(), 2);
+	EXPECT_EQ(s2.get(0), 1);
+	EXPECT_EQ(s2.get(1), 2);
+	s1.add(3);
+	EXPECT_EQ(s1.size(), 3);
+	EXPECT_EQ(s2.size(), 2);
+}
+
+TEST(ArraySetTest, MoveConstructor) {
+	ArraySet<int> s1;
+	s1.add(1);
+	ArraySet<int> s2 = std::move(s1);
+	EXPECT_EQ(s2.size(), 1);
+	EXPECT_EQ(s2.get(0), 1);
+	EXPECT_EQ(s1.size(), 0);
+}
+
+TEST(ArraySetTest, ReallocInconsistent) {
+	ArraySet<AddressTracker> set;
+	for (int i = 0; i < 100; ++i) {
+		set.add(AddressTracker(i));
+	}
+	for (int i = 0; i < set.size(); ++i) {
+		ASSERT_TRUE(set.get(i).isConsistent()) << "Element at index " << i << " was moved incorrectly";
+	}
+}
+
+TEST(ArraySetTest, ResizeNoDestructor) {
+	DestructionTracker::destructedCount = 0;
+	{
+		ArraySet<DestructionTracker> set;
+		set.add(DestructionTracker());
+		set.add(DestructionTracker());
+		DestructionTracker::destructedCount = 0;
+		set.clear();
+		EXPECT_EQ(DestructionTracker::destructedCount, 2);
+	}
 }
 
 TEST(ArraySetTest, ConstReverseIteration) {

@@ -19,6 +19,9 @@
 #ifndef EXCESSIVE_ARRAYSET_H
 #define EXCESSIVE_ARRAYSET_H
 
+#include <new>
+#include <utility>
+#include <type_traits>
 #include "ArrayList.h"
 #include "Set.h"
 
@@ -55,6 +58,68 @@ public:
 	}
 
 	/**
+	 * @brief Copy constructor.
+	 * @param other The ArraySet to copy from.
+	 */
+	ArraySet(const ArraySet<T>& other) {
+		allocated = other.allocated;
+		length = other.length;
+		elements = (T*)malloc(sizeof(T) * allocated);
+		for (int i = 0; i < length; i++)
+			new (&elements[i]) T(other.elements[i]);
+	}
+
+	/**
+	 * @brief Move constructor.
+	 * @param other The ArraySet to move from.
+	 */
+	ArraySet(ArraySet<T>&& other) noexcept {
+		allocated = other.allocated;
+		length = other.length;
+		elements = other.elements;
+		other.allocated = 0;
+		other.length = 0;
+		other.elements = nullptr;
+	}
+
+	/**
+	 * @brief Copy assignment operator.
+	 * @param other The ArraySet to copy from.
+	 * @return Reference to this ArraySet.
+	 */
+	ArraySet<T>& operator=(const ArraySet<T>& other) {
+		if (this != &other) {
+			clear();
+			free(elements);
+			allocated = other.allocated;
+			length = other.length;
+			elements = (T*)malloc(sizeof(T) * allocated);
+			for (int i = 0; i < length; i++)
+				new (&elements[i]) T(other.elements[i]);
+		}
+		return *this;
+	}
+
+	/**
+	 * @brief Move assignment operator.
+	 * @param other The ArraySet to move from.
+	 * @return Reference to this ArraySet.
+	 */
+	ArraySet<T>& operator=(ArraySet<T>&& other) noexcept {
+		if (this != &other) {
+			clear();
+			free(elements);
+			allocated = other.allocated;
+			length = other.length;
+			elements = other.elements;
+			other.allocated = 0;
+			other.length = 0;
+			other.elements = nullptr;
+		}
+		return *this;
+	}
+
+	/**
 	 * @brief Constructs an ArraySet from a raw array.
 	 * @param src Pointer to the source array.
 	 * @param size Number of elements to add.
@@ -68,9 +133,9 @@ public:
 
 	bool add(const T& item) override {
 		if (length == allocated) {
-			allocated *= 2;
-			if (allocated == 0) allocated = 8;
-			elements = (T*)realloc((void*)elements, sizeof(T) * allocated);
+			int newAllocated = allocated * 2;
+			if (newAllocated == 0) newAllocated = 8;
+			prepare(newAllocated);
 		}
 		return addRaw(item);
 	}
@@ -83,8 +148,8 @@ public:
 	void addFrom(const U& container) {
 		int count = container.size();
 		if (length + count > allocated) {
-			allocated = allocated * 2 + (((count >> 4) + 1) << 4);
-			elements = (T*)realloc((void*)elements, sizeof(T) * allocated);
+			int newAllocated = allocated * 2 + (((count >> 4) + 1) << 4);
+			prepare(newAllocated);
 		}
 		for (const T& item : container)
 			addRaw(item);
@@ -99,7 +164,9 @@ public:
 	 * @return The removed element.
 	 */
 	T pop() {
-		return elements[--length];
+		T result = std::move(elements[--length]);
+		elements[length].~T();
+		return result;
 	}
 
 	bool remove(const T& key) override {
@@ -115,7 +182,16 @@ public:
 	 * @param i Index of the element to remove.
 	 */
 	void removeAt(int i) {
-		memmove(&elements[i], &elements[i + 1], sizeof(T) * (--length - i));
+		if constexpr (std::is_trivially_copyable<T>::value) {
+			memmove(&elements[i], &elements[i + 1], sizeof(T) * (--length - i));
+		} else {
+			elements[i].~T();
+			for (int j = i; j < length - 1; j++) {
+				new(&elements[j]) T(std::move(elements[j + 1]));
+				elements[j + 1].~T();
+			}
+			length--;
+		}
 	}
 
 	/**
@@ -152,8 +228,13 @@ public:
 	 */
 	bool prepare(int size) {
 		if (size > allocated) {
-			T* newElements = (T*)realloc(elements, sizeof(T) * (size_t)size);
+			T* newElements = (T*)malloc(sizeof(T) * (size_t)size);
 			if (newElements) {
+				for (int i = 0; i < length; i++) {
+					new (&newElements[i]) T(std::move(elements[i]));
+					elements[i].~T();
+				}
+				free(elements);
 				allocated = size;
 				elements = newElements;
 			} else
@@ -190,9 +271,16 @@ public:
 	const T* end() const override { return &(elements[length]); }
 
 
-	~ArraySet() override { free(elements); }
+	~ArraySet() override {
+		clear();
+		free(elements);
+	}
 
-	inline void clear() override { length = 0; }
+	inline void clear() override {
+		for (int i = 0; i < length; i++)
+			elements[i].~T();
+		length = 0;
+	}
 
 	/**
 	 * @brief Returns the maximum element in the set.
@@ -222,9 +310,16 @@ private:
 		if (insertionIndex < length) {
 			if (elements[insertionIndex] == item)
 				return true;
-			memmove(&elements[insertionIndex + 1], &elements[insertionIndex], sizeof(T) * (length - insertionIndex));
+			if constexpr (std::is_trivially_copyable<T>::value) {
+				memmove(&elements[insertionIndex + 1], &elements[insertionIndex], sizeof(T) * (length - insertionIndex));
+			} else {
+				for (int i = length; i > insertionIndex; i--) {
+					new(&elements[i]) T(std::move(elements[i - 1]));
+					elements[i - 1].~T();
+				}
+			}
 		}
-		elements[insertionIndex] = item;
+		new(&elements[insertionIndex]) T(item);
 		length++;
 
 		return false;

@@ -20,6 +20,8 @@
 #define EXCESSIVE_SHORTQUEUE_H
 
 #include "stdlib.h"
+#include <new>
+#include <utility>
 
 
 /**
@@ -44,6 +46,65 @@ public:
 	}
 
 	/**
+	 * @brief Copy constructor.
+	 * @param other The ShortQueue to copy from.
+	 */
+	ShortQueue(const ShortQueue<T, P>& other) : count(other.count), numUsed(other.numUsed) {
+		elements = (element_t*)malloc(sizeof(element_t) * count);
+		for (int i = 0; i < numUsed; i++)
+			new (&elements[i]) element_t(other.elements[i]);
+	}
+
+	/**
+	 * @brief Move constructor.
+	 * @param other The ShortQueue to move from.
+	 */
+	ShortQueue(ShortQueue<T, P>&& other) noexcept : count(other.count), numUsed(other.numUsed), elements(other.elements) {
+		other.numUsed = 0;
+		other.count = 0;
+		other.elements = nullptr;
+	}
+
+	/**
+	 * @brief Copy assignment operator.
+	 * @param other The ShortQueue to copy from.
+	 * @return Reference to this queue.
+	 */
+	ShortQueue<T, P>& operator=(const ShortQueue<T, P>& other) {
+		if (this != &other) {
+			for (int i = 0; i < numUsed; i++)
+				elements[i].~element_t();
+			free(elements);
+			count = other.count;
+			numUsed = other.numUsed;
+			elements = (element_t*)malloc(sizeof(element_t) * count);
+			for (int i = 0; i < numUsed; i++)
+				new (&elements[i]) element_t(other.elements[i]);
+		}
+		return *this;
+	}
+
+	/**
+	 * @brief Move assignment operator.
+	 * @param other The ShortQueue to move from.
+	 * @return Reference to this queue.
+	 */
+	ShortQueue<T, P>& operator=(ShortQueue<T, P>&& other) noexcept {
+		if (this != &other) {
+			for (int i = 0; i < numUsed; i++)
+				elements[i].~element_t();
+			free(elements);
+			count = other.count;
+			numUsed = other.numUsed;
+			elements = other.elements;
+			other.numUsed = 0;
+			other.count = 0;
+			other.elements = nullptr;
+		}
+		return *this;
+	}
+
+	/**
 	 * @brief Inserts an element with the given priority.
 	 * @param value The value to insert.
 	 * @param priority The priority associated with the value.
@@ -54,6 +115,7 @@ public:
 			// If the new priority is lower (better) than the highest priority (last element), insert
 			if (priority < elements[numUsed - 1].priority) {
 				// Remove the last (highest priority) element
+				elements[numUsed - 1].~element_t();
 				numUsed--;
 			} else {
 				// Do nothing because the new item is worse than any in the queue
@@ -63,14 +125,17 @@ public:
 
 		// Find the insert position (keep sorted from lowest to highest priority)
 		int i = numUsed - 1;
-		while (i >= 0 && elements[i].priority > priority) {
-			elements[i + 1] = std::move(elements[i]);  // Shift right
+		if (i >= 0 && elements[i].priority > priority) {
+			new (&elements[i + 1]) element_t(std::move(elements[i])); // Start by shifting the last element into uninitialized memory
 			--i;
+			while (i >= 0 && elements[i].priority > priority) {
+				elements[i + 1] = std::move(elements[i]);  // Shift right (already initialized)
+				--i;
+			}
+			elements[i + 1] = {value, priority};
+		} else {
+			new (&elements[numUsed]) element_t{value, priority};
 		}
-
-		// Insert the new element
-		elements[i + 1].value = value;
-		elements[i + 1].priority = priority;
 
 		++numUsed;
 	}
@@ -148,11 +213,13 @@ public:
 		if (numUsed == 0)
 			return T();
 
-		T out = elements[0].value;
+		T out = std::move(elements[0].value);
 
 		numUsed--;
 		for (int i = 0; i < numUsed; i++)
 			elements[i] = std::move(elements[i + 1]);
+
+		elements[numUsed].~element_t();
 
 		return out;
 	}
@@ -168,12 +235,14 @@ public:
 			return false;
 
 		element_t& tmp = elements[0];
-		*valOut = tmp.value;
-		*priorityOut = tmp.priority;
+		*valOut = std::move(tmp.value);
+		*priorityOut = std::move(tmp.priority);
 
 		numUsed--;
 		for (int i = 0; i < numUsed; i++)
 			elements[i] = std::move(elements[i + 1]);
+
+		elements[numUsed].~element_t();
 
 		return true;
 	}
@@ -205,6 +274,26 @@ private:
 	struct element_t {
 		T value;
 		P priority;
+
+		element_t() : value(), priority() {}
+		element_t(const T& v, const P& p) : value(v), priority(p) {}
+		element_t(T&& v, P&& p) : value(std::move(v)), priority(std::move(p)) {}
+		element_t(const element_t& other) : value(other.value), priority(other.priority) {}
+		element_t(element_t&& other) noexcept : value(std::move(other.value)), priority(std::move(other.priority)) {}
+		element_t& operator=(const element_t& other) {
+			if (this != &other) {
+				value = other.value;
+				priority = other.priority;
+			}
+			return *this;
+		}
+		element_t& operator=(element_t&& other) noexcept {
+			if (this != &other) {
+				value = std::move(other.value);
+				priority = std::move(other.priority);
+			}
+			return *this;
+		}
 	};
 
 	int count, numUsed;

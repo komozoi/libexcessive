@@ -155,29 +155,32 @@ public:
 	/**
 	 * @brief Constructs an empty queue.
 	 */
-	Queue() {}
+	Queue() {
+		allocator = new SlabAllocator();
+	}
 
 	/**
 	 * @brief Copy constructor.
 	 * @param other The queue to copy from.
 	 */
 	Queue(const Queue& other) {
-		excessive_queue_element_t<T>* element = other.first;
+		allocator = new SlabAllocator();
+		excessive_queue_element_t<T>* element = allocator->allocate(*other.first);
 		while (element) {
 			add(element->value);
 			element = element->next;
 		}
 	}
 
-	// Currently we cannot move() a SlabAllocator safely.
-	/*Queue(Queue&& other) noexcept : allocator(std::move(other.allocator)) {
+	Queue(Queue&& other) noexcept : allocator(other.allocator) {
 		first = other.first;
 		last = other.last;
 		n = other.n;
 		other.first = nullptr;
 		other.last = nullptr;
 		other.n = 0;
-	}*/
+		other.allocator = nullptr;
+	}
 
 	/**
 	 * @brief Constructs a queue with one element.
@@ -202,7 +205,7 @@ public:
 	 */
 	inline Queue& operator=(const Queue& rhs) {
 		if (&rhs != this) {
-			allocator.freeAll();
+			allocator->freeAll();
 			n = 0;
 			first = nullptr;
 			last = nullptr;
@@ -222,7 +225,7 @@ public:
 	 * @param value The element to add.
 	 */
 	void add(const T& value) {
-		excessive_queue_element_t<T>* newLast = allocator.allocate(excessive_queue_element_t<T>(value, last, nullptr));
+		excessive_queue_element_t<T>* newLast = allocator->allocate(excessive_queue_element_t<T>(value, last, nullptr));
 		if (first == nullptr)
 			first = newLast;
 		else
@@ -236,7 +239,7 @@ public:
 	 * @param value The element to move into the queue.
 	 */
 	void add(T&& value) {
-		excessive_queue_element_t<T>* newLast = allocator.allocate(excessive_queue_element_t<T>(value, last, nullptr));
+		excessive_queue_element_t<T>* newLast = allocator->allocate(excessive_queue_element_t<T>(value, last, nullptr));
 		if (first == nullptr)
 			first = newLast;
 		else
@@ -307,7 +310,7 @@ public:
 			first->previous = nullptr;
 		else
 			last = nullptr;
-		allocator.free(oldFirst);
+		allocator->free(oldFirst);
 		n--;
 		return tmp;
 	}
@@ -341,15 +344,17 @@ public:
 		// Although it will do this on its own, the deconstructor throws warnings if it
 		// thinks there are memory leaks.  We do this so the slab knows that the memory
 		// is no longer needed, and that deleting all of it is intentional.
-		allocator.freeAll();
+		if (allocator)
+			allocator->freeAll();
 
 		first = nullptr;
 		last = nullptr;
 		n = 0;
 	}
 
-	~Queue() {
-		clear();
+	~Queue() override {
+		Queue<T>::clear();
+		delete allocator;
 	}
 
 private:
@@ -360,7 +365,7 @@ private:
 
 	// This just makes the datastructure faster + more memory efficient, as long as the queue is large enough.
 	// For small queues the burden is low.
-	SlabAllocator allocator;
+	SlabAllocator* allocator;
 };
 
 

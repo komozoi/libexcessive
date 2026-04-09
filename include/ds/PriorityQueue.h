@@ -20,6 +20,7 @@
 #define EXCESSIVE_PRIORITYQUEUE_H
 
 #include <climits>
+#include <utility>
 
 /**
  * @brief A fixed-capacity priority queue.
@@ -44,16 +45,16 @@ public:
 	 */
 	void add(const T& item, int priority) {
 		if (size == capacity) {
-			if (priority < lowestPriority)
+			if (priority <= lowestPriority)
 				return;
 			int last = lastIndex();
-			if (last > priority)
-				return;
 			content[last] = item;
 			priorities[last] = priority;
 			recomputeLowestPriority(-1);
 		} else {
-			content[size++] = item;
+			int idx = size++;
+			content[idx] = item;
+			priorities[idx] = priority;
 			if (priority < lowestPriority)
 				lowestPriority = priority;
 		}
@@ -79,7 +80,7 @@ public:
 	 * Removes and returns the first item in the queue
 	 * @return the item that was first in the queue
 	 */
-	T& read() {
+	T read() {
 		return remove(firstIndex());
 	}
 
@@ -87,7 +88,7 @@ public:
 	 * Removes and returns the last item in the queue
 	 * @return the item that was last in the queue
 	 */
-	T& pop() {
+	T pop() {
 		return remove(lastIndex());
 	}
 
@@ -96,12 +97,12 @@ public:
 	 * @param i Internal index.
 	 * @return The removed element.
 	 */
-	T& remove(int i) {
-		T& old = content[i];
+	T remove(int i) {
+		T old = std::move(content[i]);
 		if (priorities[i] == lowestPriority) {
 			recomputeLowestPriority(i);
 		}
-		content[i] = content[--size];
+		content[i] = std::move(content[--size]);
 		priorities[i] = priorities[size];
 		return old;
 	}

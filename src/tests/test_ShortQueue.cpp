@@ -17,9 +17,53 @@
 
 
 #include "gtest/gtest.h"
-
 #include "ds/ShortQueue.h"
 
+namespace {
+struct DestructionTracker {
+	static int destructedCount;
+	bool* destroyed;
+	DestructionTracker(bool* d = nullptr) : destroyed(d) {}
+	~DestructionTracker() {
+		if (destroyed) *destroyed = true;
+		destructedCount++;
+	}
+};
+int DestructionTracker::destructedCount = 0;
+}
+
+TEST(ShortQueue, CopyConstructor) {
+	ShortQueue<int, int> q1(10);
+	q1.insert(1, 1);
+	q1.insert(2, 2);
+	ShortQueue<int, int> q2 = q1;
+	EXPECT_EQ(q2.size(), 2);
+	EXPECT_EQ(q2.deleteMin(), 1);
+	EXPECT_EQ(q2.deleteMin(), 2);
+	EXPECT_EQ(q1.size(), 2);
+}
+
+TEST(ShortQueue, MoveConstructor) {
+	ShortQueue<int, int> q1(10);
+	q1.insert(1, 1);
+	ShortQueue<int, int> q2 = std::move(q1);
+	EXPECT_EQ(q2.size(), 1);
+	EXPECT_EQ(q2.deleteMin(), 1);
+	EXPECT_EQ(q1.size(), 0);
+}
+
+TEST(ShortQueue, DestructorCalls) {
+	DestructionTracker::destructedCount = 0;
+	{
+		ShortQueue<DestructionTracker, int> q(10);
+		bool d1 = false, d2 = false;
+		q.insert(DestructionTracker(&d1), 1);
+		q.insert(DestructionTracker(&d2), 2);
+		DestructionTracker::destructedCount = 0;
+	}
+	// 2 elements in queue should be destroyed
+	EXPECT_EQ(DestructionTracker::destructedCount, 2);
+}
 
 TEST(ShortQueue, InsertMaintainsSortedOrder) {
 	ShortQueue<const char*, int> q(5);
