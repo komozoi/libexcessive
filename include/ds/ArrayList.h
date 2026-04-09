@@ -27,6 +27,7 @@
 #include <string>
 #include <cmath>
 #include <utility>
+#include <type_traits>
 #include "Range.h"
 #include "MonkeyIterator.h"
 #include "Container.h"
@@ -188,9 +189,7 @@ public:
 	 */
 	T& add(const T& item) {
 		if (length == allocated) {
-			allocated *= 2;
-			if (allocated == 0) allocated = 8;
-			elements = (T*)realloc((void*)elements, sizeof(T) * allocated);
+			prepare(allocated == 0 ? 8 : allocated * 2);
 		}
 		new (&elements[length]) T(item);
 		return elements[length++];
@@ -203,9 +202,7 @@ public:
 	 */
 	T& add(T&& item) {
 		if (length == allocated) {
-			allocated *= 2;
-			if (allocated == 0) allocated = 8;
-			elements = (T*)realloc((void*)elements, sizeof(T) * allocated);
+			prepare(allocated == 0 ? 8 : allocated * 2);
 		}
 		new (&elements[length]) T(std::move(item));
 		return elements[length++];
@@ -219,13 +216,13 @@ public:
 	 */
 	T& addFirst(const T& item) {
 		if (length == allocated) {
-			allocated *= 2;
-			if (allocated == 0) allocated = 8;
-			elements = (T*)realloc((void*)elements, sizeof(T) * allocated);
+			prepare(allocated == 0 ? 8 : allocated * 2);
 		}
 
-		for (int i = length; i > 0; i--)
-			elements[i] = std::move(elements[i - 1]);
+		for (int i = length; i > 0; i--) {
+			new (&elements[i]) T(std::move(elements[i - 1]));
+			elements[i - 1].~T();
+		}
 
 		length++;
 		new (&elements[0]) T(item);
@@ -239,8 +236,7 @@ public:
 	 */
 	void addMany(const T* values, int count) {
 		if (length + count > allocated) {
-			allocated = allocated * 2 + (((count >> 4) + 1) << 4);
-			elements = (T*)realloc((void*)elements, sizeof(T) * allocated);
+			prepare(allocated * 2 + (((count >> 4) + 1) << 4));
 		}
 		for (int i = 0; i < count; i++)
 			new (&elements[length + i]) T(values[i]);
@@ -255,8 +251,7 @@ public:
 	void addMany(const U& container) {
 		int count = container.size();
 		if (length + count > allocated) {
-			allocated = allocated * 2 + (((count >> 4) + 1) << 4);
-			elements = (T*)realloc((void*)elements, sizeof(T) * allocated);
+			prepare(allocated * 2 + (((count >> 4) + 1) << 4));
 		}
 		for (const T& item: container)
 			new (&elements[length++]) T(item);
@@ -269,10 +264,14 @@ public:
 	void addMany(std::string_view view) {
 		int count = (int)view.size();
 		if (length + count > allocated) {
-			allocated = allocated * 2 + (((count >> 4) + 1) << 4);
-			elements = (T*)realloc(elements, sizeof(T) * allocated);
+			prepare(allocated * 2 + (((count >> 4) + 1) << 4));
 		}
-		memcpy(&elements[length], view.data(), sizeof(T) * count);
+		if constexpr (std::is_trivially_copyable_v<T>) {
+			memcpy(&elements[length], view.data(), sizeof(T) * count);
+		} else {
+			for (int i = 0; i < count; i++)
+				new (&elements[length + i]) T(view[i]);
+		}
 		length += count;
 	}
 
@@ -283,8 +282,7 @@ public:
 	 */
 	void addCopies(T value, int count) {
 		if (length + count > allocated) {
-			allocated = allocated * 2 + (((count >> 4) + 1) << 4);
-			elements = (T*)realloc((void*)elements, sizeof(T) * allocated);
+			prepare(allocated * 2 + (((count >> 4) + 1) << 4));
 		}
 		for (int i = 0; i < count; i++)
 			new (&elements[length + i]) T(value);
@@ -336,7 +334,9 @@ public:
 	 * @return The removed element.
 	 */
 	T pop() {
-		return std::move(elements[--length]);
+		T result = std::move(elements[--length]);
+		elements[length].~T();
+		return result;
 	}
 
 	/**
@@ -346,7 +346,7 @@ public:
 	 */
 	void unorderedRemove(int i) {
 		if (i < length && i >= 0)
-			set(i, std::move(elements[--length]));
+			set(i, pop());
 	}
 
 	/**
@@ -360,13 +360,28 @@ public:
 	 */
 	void resize(int newLength) {
 		if (newLength > allocated) {
-			allocated = newLength * 2;
-			elements = (T*)realloc((void*)elements, sizeof(T) * allocated);
+			int newAllocated = newLength * 2;
+			if constexpr (std::is_trivially_copyable_v<T>) {
+				elements = (T*)realloc((void*)elements, sizeof(T) * newAllocated);
+			} else {
+				T* newElements = (T*)malloc(sizeof(T) * newAllocated);
+				for (int i = 0; i < length; i++) {
+					new (&newElements[i]) T(std::move(elements[i]));
+					elements[i].~T();
+				}
+				free(elements);
+				elements = newElements;
+			}
+			allocated = newAllocated;
 		}
 		if (newLength > length) {
-			void* toZero = (void*)&elements[length];
-			size_t zeroSize = sizeof(T) * (newLength - length);
-			bzero(toZero, zeroSize);
+			for (int i = length; i < newLength; i++) {
+				new (&elements[i]) T();
+			}
+		} else if (newLength < length) {
+			for (int i = newLength; i < length; i++) {
+				elements[i].~T();
+			}
 		}
 		length = newLength;
 	}
@@ -380,12 +395,26 @@ public:
 	 */
 	bool prepare(int size) {
 		if (size > allocated) {
-			T* newElements = (T*)realloc((void*)elements, sizeof(T) * (size_t)size);
-			if (newElements) {
-				allocated = size;
-				elements = newElements;
-			} else
-				return false;
+			if constexpr (std::is_trivially_copyable_v<T>) {
+				T* newElements = (T*)realloc((void*)elements, sizeof(T) * (size_t)size);
+				if (newElements) {
+					allocated = size;
+					elements = newElements;
+				} else
+					return false;
+			} else {
+				T* newElements = (T*)malloc(sizeof(T) * (size_t)size);
+				if (newElements) {
+					for (int i = 0; i < length; i++) {
+						new (&newElements[i]) T(std::move(elements[i]));
+						elements[i].~T();
+					}
+					free(elements);
+					elements = newElements;
+					allocated = size;
+				} else
+					return false;
+			}
 		}
 
 		return true;

@@ -19,6 +19,8 @@
 #include <ds/ArrayList.h>
 #include <ds/LinkedList.h>
 #include <gtest/gtest.h>
+#include <string>
+#include <utility>
 
 TEST(ArrayListTest, DefaultConstruction) {
 	ArrayList<int> list;
@@ -264,4 +266,70 @@ TEST(ArrayListTest, ConstReverseIteration) {
 		count++;
 	}
 	EXPECT_EQ(count, 3);
+}
+
+namespace {
+struct AddressTracker {
+	AddressTracker* self;
+	int value;
+	AddressTracker(int v = 0) : value(v) { self = this; }
+	AddressTracker(const AddressTracker& other) : value(other.value) { self = this; }
+	AddressTracker(AddressTracker&& other) noexcept : value(other.value) { self = this; }
+	AddressTracker& operator=(const AddressTracker& other) { value = other.value; self = this; return *this; }
+	AddressTracker& operator=(AddressTracker&& other) noexcept { value = other.value; self = this; return *this; }
+	bool isConsistent() const { return self == this; }
+};
+
+struct DestructionTracker {
+	static int destructedCount;
+	bool* destroyed;
+	DestructionTracker(bool* d = nullptr) : destroyed(d) {}
+	~DestructionTracker() {
+		if (destroyed) *destroyed = true;
+		destructedCount++;
+	}
+};
+int DestructionTracker::destructedCount = 0;
+
+struct NonTrivialNoEq {
+	std::string s;
+	NonTrivialNoEq(const char* str) : s(str) {}
+	// No operator==
+};
+}
+
+TEST(ArrayListTest, ReallocInconsistent) {
+	ArrayList<AddressTracker> list;
+	for (int i = 0; i < 2000; i++) {
+		list.add(AddressTracker(i));
+	}
+
+	for (int i = 0; i < list.size(); i++) {
+		EXPECT_TRUE(list.get(i).isConsistent()) << "Element at index " << i << " is inconsistent!";
+	}
+}
+
+TEST(ArrayListTest, ResizeNoDestructor) {
+	DestructionTracker::destructedCount = 0;
+	{
+		ArrayList<DestructionTracker> list;
+		bool d1 = false, d2 = false;
+		list.add(DestructionTracker(&d1));
+		list.add(DestructionTracker(&d2));
+		DestructionTracker::destructedCount = 0;
+
+		// Resize down - should destroy elements
+		list.resize(1);
+		EXPECT_TRUE(d2) << "Element 2 should have been destroyed by resize(1)";
+		EXPECT_EQ(DestructionTracker::destructedCount, 1);
+	}
+}
+
+TEST(ArrayListTest, ContainerFindNonTrivialNoEq) {
+	ArrayList<NonTrivialNoEq> list;
+	list.add(NonTrivialNoEq("hello"));
+
+	// This should call the safe compare() using if constexpr
+	int index = list.find(NonTrivialNoEq("hello"));
+	EXPECT_EQ(index, -1);
 }

@@ -19,6 +19,8 @@
 #define LIBEXCESSIVE_CONTAINER_H
 
 #include <iterator>
+#include <type_traits>
+#include <utility>
 
 
 /**
@@ -184,13 +186,19 @@ public:
 	virtual ~Container() = default;
 
 private:
-	template <typename U>
-	auto compare(const U& a, const U& b) const -> decltype(a == b, bool()) {
-		return a == b;
-	}
+	template <typename V, typename = void>
+	struct has_equality : std::false_type {};
 
-	bool compare(...) const {
-		return false;
+	template <typename V>
+	struct has_equality<V, std::void_t<decltype(std::declval<const V&>() == std::declval<const V&>())>> : std::true_type {};
+
+	template <typename U>
+	bool compare(const U& a, const U& b) const {
+		if constexpr (has_equality<U>::value) {
+			return a == b;
+		} else {
+			return false;
+		}
 	}
 };
 
