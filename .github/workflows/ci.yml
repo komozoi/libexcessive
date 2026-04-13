@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ "master", "main" ]
+    branches: [ "master" ]
     paths:
       - '**/*.cpp'
       - '**/*.c'
@@ -11,7 +11,7 @@ on:
       - '**/CMakeLists.txt'
       - '**/*.cmake'
   pull_request:
-    branches: [ "master", "main" ]
+    branches: [ "master" ]
     paths:
       - '**/*.cpp'
       - '**/*.c'
