@@ -356,6 +356,14 @@ public:
 	}
 
 	/**
+	 * @brief Immediately copies the underlying data, giving a new pointer of the given type.
+	 * @return A new `sp<T>` instance in the specified `SpPointerType`.
+	 */
+	sp<T> copy(SpPointerType newType) const {
+		return sp<T>(details->copy(), newType);
+	}
+
+	/**
 	 * @brief Returns the current ownership model type.
 	 * @return The current `SpPointerType`.
 	 */
