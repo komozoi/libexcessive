@@ -363,7 +363,7 @@ public:
 	 * @param flags Mapping flags.
 	 * @return MmapHandle.
 	 */
-	MmapHandle getMmapHandle(off_t offset, size_t size, int prot = PROT_READ | PROT_WRITE, int flags = MAP_SHARED);
+	MmapHandle getMmapHandle(off_t offset, size_t size, int prot = PROT_READ | PROT_WRITE, int flags = MAP_SHARED) const;
 
 	/**
 	 * @brief Returns the number of references to the underlying file.

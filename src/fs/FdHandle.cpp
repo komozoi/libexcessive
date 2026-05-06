@@ -482,13 +482,13 @@ void FdHandle::markToClose() const {
 	getHandleData(fd).markToClose();
 }
 
-MmapHandle FdHandle::getMmapHandle(off_t offset, size_t size, int prot, int flags) {
+MmapHandle FdHandle::getMmapHandle(off_t offset, size_t size, int prot, int flags) const {
 	FdHandleData& handle = getHandleData(fd);
 
 	// Make sure the file is big enough, then
 	// restore the previous cursor position
 	{
-		std::lock_guard _(handle.mutex);
+		std::lock_guard<std::mutex> _(handle.mutex);
 
 		// Get current file offset to restore later
 		off_t previousOffset = lseek(fd, 0, SEEK_CUR);
