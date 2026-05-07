@@ -474,11 +474,11 @@ public:
 
 		if (!isPresent(index)) {
 			new (&keys[index]) K(key);
-			new (&values[index]) T(std::move(value));
+			new (&values[index]) T((T&&)std::forward<T>(value));
 			setPresent(index, true);
 			amountUsed++;
 		} else
-			values[index] = std::move(value);
+			values[index] = (T&&)std::forward<T>(value);
 
 		if (amountUsed == capacity) {
 			resize(capacity * 2);
