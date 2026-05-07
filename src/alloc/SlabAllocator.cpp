@@ -333,7 +333,7 @@ SlabAllocator::~SlabAllocator() {
 				freeBlocks += countSetBits(chunk->freeBlocks[i]);
 			int allocatedBlocks = chunk->numBlocks - freeBlocks;
 			if (allocatedBlocks > 0)
-				dprintf(2, "  Chunk %i: %i blocks of size %i\n", chunkId, allocatedBlocks, chunk->blockWidth);
+				dprintf(2, "  Chunk %i: %i blocks of size %lu\n", chunkId, allocatedBlocks, chunk->blockWidth);
 		}
 		::free(chunk->blocks);
 #ifndef DEBUG_MEMORY
