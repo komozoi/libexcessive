@@ -23,6 +23,37 @@
 #include <gtest/gtest.h>
 #include <string>
 #include <algorithm>
+#include <utility>
+#include "alloc/Allocator.h"
+
+
+class TrackingAllocator : public Allocator {
+public:
+	size_t allocations;
+	size_t frees;
+	size_t current_allocated_bytes;
+
+	TrackingAllocator() : allocations(0), frees(0), current_allocated_bytes(0) {}
+
+	void* alloc(size_t size) override {
+		allocations++;
+		current_allocated_bytes += size;
+		void* ptr = malloc(size + sizeof(size_t));
+		*(size_t*)ptr = size;
+		return (char*)ptr + sizeof(size_t);
+	}
+
+	void free(const void* ptr) override {
+		if (!ptr) return;
+		frees++;
+		void* base = (char*)ptr - sizeof(size_t);
+		size_t size = *(size_t*)base;
+		current_allocated_bytes -= size;
+		::free(base);
+	}
+
+	size_t get_total_allocated() const { return current_allocated_bytes; }
+};
 
 
 class DestructorCounter {
@@ -423,4 +454,58 @@ TEST(HashMapDropTest, AmountUsedCorrect) {
 	for (int i = 1; i < keys.size(); ++i) {
 		EXPECT_TRUE(map.hasKey(keys.get(i)));
 	}
+}
+
+TEST(HashMapLeakTest, DetectLeakInDestructor) {
+	TrackingAllocator tracker;
+	{
+		HashMap<int, int> map(10, tracker);
+		map.put(1, 10);
+		map.put(2, 20);
+	}
+	EXPECT_EQ(tracker.current_allocated_bytes, 0);
+	EXPECT_EQ(tracker.allocations, tracker.frees);
+}
+
+TEST(HashMapLeakTest, DetectLeakInResize) {
+	TrackingAllocator tracker;
+
+	{
+		HashMap<int, int> map(2, tracker);
+
+		map.put(1, 10);
+		map.put(2, 20);
+		map.put(3, 30); // Should trigger resize
+	}
+
+	EXPECT_EQ(tracker.current_allocated_bytes, 0);
+	EXPECT_EQ(tracker.allocations, tracker.frees);
+}
+
+TEST(HashMapLeakTest, DetectLeakInAssignment) {
+	TrackingAllocator tracker;
+	{
+		HashMap<int, int> map1(10, tracker);
+		{
+			HashMap<int, int> map2(20, tracker);
+			map2 = map1;
+			// map2 should have freed its 20-capacity buffers and allocated 10-capacity ones.
+		}
+	}
+	EXPECT_EQ(tracker.current_allocated_bytes, 0);
+	EXPECT_EQ(tracker.allocations, tracker.frees);
+}
+
+TEST(HashMapLeakTest, DetectLeakInMoveAssignment) {
+	TrackingAllocator tracker;
+	{
+		HashMap<int, int> map1(10, tracker);
+		{
+			HashMap<int, int> map2(20, tracker);
+			map2 = std::move(map1);
+			// map2 should have freed its 20-capacity buffers and taken ownership of 10-capacity ones.
+		}
+	}
+	EXPECT_EQ(tracker.current_allocated_bytes, 0);
+	EXPECT_EQ(tracker.allocations, tracker.frees);
 }
