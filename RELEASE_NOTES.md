@@ -1,4 +1,50 @@
 
+# Release Notes - v0.3.0
+
+## New Features
+
+- **ThreadPool**:
+  - Added `ThreadPool` class for managing a pool of worker threads.
+  - This class simplifies the creation and management of worker threads,
+    allowing for efficient parallel execution of tasks.
+- **Container Enhancements**:
+  - `Queue` now inherits from the `Container` hierarchy, improving consistency across data structures.
+  - Added `addMany` method to `ArrayList` and `LinkedList` to support adding elements from any generic container or iterator-compatible object.
+- **Smart Pointer Improvements (`sp<T>`)**:
+  - Refactored internal control blocks to use virtual methods, ensuring correct behavior for polymorphic types (e.g., `sp<Base>` managing a `Derived` instance).
+  - Fixed `mut()` method to work correctly when a smart pointer has been cast to a base type.
+  - Improved constructor logic using `std::enable_if` to prevent perfect-forwarding from accidentally overriding copy/move constructors.
+  - Added `copy()` method to create an immediate deep copy of the managed object with a specified pointer type.
+
+## Improvements
+
+- **FdHandle enhancements**:
+  - Added `printf` and `readLine` methods to `FdHandle` for easier string formatting and stream parsing.
+  - Improved thread-safety in `FdHandle` by using `std::mutex` and `std::atomic` for reference counting.
+  - Refined `close()` behavior to use reference counting instead of immediate deletion.
+- **ArrayList Memory Management**:
+  - Improved handling of non-trivial types during reallocations and container operations.
+  - Added optimized `find` and `contains` methods.
+- **LinkedList Features**:
+  - Added full support for copy and move constructors and assignment operators.
+- **Hash quality improvements**:
+  - Improved bit mixing in `obviousHashFunction` for strings, specifically addressing quality issues for strings with lengths not divisible by 8.
+
+## Bug Fixes
+
+- **Socket IO Hang**:
+  - Fixed an infinite busy-loop in `SocketHandleData::read` that occurred when a pipe or socket was closed by the peer (`POLLHUP`).
+  - This issue caused some applications to hang indefinitely when reading from a closed pipe.
+- **FdHandle write merging fix**:
+  - Fixed a bug in `FdHandle` where merging pending writes could result in incorrect memory moves, corrupting the write buffer.
+- **sp<T> construction fix**:
+  - Fixed a regression where `sp<T>` would sometimes attempt to construct the managed object from the smart pointer itself during copy operations.
+
+## Testing
+- Added comprehensive edge-case tests for `FdHandle` concurrency and write merging.
+- Added new tests for `ArrayList` and `LinkedList` memory management and generic container integration.
+- Expanded `sp<T>` test suite to cover polymorphic conversions and "collapsing" constructor scenarios.
+
 # Release Notes - v0.2.1
 
 This release was focused on ease of use and API improvements.  Some features were added but this was primarily
