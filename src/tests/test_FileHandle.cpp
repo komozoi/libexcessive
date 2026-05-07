@@ -215,3 +215,38 @@ TEST_F(FdHandleTest, PrependMergeCorruption) {
     EXPECT_EQ(readVal[1], 0x11111111);
 }
 
+TEST_F(FdHandleTest, Printf) {
+	{
+		FdHandle handle = FdHandle::open(TEST_FILE, O_WRONLY | O_CREAT, 0660);
+		handle.printf("Hello %s %d", "World", 123);
+	}
+
+	{
+		FdHandle handle = FdHandle::open(TEST_FILE, O_RDONLY);
+		char buffer[1024];
+		ssize_t n = handle.read(buffer, sizeof(buffer));
+		ASSERT_GT(n, 0);
+		buffer[n] = 0;
+		EXPECT_STREQ(buffer, "Hello World 123");
+	}
+}
+
+TEST_F(FdHandleTest, ReadLine) {
+	{
+		FdHandle handle = FdHandle::open(TEST_FILE, O_WRONLY | O_CREAT, 0660);
+		handle.printf("Line 1\nLine 2\r\nLine 3");
+	}
+
+	{
+		FdHandle handle = FdHandle::open(TEST_FILE, O_RDONLY);
+		std::string line;
+		EXPECT_TRUE(handle.readLine(line));
+		EXPECT_EQ(line, "Line 1");
+		EXPECT_TRUE(handle.readLine(line));
+		EXPECT_EQ(line, "Line 2");
+		EXPECT_TRUE(handle.readLine(line));
+		EXPECT_EQ(line, "Line 3");
+		EXPECT_FALSE(handle.readLine(line));
+	}
+}
+

@@ -22,6 +22,8 @@
 #include "unistd.h"
 #include <mutex>
 #include "sys/mman.h"
+#include <cstdarg>
+#include <string>
 
 
 class FdHandleData;
@@ -295,6 +297,29 @@ public:
 	 * @return true if ready.
 	 */
 	bool waitForRead() const;
+
+	/**
+	 * @brief Writes a formatted string to the file.
+	 * @param fmt Format string.
+	 * @param ... Arguments.
+	 * @return Number of bytes written.
+	 */
+	ssize_t printf(const char* fmt, ...);
+
+	/**
+	 * @brief Writes a formatted string to the file using a va_list.
+	 * @param fmt Format string.
+	 * @param args Arguments.
+	 * @return Number of bytes written.
+	 */
+	ssize_t vprintf(const char* fmt, va_list args);
+
+	/**
+	 * @brief Reads a line from the file.
+	 * @param line String to store the read line.
+	 * @return true if a line was read, false on EOF or error.
+	 */
+	bool readLine(std::string& line);
 
 	/**
 	 * @brief Changes the file offset.

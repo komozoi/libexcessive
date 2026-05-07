@@ -18,6 +18,7 @@
 
 #include "fs/FdHandle.h"
 
+#include <cstdio>
 #include <mutex>
 #include <atomic>
 #include <sys/poll.h>
@@ -143,7 +144,7 @@ public:
 
 	virtual ssize_t read(void* value, size_t size) {
 		char* buffer = (char*)value;
-		int totalWritten = 0;
+		int totalRead = 0;
 		int remaining = (int)size;
 
 		if (!writeQueue.empty()) {
@@ -152,23 +153,24 @@ public:
 			lseek(fd, offset, SEEK_SET);
 		}
 
-		while (totalWritten < (int)size) {
-			int res = (int)::read(fd, &buffer[totalWritten], remaining);
+		while (totalRead < (int)size) {
+			int res = (int)::read(fd, &buffer[totalRead], remaining);
 
-			if (res < 0)
+			if (res < 0) {
+				if (totalRead > 0) return totalRead;
 				return res;
-			else if (res == 0)
+			} else if (res == 0)
 				break;
 
-			totalWritten += res;
+			totalRead += res;
 			remaining -= res;
 		}
 
-		return totalWritten;
+		return totalRead;
 	}
 
 	bool waitForRead() {
-		struct pollfd pfd {fd, POLLIN, 0};
+		struct pollfd pfd {fd, POLLIN | POLLHUP | POLLERR | POLLNVAL, 0};
 
 		while (true) {
 			int res = poll(&pfd, 1, 100);
@@ -178,10 +180,14 @@ public:
 
 			if (res < 0)
 				return false;
-			else if (res == 0)
+			else if (res == 0) {
+				int flags = fcntl(fd, F_GETFL);
+				if (flags != -1 && (flags & O_NONBLOCK))
+					return false;
 				continue;
+			}
 
-			if (pfd.revents & POLLIN)
+			if (pfd.revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL))
 				return true;
 		}
 	}
@@ -307,7 +313,7 @@ public:
 	explicit SocketHandleData(int fd) : FdHandleData(fd), shouldClose(false) {}
 
 	ssize_t read(void* value, size_t size) override {
-		struct pollfd pfd {fd, POLLIN, 0};
+		struct pollfd pfd {fd, POLLIN | POLLHUP | POLLERR | POLLNVAL, 0};
 
 		char* buffer = (char*)value;
 		size_t totalRead = 0;
@@ -317,27 +323,40 @@ public:
 			int res = poll(&pfd, 1, 100);
 
 			if (shouldClose)
-				return 0;
+				return (ssize_t)totalRead;
 
-			if (res < 0)
+			if (res < 0) {
+				if (totalRead > 0) return (ssize_t)totalRead;
 				return res;
-			else if (res == 0)
-				continue;
+			} else if (res == 0) {
+				if (totalRead > 0) break;
 
-			if (pfd.revents & POLLIN) {
+				// Check if non-blocking
+				int flags = fcntl(fd, F_GETFL);
+				if (flags != -1 && (flags & O_NONBLOCK))
+					return 0; // Return 0 for non-blocking if no data available
+
+				continue;
+			}
+
+			if (pfd.revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)) {
 				res = (int)::read(fd, &buffer[totalRead], remaining);
 
-				if (res < 0)
+				if (res < 0) {
+					if (totalRead > 0) return (ssize_t)totalRead;
 					return res;
-				else if (res == 0)
+				} else if (res == 0)
 					break;
 
 				totalRead += res;
 				remaining -= res;
+
+				// Return immediately after reading some data for stream handles
+				break;
 			}
 		}
 
-		return totalRead;
+		return (ssize_t)totalRead;
 	}
 
 	bool isStream() const override { return true; }
@@ -401,7 +420,8 @@ FdHandle FdHandle::open(const char* path, int mode, int flag) {
 FdHandle FdHandle::from(int fd) {
 	std::lock_guard<std::mutex> lock(state.mutex);
 	if (!state.getFds()->hasKey(fd)) {
-		SocketHandleData* handleData = new(slab.allocate<SocketHandleData>()) SocketHandleData(fd);
+		//SocketHandleData* handleData = new(slab.allocate<SocketHandleData>()) SocketHandleData(fd);
+		SocketHandleData* handleData = new SocketHandleData(fd);
 		state.getFds()->put((int16_t) fd, handleData);
 	}
 
@@ -431,6 +451,50 @@ ssize_t FdHandle::read(void* value, size_t size) const {
 
 bool FdHandle::waitForRead() const {
 	return getHandleData(fd).waitForRead();
+}
+
+ssize_t FdHandle::printf(const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	ssize_t result = vprintf(fmt, args);
+	va_end(args);
+	return result;
+}
+
+ssize_t FdHandle::vprintf(const char* fmt, va_list args) {
+	char buffer[1024];
+	va_list args_copy;
+	va_copy(args_copy, args);
+	int size = vsnprintf(buffer, sizeof(buffer), fmt, args_copy);
+	va_end(args_copy);
+
+	if (size < 0) return -1;
+
+	if ((size_t)size < sizeof(buffer)) {
+		return write(buffer, size);
+	} else {
+		char* dynamicBuffer = new char[size + 1];
+		va_list args2;
+		va_copy(args2, args);
+		vsnprintf(dynamicBuffer, size + 1, fmt, args2);
+		va_end(args2);
+		ssize_t written = write(dynamicBuffer, size);
+		delete[] dynamicBuffer;
+		return written;
+	}
+}
+
+bool FdHandle::readLine(std::string& line) {
+	line.clear();
+	char c;
+	bool readAny = false;
+	while (read(&c, 1) == 1) {
+		readAny = true;
+		if (c == '\n') break;
+		line += c;
+	}
+	if (!line.empty() && line.back() == '\r') line.pop_back();
+	return readAny;
 }
 
 off_t FdHandle::seek(off_t where, int whence) const {
