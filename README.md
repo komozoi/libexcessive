@@ -20,7 +20,7 @@ include(FetchContent)
 FetchContent_Declare(
         excessive
         GIT_REPOSITORY https://gitea.com/komozoi/excessive.git
-        GIT_TAG v0.2.1
+        GIT_TAG v0.3.0
         GIT_SHALLOW TRUE
         GIT_PROGRESS ON
         SYSTEM
@@ -54,10 +54,10 @@ struct btree_entry_s {
 
 int main() {
     FdHandle file = FdHandle::open("btree.bin", O_RDWR | O_CREAT, 0644);
-	if (!file) {
-		printf("Failed to open file!\n");
-		return 1;
-	}
+    if (!file) {
+        printf("Failed to open file!\n");
+        return 1;
+    }
 
     // It is easy to check if the file already existed or was just created
     printf("File is %s.\n", file.isNew() ? "newly created" : "existing");
@@ -89,7 +89,7 @@ int main() {
     // but can be closed manually with:
     // write_handle.close();
 
-	return 0;
+    return 0;
 }
 ```
 
@@ -127,8 +127,10 @@ design goals and features are:
   * Mmap handles
   * Open file reference counting
   * Utilities for keeping data on-disk
-    * BTree
+    * BTree for indexing various sortable datatypes
+    * DiskBytestringSearchTree for handling sorted bytestrings and anything they can encode
     * Files with dynamically allocated regions
+* ThreadPool for efficient parallel task execution
 * (planned) Utilities for building on-disk indexes and databases
 * Favor explicit memory and performance control. Many components are designed to be friendly to
   custom allocators and memory pools.
@@ -186,6 +188,47 @@ int main() {
     // File automatically closes when all references go out of scope,
     // but can be closed manually with:
     // write_handle.close();
+}
+```
+
+### On-Disk Search Tree with Bytestring Keys
+
+For on-disk indexing by variable-length keys (like strings), `DiskBytestringSearchTree` provides an efficient O(log(n))
+lookup in the average case.
+
+```cpp
+#include "fs/DiskBytestringSearchTree.h"
+#include "fs/FreeSpaceFile.h"
+#include <fcntl.h>
+
+
+int main() {
+    FdHandle file = FdHandle::open("search_tree.bin", O_RDWR | O_CREAT, 0644);
+    FreeSpaceFile fss(file);
+
+    uint64_t rootOffset;
+    if (file.isNew()) {
+        rootOffset = DiskBytestringSearchTree::initialize(fss);
+    } else {
+        // Root offset should be stored and retrieved from a known location.
+        // For this example, we assume it's right after the FreeSpaceFile header.
+        rootOffset = fss.getHeaderEnd();
+    }
+
+    DiskBytestringSearchTree tree(fss, rootOffset);
+
+    // Insert keys
+    tree.insert(Bytestring("user_123"), 0xDEADBEEF);
+
+    // Find keys
+    uint64_t value = tree.find(Bytestring("user_123"));
+    if (value != 0) {
+        printf("Found value: %llx\n", (unsigned long long)value);
+    }
+
+    // FdHandle closes on its own
+
+    return 0;
 }
 ```
 
@@ -301,6 +344,40 @@ int main() {
         // object is destroyed exactly once when both go out of scope
     }
 
+    // Polymorphic support (New in v0.3.0)
+    // Seamlessly convert from sp<Derived> to sp<Base>
+    // sp<Derived> derived(SpPointerType::UNIQUE, Derived{});
+    // sp<Base> base = derived;
+
+    return 0;
+}
+```
+
+### Thread Pool
+
+Efficient parallel task execution using a pool of worker threads.
+
+```cpp
+#include "parallel/ThreadPool.h"
+#include <cstdio>
+
+
+int main() {
+    // Create a pool with 8 worker threads
+    ThreadPool pool(8);
+
+    // Submit a lambda
+    pool.submit([]() {
+        printf("Parallel task running\n");
+    });
+
+    // Submit a function with arguments
+    pool.submit([](int x, int y) {
+        printf("Result: %d\n", x + y);
+    }, 10, 20);
+
+    // Graceful shutdown
+    pool.shutdown();
     return 0;
 }
 ```
@@ -335,7 +412,7 @@ int main() {
     ArrayList<int> list{2,3,4};
 
     // Add 1 to the beginning
-	list.addFirst(1);
+    list.addFirst(1);
 
     // 1, 2, 3, 4
     for (int element: list)
