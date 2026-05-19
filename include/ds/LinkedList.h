@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <iterator>
 #include <cstddef>
+#include <stdexcept>
 #include "Container.h"
 
 
@@ -494,7 +495,7 @@ public:
 	 */
 	T& get(int i) const {
 		if (i >= length || i < 0)
-			printf("Out of bounds read of %i for LinkedList of length %i\n", i, length);
+			throw std::out_of_range("index out of bounds");
 		return findItem(i)->value;
 	}
 

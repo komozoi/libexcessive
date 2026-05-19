@@ -214,3 +214,11 @@ TEST(LinkedListTest, MoveAssignment) {
 	EXPECT_EQ(list2.get(0), 1);
 	EXPECT_EQ(list1.size(), 0);
 }
+
+TEST(LinkedListTest, OutOfBoundsException) {
+	LinkedList<int> list;
+	list.add(1);
+	list.add(2);
+	EXPECT_THROW(list.get(-1), std::out_of_range);
+	EXPECT_THROW(list.get(2), std::out_of_range);
+}

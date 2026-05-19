@@ -496,13 +496,8 @@ public:
 	 */
 	bool isStream() const;
 
-	/**
-	 * @brief Ends the transaction and releases the lock.
-	 */
-	~FdTransaction();
-
 private:
-
+	std::lock_guard<std::mutex> guard;
 	FdHandleData& handleData; /**< Underlying file handle data. */
 };
 

@@ -593,8 +593,7 @@ int FdHandle::numReferences() const {
 	return getHandleData(fd).numReferences();
 }
 
-FdTransaction::FdTransaction(const FdHandle& handle) : handleData(getHandleData(handle.getFd())) {
-	handleData.mutex.lock();
+FdTransaction::FdTransaction(const FdHandle& handle) : guard(getHandleData(handle.getFd()).mutex), handleData(getHandleData(handle.getFd())) {
 }
 
 ssize_t FdTransaction::write(const void* value, size_t size) const {
@@ -625,13 +624,9 @@ bool FdTransaction::isStream() const {
 	return handleData.isStream();
 }
 
-FdTransaction::~FdTransaction() {
-	handleData.mutex.unlock();
-}
-
 
 MmapHandle::MmapHandle(FdHandleData &handleData, char *data, char *end)
-		: handleData(handleData), data(data), cursor(data), end(end) {
+	: handleData(handleData), data(data), cursor(data), end(end) {
 	if (data)
 		handleData.incRef();
 }

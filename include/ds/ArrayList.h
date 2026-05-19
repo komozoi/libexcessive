@@ -28,6 +28,7 @@
 #include <cmath>
 #include <utility>
 #include <type_traits>
+#include <stdexcept>
 #include "Range.h"
 #include "MonkeyIterator.h"
 #include "Container.h"
@@ -442,7 +443,7 @@ public:
 	 */
 	inline T& get(int i) const {
 		if (i >= length || i < 0) {
-			printf("Out of bounds read of %i for ArrayList of length %i and allocated %i\n", i, length, allocated);
+			throw std::out_of_range("index out of bounds");
 		}
 		return elements[i];
 	}

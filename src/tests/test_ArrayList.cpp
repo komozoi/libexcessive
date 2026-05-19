@@ -333,3 +333,11 @@ TEST(ArrayListTest, ContainerFindNonTrivialNoEq) {
 	int index = list.find(NonTrivialNoEq("hello"));
 	EXPECT_EQ(index, -1);
 }
+
+TEST(ArrayListTest, OutOfBoundsException) {
+	ArrayList<int> list;
+	list.add(1);
+	list.add(2);
+	EXPECT_THROW(list.get(-1), std::out_of_range);
+	EXPECT_THROW(list.get(2), std::out_of_range);
+}
