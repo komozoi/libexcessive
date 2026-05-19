@@ -63,6 +63,12 @@ public:
 	 */
 	off_t getHeaderEnd();
 
+	/**
+	 * @brief Gets the underlying file handle.
+	 * @return Reference to the FdHandle.
+	 */
+	FdHandle& getFile() { return file; }
+
 protected:
 	/**
 	 * @brief Represents a free region in the file.
