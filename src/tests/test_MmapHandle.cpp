@@ -595,9 +595,46 @@ TEST(MmapHandleTest, MoveConstructor) {
 	MmapHandle original = fd_handle.getMmapHandle(0, 1024);
 	EXPECT_TRUE(original);
 
+	const char* test_data = "MoveConstructorTest";
+	original.write(test_data, strlen(test_data) + 1);
+
 	MmapHandle moved(std::move(original));
 	EXPECT_TRUE(moved);
 	EXPECT_FALSE(original);
 
+	moved.seek(0);
+	char buffer[32];
+	moved.read(buffer, strlen(test_data) + 1);
+	EXPECT_STREQ(buffer, test_data);
+
 	unlink(temp_filename);
+}
+
+TEST(MmapHandleTest, MoveAssignment) {
+	const char* temp_filename = "mmap_test_assign.tmp";
+	unlink(temp_filename);
+	FdHandle fd_handle = FdHandle::open(temp_filename, O_RDWR | O_CREAT, 0660);
+	MmapHandle original = fd_handle.getMmapHandle(0, 1024);
+	EXPECT_TRUE(original);
+
+	const char* test_data = "MoveAssignmentTest";
+	original.write(test_data, strlen(test_data) + 1);
+
+	MmapHandle assigned;
+	assigned = std::move(original);
+
+	EXPECT_TRUE(assigned);
+	EXPECT_FALSE(original);
+
+	assigned.seek(0);
+	char buffer[32];
+	assigned.read(buffer, strlen(test_data) + 1);
+	EXPECT_STREQ(buffer, test_data);
+
+	unlink(temp_filename);
+}
+
+TEST(MmapHandleTest, DefaultConstructor) {
+	MmapHandle mmap;
+	EXPECT_FALSE(mmap);
 }

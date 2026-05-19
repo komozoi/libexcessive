@@ -43,6 +43,8 @@ public:
 	explicit MmapHandle(FdHandleData& handleData, char* data, char* end);
 
 	MmapHandle(const MmapHandle& other) = delete;
+	MmapHandle() : handleData(nullptr), data(nullptr), cursor(nullptr), end(nullptr) {
+	}
 
 	/**
 	 * @brief Move constructor for MmapHandle.
@@ -50,10 +52,15 @@ public:
 	 */
 	inline MmapHandle(MmapHandle&& other) noexcept
 		: handleData(other.handleData), data(other.data), cursor(other.cursor), end(other.end) {
+		other.handleData = nullptr;
 		other.data = nullptr;
+		other.cursor = nullptr;
+		other.end = nullptr;
 	}
 
-	MmapHandle& operator=(MmapHandle&& other) noexcept = delete;
+	MmapHandle& operator=(MmapHandle&& other) noexcept;
+
+	MmapHandle& operator=(const MmapHandle& other) = delete;
 
 	/**
 	 * @brief Checks if the mapping is valid.
@@ -139,7 +146,7 @@ public:
 	~MmapHandle();
 
 private:
-	FdHandleData& handleData; /**< Underlying file handle data. */
+	FdHandleData* handleData; /**< Underlying file handle data. */
 	char* data;               /**< Start of the mapping. */
 	char* cursor;             /**< Current position in the mapping. */
 	char* end;                /**< End of the mapping. */

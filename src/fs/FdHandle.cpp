@@ -626,9 +626,25 @@ bool FdTransaction::isStream() const {
 
 
 MmapHandle::MmapHandle(FdHandleData &handleData, char *data, char *end)
-	: handleData(handleData), data(data), cursor(data), end(end) {
+	: handleData(&handleData), data(data), cursor(data), end(end) {
 	if (data)
 		handleData.incRef();
+}
+
+MmapHandle& MmapHandle::operator=(MmapHandle&& other) noexcept {
+	if (this == &other)
+		return *this;
+	if (handleData)
+		handleData->decRef();
+	handleData = other.handleData;
+	data = other.data;
+	cursor = other.cursor;
+	end = other.end;
+	other.handleData = nullptr;
+	other.data = nullptr;
+	other.cursor = nullptr;
+	other.end = nullptr;
+	return *this;
 }
 
 ssize_t MmapHandle::write(const void* value, size_t size) {
@@ -670,7 +686,7 @@ off_t MmapHandle::seek(off_t where, int whence) {
 MmapHandle::~MmapHandle() {
 	if (data) {
 		munmap(data, end - data);
-		handleData.decRef();
+		handleData->decRef();
 	}
 }
 
