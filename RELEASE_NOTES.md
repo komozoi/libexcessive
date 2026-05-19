@@ -3,6 +3,9 @@
 
 ## New Features
 
+- **Persistent Indexing and Storage**:
+  - Added `Bytestring` class for optimized byte sequence management.
+  - Added `DiskBytestringSearchTree` for on-disk B-Tree search with `Bytestring` keys.
 - **ThreadPool**:
   - Added `ThreadPool` class for managing a pool of worker threads.
   - This class simplifies the creation and management of worker threads,
@@ -29,6 +32,12 @@
   - Added full support for copy and move constructors and assignment operators.
 - **Hash quality improvements**:
   - Improved bit mixing in `obviousHashFunction` for strings, specifically addressing quality issues for strings with lengths not divisible by 8.
+- **MmapHandle Flexibility**:
+  - Added default constructor and move assignment operator to `MmapHandle`.
+- **HashMap Performance**:
+  - Improved `insert` method to use `std::forward` for more efficient value forwarding.
+- **Enhanced Error Handling**:
+  - Integrated out-of-bounds exceptions into `ArrayList` and `LinkedList` for better reliability.
 
 ## Bug Fixes
 
@@ -39,11 +48,15 @@
   - Fixed a bug in `FdHandle` where merging pending writes could result in incorrect memory moves, corrupting the write buffer.
 - **sp<T> construction fix**:
   - Fixed a regression where `sp<T>` would sometimes attempt to construct the managed object from the smart pointer itself during copy operations.
+- **String Formatting**:
+  - Fixed several small bugs related to string formatting.
 
 ## Testing
 - Added comprehensive edge-case tests for `FdHandle` concurrency and write merging.
 - Added new tests for `ArrayList` and `LinkedList` memory management and generic container integration.
 - Expanded `sp<T>` test suite to cover polymorphic conversions and "collapsing" constructor scenarios.
+- Added leak detection tests for `HashMap`.
+- Added extensive test coverage for `Bytestring` and `DiskBytestringSearchTree`.
 
 # Release Notes - v0.2.1
 
