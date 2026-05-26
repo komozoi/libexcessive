@@ -250,3 +250,50 @@ TEST_F(FdHandleTest, ReadLine) {
 	}
 }
 
+TEST_F(FdHandleTest, QueueWriteMmapReadback) {
+	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
+
+	const size_t dataSize = 65536;
+	uint8_t* data = new uint8_t[dataSize];
+	for (size_t i = 0; i < dataSize; ++i) {
+		data[i] = (uint8_t)(i % 256);
+	}
+
+	h.queueWrite(data, dataSize, 0);
+
+	// Open MmapHandle on the same region. This should ideally flush the queue.
+	MmapHandle m = h.getMmapHandle(0, dataSize);
+	ASSERT_TRUE((bool)m);
+
+	uint8_t* readback = new uint8_t[dataSize];
+	m.read(readback, dataSize);
+
+	for (size_t i = 0; i < dataSize; ++i) {
+		ASSERT_EQ(readback[i], data[i]) << "Mismatch at index " << i;
+	}
+
+	delete[] data;
+	delete[] readback;
+}
+
+TEST_F(FdHandleTest, MultiQueueWriteMmapReadback) {
+	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
+
+	uint32_t val1 = 0x11111111;
+	uint32_t val2 = 0x22222222;
+	uint32_t val3 = 0x33333333;
+
+	h.queueWrite(val1, 0);
+	h.queueWrite(val2, 4);
+	h.queueWrite(val3, 12); // Hole at 8-11
+
+	MmapHandle m = h.getMmapHandle(0, 16);
+	ASSERT_TRUE((bool)m);
+
+	uint32_t* ptr = m.directPointer<uint32_t>(0);
+	EXPECT_EQ(ptr[0], val1);
+	EXPECT_EQ(ptr[1], val2);
+	EXPECT_EQ(ptr[2], 0); // Hole should be zeroed
+	EXPECT_EQ(ptr[3], val3);
+}
+

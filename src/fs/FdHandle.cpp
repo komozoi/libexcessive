@@ -573,6 +573,8 @@ MmapHandle FdHandle::getMmapHandle(off_t offset, size_t size, int prot, int flag
 		if (previousOffset == -1)
 			return MmapHandle(handle, nullptr, nullptr);
 
+		handle.flushWrites();
+
 		// Get file size
 		off_t currentSize = lseek(fd, 0, SEEK_END);
 		if (currentSize == -1) {
