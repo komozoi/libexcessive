@@ -371,6 +371,10 @@ public:
 		return (SpPointerType)type;
 	}
 
+	int numReferences() const {
+		return details ? details->refs.load(std::memory_order_acquire) : 0;
+	}
+
 private:
 	sp_pointer_details_t* details; /**< Pointer to the control block. */
 	char type = NULLPTR;            /**< Current ownership model type. */

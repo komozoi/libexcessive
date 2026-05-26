@@ -311,3 +311,68 @@ TEST(SpTest, DoesNotCollapseOnTemplatedMove) {
 
 	EXPECT_FALSE(b->collapsed) << "Constructor sp(U&&) was incorrectly used instead of templated move constructor";
 }
+
+TEST(SpTest, NumReferences) {
+	sp<int> a;
+	EXPECT_EQ(a.numReferences(), 0);
+
+	sp<int> b(10);
+	EXPECT_EQ(b.numReferences(), 1);
+
+	sp<int> c = b;
+	EXPECT_EQ(b.numReferences(), 2);
+	EXPECT_EQ(c.numReferences(), 2);
+
+	{
+		sp<int> d = c;
+		EXPECT_EQ(b.numReferences(), 3);
+		EXPECT_EQ(c.numReferences(), 3);
+		EXPECT_EQ(d.numReferences(), 3);
+	}
+
+	EXPECT_EQ(b.numReferences(), 2);
+	EXPECT_EQ(c.numReferences(), 2);
+
+	b.reset();
+	EXPECT_EQ(b.numReferences(), 0);
+	EXPECT_EQ(c.numReferences(), 1);
+}
+
+TEST(SpTest, NumReferencesWithCOW) {
+	sp<int> a(SpPointerType::UNIQUE, 5);
+	EXPECT_EQ(a.numReferences(), 1);
+
+	sp<int> b = a;
+	EXPECT_EQ(a.numReferences(), 2);
+	EXPECT_EQ(b.numReferences(), 2);
+
+	b.mut() = 10; // Should detach
+	EXPECT_EQ(a.numReferences(), 1);
+	EXPECT_EQ(b.numReferences(), 1);
+}
+
+TEST(SpTest, NumReferencesWithMove) {
+	sp<int> a(5);
+	EXPECT_EQ(a.numReferences(), 1);
+
+	sp<int> b(std::move(a));
+	EXPECT_EQ(a.numReferences(), 0);
+	EXPECT_EQ(b.numReferences(), 1);
+}
+
+TEST(SpTest, NumReferencesWithTemplatedCopyMove) {
+	struct Base { virtual ~Base() {} };
+	struct Derived : Base {};
+
+	sp<Derived> d = sp<Derived>::create();
+	EXPECT_EQ(d.numReferences(), 1);
+
+	sp<Base> b(d);
+	EXPECT_EQ(d.numReferences(), 2);
+	EXPECT_EQ(b.numReferences(), 2);
+
+	sp<Base> b2(std::move(d));
+	EXPECT_EQ(d.numReferences(), 0);
+	EXPECT_EQ(b.numReferences(), 2);
+	EXPECT_EQ(b2.numReferences(), 2);
+}
