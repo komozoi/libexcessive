@@ -376,15 +376,37 @@ static FdHandleData& getHandleData(int16_t fd) {
 
 
 FdHandle::FdHandle(int fd) : fd((int16_t)fd) {
-	getHandleData((int16_t)fd).incRef();
+	if (this->fd >= 0)
+		getHandleData(this->fd).incRef();
 }
 
 FdHandle::FdHandle(const FdHandle& other) : fd(other.fd) {
-	getHandleData((int16_t)fd).incRef();
+	if (fd >= 0)
+		getHandleData(fd).incRef();
 }
 
 FdHandle::FdHandle(FdHandle&& other) noexcept : fd(other.fd) {
 	other.fd = -1;
+}
+
+FdHandle &FdHandle::operator=(FdHandle&& other) noexcept {
+	if (fd >= 0)
+		getHandleData(fd).decRef();
+	fd = other.fd;
+	other.fd = -1;
+	return *this;
+}
+
+FdHandle &FdHandle::operator=(const FdHandle& other) {
+	if (this == &other)
+		return *this;
+
+	if (fd >= 0)
+		getHandleData(fd).decRef();
+	fd = other.fd;
+	if (fd >= 0)
+		getHandleData(fd).incRef();
+	return *this;
 }
 
 FdHandle FdHandle::open(const char* path, int mode) {
@@ -532,14 +554,6 @@ std::lock_guard<std::mutex> FdHandle::getLock() const {
 FdHandle::~FdHandle() {
 	if (fd >= 0)
 		getHandleData(fd).decRef();
-}
-
-FdHandle &FdHandle::operator=(FdHandle &&other) noexcept {
-	if (fd != -1)
-		getHandleData(fd).decRef();
-	fd = other.fd;
-	other.fd = -1;
-	return *this;
 }
 
 void FdHandle::markToClose() const {

@@ -189,6 +189,8 @@ public:
 	 */
 	FdHandle& operator=(FdHandle&& other) noexcept;
 
+	FdHandle& operator=(const FdHandle& other);
+
 	/**
 	 * @brief Checks if the handle is valid.
 	 * @return true if valid.
