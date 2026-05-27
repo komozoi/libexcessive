@@ -24,6 +24,8 @@
 #include "stdint.h"
 #include "stddef.h"
 #include "string.h"
+#include <mutex>
+#include <shared_mutex>
 
 
 /**
@@ -85,6 +87,7 @@ public:
 	 * @return true if the key is already present, false if the key was not previously present and has been inserted
 	 */
 	bool insert(const T& val) {
+		//std::unique_lock<std::shared_mutex> lock(treeMutex);
 		btree_node_t<T, N> target;
 		btree_node_header_t<N>& header = target.header;
 		uint64_t offset;
@@ -126,6 +129,7 @@ public:
 	 * @return true if the key was already present and overwritten, false if the key was not previously present and has been newly inserted
 	 */
 	bool overwrite(const T& val) {
+		//std::unique_lock<std::shared_mutex> lock(treeMutex);
 		btree_node_t<T, N> target;
 		uint64_t offset;
 
@@ -171,6 +175,7 @@ public:
 	 * @return true if the value was found, false if not
 	 */
 	bool find(T& val) {
+		//std::shared_lock<std::shared_mutex> lock(treeMutex);
 		btree_node_t<T, N> target;
 		uint64_t offset;
 
@@ -190,6 +195,7 @@ public:
 	 * @return true if a match was found, false if not
 	 */
 	bool findNext(T& val) {
+		//std::shared_lock<std::shared_mutex> lock(treeMutex);
 		btree_node_t<T, N> node = getRootNode();
 		uint64_t offset = getRootOffset();
 		bool found = false;
@@ -243,6 +249,7 @@ public:
 	 * @return true if the value was found and removed, false if not
 	 */
 	bool remove(T& val) {
+		//std::unique_lock<std::shared_mutex> lock(treeMutex);
 		btree_node_t<T, N> node;
 		uint64_t offset;
 
@@ -276,6 +283,14 @@ protected:
 	 * @param compare Pointer to a function that compares two elements of type T.
 	 */
 	explicit BTreeBase(int (*compare) (const T&, const T&)) : compare(compare) {}
+
+	// The mutex is non-copyable/non-movable but instances of BTreeBase are
+	// embedded in other containers (e.g. TreeMap) that rely on copy/move.
+	// Each instance gets its own fresh mutex.
+	BTreeBase(const BTreeBase& other) : compare(other.compare) {}
+	BTreeBase(BTreeBase&& other) noexcept : compare(other.compare) {}
+	BTreeBase& operator=(const BTreeBase& other) { compare = other.compare; return *this; }
+	BTreeBase& operator=(BTreeBase&& other) noexcept { compare = other.compare; return *this; }
 
 	/**
 	 * Finds which node is a good candidate for adding the given value.  The outputted node will always be at the
@@ -524,6 +539,8 @@ protected:
 	virtual void overwriteNodeHeader(uint64_t offset, const btree_node_t<T, N>& node) = 0;
 
 	int (*compare) (const T&, const T&); /**< Comparison function for elements of type T. */
+
+	mutable std::shared_mutex mutex;
 };
 
 
@@ -575,9 +592,7 @@ public:
 	 */
 	void initialize() {
 		btree_node_t<T, N> root{{0, 0, 0, -1, 0, {}}, {}};
-
-		file.seek(rootOffset);
-		file.write(root);
+		file.pwrite(root, rootOffset);
 	}
 
 protected:
@@ -589,9 +604,7 @@ protected:
 	 */
 	btree_node_t<T, N> getNode(uint64_t offset) const override {
 		btree_node_t<T, N> resultat;
-
-		file.seek(offset, SEEK_SET);
-		file.read(resultat);
+		file.pread(resultat, (off_t)offset);
 		return resultat;
 	}
 
@@ -618,7 +631,7 @@ protected:
 	 */
 	uint64_t addNode(const btree_node_t<T, N>& node) override {
 		uint64_t offset = file.seekToEndWithPadding(8);
-		file.write(node);
+		file.pwrite(node, offset);
 		return offset;
 	}
 
@@ -628,8 +641,7 @@ protected:
 	 * @param node Node data.
 	 */
 	void overwriteNode(uint64_t offset, const btree_node_t<T, N>& node) override {
-		file.seek(offset);
-		file.write(node);
+		file.pwrite(node, (off_t)offset);
 	}
 
 	/**
@@ -638,8 +650,7 @@ protected:
 	 * @param node Node data containing the header.
 	 */
 	void overwriteNodeHeader(uint64_t offset, const btree_node_t<T, N>& node) override {
-		file.seek(offset);
-		file.write(&node, sizeof(node.header));
+		file.pwrite(&node, sizeof(node.header), (off_t)offset);
 	}
 
 	off_t rootOffset; /**< Offset of the root node in the file. */

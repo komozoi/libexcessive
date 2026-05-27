@@ -18,6 +18,9 @@
 
 #include <string>
 #include <cstdint>
+#include <thread>
+#include <vector>
+#include <atomic>
 #include "universaltime.h"
 #include "gtest/gtest.h"
 #include "fs/FdHandle.h"
@@ -278,6 +281,48 @@ TEST(FreeSpaceFileTest, ReinsertAfterAllocate) {
 
 	if (!HasFailure()) unlink(test_file);
 }
+
+// Regression test: BTree is documented as threadsafe, and FreeSpaceFile is
+// accessed concurrently (e.g. from a ThreadPool by CatalogFile).  Allocating
+// and freeing regions from multiple threads must not corrupt the BTree's
+// on-disk nodes or crash inside the comparator.
+TEST(FreeSpaceFileTest, ConcurrentAllocateAndFree) {
+	std::string path = makeTempFileName("freespace_concurrent");
+	const char* test_file = path.c_str();
+
+	unlink(test_file);
+	FdHandle handle = FdHandle::open(test_file, O_RDWR | O_CREAT, 0660);
+	FreeSpaceFile fs(std::move(handle));
+
+	const int numThreads = 8;
+	const int opsPerThread = 200;
+
+	std::atomic<bool> failed(false);
+	std::vector<std::thread> threads;
+	threads.reserve(numThreads);
+
+	for (int t = 0; t < numThreads; t++) {
+		threads.emplace_back([&fs, &failed, t, opsPerThread]() {
+			for (int i = 0; i < opsPerThread; i++) {
+				uint32_t size = 64 + ((uint32_t)((t * 131) + (i * 17)) & 0x3FF);
+				off_t off = fs.getFreeRegion(size);
+				if (off < 0) {
+					failed.store(true);
+					return;
+				}
+				fs.markFreeRegion(off, size);
+			}
+		});
+	}
+
+	for (std::thread& th : threads)
+		th.join();
+
+	EXPECT_FALSE(failed.load());
+
+	if (!HasFailure()) unlink(test_file);
+}
+
 
 TEST(FreeSpaceFileTest, NeverAllocatesBeforeHeader) {
 	std::string path = makeTempFileName("freespace_header");
