@@ -231,7 +231,7 @@ public:
 	}
 
 	int16_t fd;
-	std::mutex mutex;
+	std::recursive_mutex mutex;
 
 	int numReferences() const {
 		return refs;
@@ -471,6 +471,53 @@ ssize_t FdHandle::read(void* value, size_t size) const {
 	return getHandleData(fd).read(value, size);
 }
 
+ssize_t FdHandle::pread(void* value, size_t size, off_t offset) const {
+	FdHandleData& handle = getHandleData(fd);
+
+	// Drain any queued positional writes so the read sees the latest data,
+	// then release the handle mutex before issuing the syscall.  Multiple
+	// readers can then execute concurrently inside the kernel.
+	{
+		std::lock_guard<std::recursive_mutex> _(handle.mutex);
+		handle.flushWrites();
+	}
+
+	char* buffer = (char*)value;
+	size_t totalRead = 0;
+	while (totalRead < size) {
+		ssize_t res = ::pread(handle.fd, &buffer[totalRead], size - totalRead, offset + (off_t)totalRead);
+		if (res < 0) {
+			if (totalRead > 0) return (ssize_t)totalRead;
+			return res;
+		} else if (res == 0)
+			break;
+		totalRead += (size_t)res;
+	}
+	return (ssize_t)totalRead;
+}
+
+ssize_t FdHandle::pwrite(const void* value, size_t size, off_t offset) const {
+	FdHandleData& handle = getHandleData(fd);
+
+	{
+		std::lock_guard<std::recursive_mutex> _(handle.mutex);
+		handle.flushWrites();
+	}
+
+	const char* buffer = (const char*)value;
+	size_t totalWritten = 0;
+	while (totalWritten < size) {
+		ssize_t res = ::pwrite(handle.fd, &buffer[totalWritten], size - totalWritten, offset + (off_t)totalWritten);
+		if (res < 0) {
+			if (totalWritten > 0) return (ssize_t)totalWritten;
+			return res;
+		} else if (res == 0)
+			break;
+		totalWritten += (size_t)res;
+	}
+	return (ssize_t)totalWritten;
+}
+
 bool FdHandle::waitForRead() const {
 	return getHandleData(fd).waitForRead();
 }
@@ -547,8 +594,8 @@ void FdHandle::close() {
 	}
 }
 
-std::lock_guard<std::mutex> FdHandle::getLock() const {
-	return std::lock_guard<std::mutex>(getHandleData(fd).mutex);
+std::lock_guard<std::recursive_mutex> FdHandle::getLock() const {
+	return std::lock_guard<std::recursive_mutex>(getHandleData(fd).mutex);
 }
 
 void FdHandle::markToClose() const {
@@ -561,7 +608,7 @@ MmapHandle FdHandle::getMmapHandle(off_t offset, size_t size, int prot, int flag
 	// Make sure the file is big enough, then
 	// restore the previous cursor position
 	{
-		std::lock_guard<std::mutex> _(handle.mutex);
+		std::lock_guard<std::recursive_mutex> _(handle.mutex);
 
 		// Get current file offset to restore later
 		off_t previousOffset = lseek(fd, 0, SEEK_CUR);

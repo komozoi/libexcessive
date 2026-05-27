@@ -302,6 +302,56 @@ public:
 	ssize_t read(void* value, size_t size) const;
 
 	/**
+	 * @brief Reads a value of type T from a specific file offset.
+	 *
+	 * This is a thread-safe positional read.  Unlike read(), it does not
+	 * mutate or rely on the file's seek position and does not hold the file
+	 * mutex for the duration of the syscall, allowing concurrent readers.
+	 *
+	 * @tparam T Type of value.
+	 * @param value Reference to store the read value.
+	 * @param offset Offset in the file to read from.
+	 * @return Number of bytes read.
+	 */
+	template<class T>
+	inline ssize_t pread(T& value, off_t offset) const {
+		return pread(&value, sizeof(value), offset);
+	}
+
+	/**
+	 * @brief Reads raw bytes from a specific file offset.
+	 * @param value Pointer to buffer.
+	 * @param size Number of bytes to read.
+	 * @param offset Offset in the file to read from.
+	 * @return Number of bytes read.
+	 */
+	ssize_t pread(void* value, size_t size, off_t offset) const;
+
+	/**
+	 * @brief Writes a value of type T to a specific file offset.
+	 *
+	 * Positional write that does not move the file's seek position.
+	 *
+	 * @tparam T Type of value.
+	 * @param value Value to write.
+	 * @param offset Offset in the file to write to.
+	 * @return Number of bytes written.
+	 */
+	template<class T>
+	inline ssize_t pwrite(const T& value, off_t offset) const {
+		return pwrite(&value, sizeof(value), offset);
+	}
+
+	/**
+	 * @brief Writes raw bytes to a specific file offset.
+	 * @param value Pointer to data.
+	 * @param size Number of bytes to write.
+	 * @param offset Offset in the file to write to.
+	 * @return Number of bytes written.
+	 */
+	ssize_t pwrite(const void* value, size_t size, off_t offset) const;
+
+	/**
 	 * @brief Waits until data is available for reading.
 	 * @return true if ready.
 	 */
@@ -382,7 +432,7 @@ public:
 	 * @brief Returns a lock guard for the file's mutex.
 	 * @return lock_guard.
 	 */
-	std::lock_guard<std::mutex> getLock() const;
+	std::lock_guard<std::recursive_mutex> getLock() const;
 
 	/**
 	 * @brief Destructor (decreases reference count).
@@ -506,7 +556,7 @@ public:
 	bool isStream() const;
 
 private:
-	std::lock_guard<std::mutex> guard;
+	std::lock_guard<std::recursive_mutex> guard;
 	FdHandleData& handleData; /**< Underlying file handle data. */
 };
 
