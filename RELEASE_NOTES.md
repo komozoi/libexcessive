@@ -1,4 +1,29 @@
 
+# Release Notes - v0.3.1
+
+## Improvements
+
+- **B-Tree concurrency and critical logic**:
+  - Fixed severe logic errors in `findNext`, `findNearest`, and `scanNode` affecting navigation and ascending order consistency.
+  - Added `std::shared_mutex` to `BTreeBase` for enabling concurrent reader access while maintaining exclusive writer access.
+  - Corrected node split/insertion logic in `insertNonFull`.
+  - Now uses `pwrite` and `pread` to avoid conflicts with other threads accessing the same file.  Improves multithreaded performance.
+- **FdHandle positional I/O**:
+  - Added thread-safe positional `pread` and `pwrite` methods for concurrent I/O operations without modifying the seek cursor.
+  - Replaced `FdHandleData::mutex` with `std::recursive_mutex` to eliminate deadlocks in complex transactions.
+- **Concurrency & Stability**:
+  - Fixed `FreeSpaceFile` SEGV/double-lock crashes under heavy `ThreadPool` contention.
+- **Other**:
+  - Added `sp<T>::numReferences()` to simplify reference count checks.
+  - Added copy assignment operator to `FdHandle`.
+  - Enhanced MmapHandle/FdHandle interaction.
+
+## Testing
+
+- Added comprehensive regression tests for BTree concurrency, including a new `BTreeFindNext` suite.
+- Added 9 new concurrency/safety tests for `FdHandle::pread`/`pwrite` in `FdHandleTest` suite, covering cross-thread safety, positional consistency, and queueWrite interaction.
+- Added regression test for `FreeSpaceFile` concurrent allocation and free.
+
 # Release Notes - v0.3.0
 
 ## New Features
