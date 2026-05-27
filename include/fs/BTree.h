@@ -190,29 +190,49 @@ public:
 	 * @return true if a match was found, false if not
 	 */
 	bool findNext(T& val) {
-		btree_node_t<T, N> node;
-		uint64_t offset;
-
-		int i = findNearest(val, node, offset);
-		if (i > 0)
-			i--;
+		btree_node_t<T, N> node = getRootNode();
+		uint64_t offset = getRootOffset();
+		bool found = false;
+		T best;
 
 		while (true) {
-			if (i < node.header.nElements && compare(node.elements[i], val) >= 0) {
-				// Found a valid next value (either equal or next greater)
-				val = node.elements[i];
-				return true;
+			int low = 0;
+			int high = node.header.nElements - 1;
+			int midIdx = -1;
+
+			while (low <= high) {
+				int mid = (low + high) / 2;
+				int c = compare(node.elements[mid], val);
+				if (c < 0) {
+					low = mid + 1;
+				} else if (c == 0) {
+					val = node.elements[mid];
+					return true;
+				} else {
+					midIdx = mid;
+					high = mid - 1;
+				}
 			}
 
-			// If this node has no children, there is no next element
-			if (node.header.nChildren == 0)
-				return false;
+			if (midIdx != -1) {
+				if (!found || compare(node.elements[midIdx], best) < 0) {
+					best = node.elements[midIdx];
+					found = true;
+				}
+			}
 
-			// Go to the next child
-			offset = node.header.childOffsets[i];
+			if (node.header.nChildren == 0)
+				break;
+
+			offset = node.header.childOffsets[low];
 			node = getNode(offset);
-			i = 0;
 		}
+
+		if (found) {
+			val = best;
+			return true;
+		}
+		return false;
 	}
 
 	/**
@@ -279,11 +299,11 @@ protected:
 				int c = compare(node.elements[mid], val);
 
 				if (c < 0)
-					high = mid - 1;
+					low = mid + 1;
 				else if (c == 0) {
 					return mid;
 				} else
-					low = mid + 1;
+					high = mid - 1;
 			}
 
 			if (node.header.nChildren == 0)
@@ -323,18 +343,18 @@ protected:
 			overwriteNode(offset, node);
 
 		} else {
-			btree_node_t<T, N> child = getNode(node.childOffsets[i]);
+			btree_node_t<T, N> child = getNode(node.header.childOffsets[i]);
 
 			if (child.header.nElements == N) {
 				uint64_t newChildOffset;
-				btree_node_t<T, N> newChild = splitChild(node, child, node.childOffsets[i], newChildOffset);
+				btree_node_t<T, N> newChild = splitChild(node, child, node.header.childOffsets[i], newChildOffset);
 				if (compare(node.elements[i], element) <= 0) {
 					child = newChild;
 					i++;
 				}
 			}
 
-			insertNonFull(child, node.childOffsets[i], element);
+			insertNonFull(child, node.header.childOffsets[i], element);
 		}
 
 	}
@@ -452,7 +472,7 @@ protected:
 	int scanNode(const btree_node_t<T, N>& node, const T& element) {
 		int i = 0;
 		for (; i < node.header.nElements; i++) {
-			if (compare(node.elements[i], element) <= 0)
+			if (compare(node.elements[i], element) >= 0)
 				break;
 		}
 

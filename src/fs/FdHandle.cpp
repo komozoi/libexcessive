@@ -551,11 +551,6 @@ std::lock_guard<std::mutex> FdHandle::getLock() const {
 	return std::lock_guard<std::mutex>(getHandleData(fd).mutex);
 }
 
-FdHandle::~FdHandle() {
-	if (fd >= 0)
-		getHandleData(fd).decRef();
-}
-
 void FdHandle::markToClose() const {
 	getHandleData(fd).markToClose();
 }
@@ -607,6 +602,11 @@ bool FdHandle::shouldClose() const {
 
 int FdHandle::numReferences() const {
 	return getHandleData(fd).numReferences();
+}
+
+FdHandle::~FdHandle() {
+	if (fd >= 0)
+		getHandleData(fd).decRef();
 }
 
 FdTransaction::FdTransaction(const FdHandle& handle) : guard(getHandleData(handle.getFd()).mutex), handleData(getHandleData(handle.getFd())) {

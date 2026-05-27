@@ -320,3 +320,66 @@ TEST_F(BTreeBaseTest, FindNext) {
 	EXPECT_FALSE(tree.findNext(val));
 	EXPECT_EQ(10000, val);
 }
+
+TEST(BTreeFindNext, FindsClosestHigherInChildNode) {
+	RAMBTree<int, 3> tree(compareInts);
+
+	// Insert enough elements to force multiple splits and a multi-level tree.
+	// Using even numbers so we can probe with odd "gap" queries.
+	const int numElements = 200;
+	for (int i = 0; i < numElements; ++i)
+		tree.insert(i * 2);
+
+	// Sanity check: every inserted value must be retrievable via find().
+	for (int i = 0; i < numElements; ++i) {
+		int val = i * 2;
+		ASSERT_TRUE(tree.find(val)) << "find missing for " << (i * 2);
+		ASSERT_EQ(i * 2, val);
+	}
+
+	// For every odd value in range, findNext must return the next even value.
+	// Under the previous buggy findNext, the descent skipped the correct child
+	// and returned an unrelated greater value (or returned false), making this
+	// test fail.
+	for (int q = 1; q < numElements * 2 - 1; q += 2) {
+		int val = q;
+		EXPECT_TRUE(tree.findNext(val)) << "query=" << q;
+		EXPECT_EQ(q + 1, val) << "query=" << q;
+	}
+
+	// Exact-match probes must still work.
+	for (int q = 0; q < numElements * 2; q += 2) {
+		int val = q;
+		EXPECT_TRUE(tree.findNext(val)) << "query=" << q;
+		EXPECT_EQ(q, val) << "query=" << q;
+	}
+
+	// A value strictly larger than every element should not be found.
+	int val = numElements * 2 + 10;
+	EXPECT_FALSE(tree.findNext(val));
+	EXPECT_EQ(numElements * 2 + 10, val);
+}
+
+
+// Regression test: findNext with a sparse outlier in a deep tree.  Searching
+// in the gap between the densely packed range and the outlier must return
+// the outlier (which lives in a different subtree than the descent path of
+// the buggy implementation).
+TEST(BTreeFindNext, FindsOutlierAcrossSubtrees) {
+	RAMBTree<int, 3> tree(compareInts);
+
+	for (int i = 0; i < 100; ++i)
+		tree.insert(i * 2);
+	tree.insert(100000);
+
+	int val = 500;
+	EXPECT_TRUE(tree.findNext(val));
+	EXPECT_EQ(100000, val);
+
+	val = 99999;
+	EXPECT_TRUE(tree.findNext(val));
+	EXPECT_EQ(100000, val);
+
+	val = 100001;
+	EXPECT_FALSE(tree.findNext(val));
+}
