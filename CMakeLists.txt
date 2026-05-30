@@ -58,7 +58,7 @@ if(LIBEXCESSIVE_BUILD_TESTS)
                 src/tests/*.cpp
         )
 
-        add_executable(libexcessive_tests src/testmain.cpp ${TEST_SOURCES})
+        add_executable(libexcessive_tests src/tests/testmain.cpp ${TEST_SOURCES})
         target_link_libraries(libexcessive_tests PRIVATE LibExcessive::excessive ${GTEST_LIBRARIES})
     endif()
 endif()
