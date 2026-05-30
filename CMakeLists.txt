@@ -2,11 +2,12 @@ cmake_minimum_required(VERSION 3.15)
 
 project(LibExcessive LANGUAGES C CXX)
 
-file(GLOB_RECURSE LIBEXCESSIVE_SOURCES CONFIGURE_DEPENDS
+file(GLOB LIBEXCESSIVE_SOURCES CONFIGURE_DEPENDS
         src/*.cpp
         src/alloc/*.cpp
         src/ds/*.cpp
         src/fs/*.cpp
+        src/parallel/*.cpp
 )
 
 add_library(excessive ${LIBEXCESSIVE_SOURCES})
@@ -53,7 +54,7 @@ if(LIBEXCESSIVE_BUILD_TESTS)
     find_package(GTest QUIET)
 
     if(GTest_FOUND)
-        file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
+        file(GLOB TEST_SOURCES CONFIGURE_DEPENDS
                 src/tests/*.cpp
         )
 
