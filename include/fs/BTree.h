@@ -408,6 +408,10 @@ protected:
 	 * @param newChildOffset Output parameter for the offset of the newly created node.
 	 * @return The newly created node.
 	 */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winfinite-recursion"
+#endif
 	btree_node_t<T, N> splitChild(btree_node_t<T, N>& parent, btree_node_t<T, N>& originalChild, uint64_t childOffset, uint64_t& newChildOffset) {
 		if (parent.header.nElements == N) {
 			btree_node_t<T, N> rhs;
@@ -477,6 +481,9 @@ protected:
 
 		return newChild;
 	}
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 	/**
 	 * @brief Scans a node to find the position for an element.
