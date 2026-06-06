@@ -38,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake build-essential libgtest-dev
         elif [[ ${{ matrix.os }} == 'macos-latest' || ${{ matrix.os }} == 'macos-15-intel' ]]; then
-          brew install cmake
+          brew install cmake googletest
         fi
 
     - name: Configure CMake
