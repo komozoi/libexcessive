@@ -10,6 +10,7 @@ on:
       - '**/*.hpp'
       - '**/CMakeLists.txt'
       - '**/*.cmake'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [ "master", "main" ]
     paths:
@@ -19,10 +20,14 @@ on:
       - '**/*.hpp'
       - '**/CMakeLists.txt'
       - '**/*.cmake'
+      - '.github/workflows/ci.yml'
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
