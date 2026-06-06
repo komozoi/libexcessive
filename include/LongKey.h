@@ -20,7 +20,6 @@
 #define EXCESSIVE_LONGKEY_H
 
 #include <cstdint>
-#include <immintrin.h>
 #include "string.h"
 #include <string>
 
