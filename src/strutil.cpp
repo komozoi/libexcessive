@@ -47,7 +47,7 @@ char* formatBinaryDataForHexdump(const uint8_t* data, int size, int columns) {
 
 	for (int line = 0; line < nLines; line++) {
 		if (nLines > 1)
-			p += sprintf(p, "%04zx  ", (size_t)(dp - data));
+			p += snprintf(p, 32, "%04zx  ", (size_t)(dp - data));
 
 		if (line + 1 == nLines)
 			columns = size - columns * line;
