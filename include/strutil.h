@@ -130,7 +130,7 @@ static inline char* toHex(uint64_t value, char* outBuffer) {
 	*(outBuffer) = 0;
 
 	return outBuffer;*/
-	return &outBuffer[sprintf(outBuffer, "0x%lx", value)];
+	return &outBuffer[snprintf(outBuffer, 20, "0x%llx", (unsigned long long)value)];
 }
 
 
