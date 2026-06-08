@@ -43,7 +43,7 @@ static inline bool isNumber(const std::string_view& s) {
  * Finds the end of the string and adds the formatted string to it while formatting.
  * @param s1 first string to concat, usually output from a previous concatf() call
  * @param s2 a format string
- * @return
+ * @return Pointer to the null-terminator in the output buffer.
  */
 static inline char* concatf(char* s1, const char* s2, ...) {
 	while (*s1)
@@ -51,7 +51,11 @@ static inline char* concatf(char* s1, const char* s2, ...) {
 
 	va_list args;
 	va_start(args, s2);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 	s1 = &s1[vsprintf(s1, s2, args)];
+#pragma GCC diagnostic pop
+	//s1 = &s1[vsnprintf(s1, 1024 * 1024, s2, args)];
 	va_end(args);
 
 	return s1;
@@ -130,7 +134,7 @@ static inline char* toHex(uint64_t value, char* outBuffer) {
 	*(outBuffer) = 0;
 
 	return outBuffer;*/
-	return &outBuffer[sprintf(outBuffer, "0x%lx", value)];
+	return &outBuffer[snprintf(outBuffer, 20, "0x%llx", (unsigned long long)value)];
 }
 
 

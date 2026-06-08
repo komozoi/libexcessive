@@ -19,39 +19,46 @@
 #include <gtest/gtest.h>
 #include "fcntl.h"
 #include "bigint.h"
-#include "universaltime.h"
+
+
+static uint32_t rand_state = 42;
+static uint32_t deterministic_rand() {
+	rand_state = rand_state * 1664525 + 1013904223;
+	rand_state ^= rand_state >> 16;
+	return rand_state;
+}
 
 
 TEST(UnsignedFixedWidthBigIntTest, AddSpeed) {
 	uint256_t a(0x55);
 	a <<= 192;
-	srand(42);
+	rand_state = 42;
 	for (int i = 0; i < 5000000; i++) {
 		uint256_t b(0);
-		b.data.rawBytes[rand() & 31] = rand();
+		b.data.rawBytes[deterministic_rand() & 31] = (uint8_t)deterministic_rand();
 		a += b;
 		a += 67;
 		a += b;
 	}
 
-	EXPECT_EQ(a, uint256_t("0x45A0285D15F95D6Db6F8D7b69934232b8bA67bc43ce40c70A3A6F3318D88326c"));
+	EXPECT_EQ(a, uint256_t("0xc5c0702083816c22282c9Fe322F87D9F4c8c21660735e97A508619ce4bbc35cA"));
 }
 
 TEST(UnsignedFixedWidthBigIntTest, MulSpeed) {
 	uint256_t a(0x55);
 	a <<= 192;
-	srand(42);
+	rand_state = 42;
 	for (int i = 0; i < 1000000; i++) {
 		uint256_t b(0);
-		b.data.rawBytes[rand() & 31] = rand();
-		b.data.rawBytes[rand() & 31] = rand();
+		b.data.rawBytes[deterministic_rand() & 31] = (uint8_t)deterministic_rand();
+		b.data.rawBytes[deterministic_rand() & 31] = (uint8_t)deterministic_rand();
 		b = b * b;
 		a = (a + 17) * (b + 13);
 	}
 	for (int i = 0; i < 500000; i++)
 		a = a * (a + 17);
 
-	EXPECT_EQ(a, uint256_t("0xA6cb8c90AA2F76816928357e9453e02b6740DD86DA7684671774FD33c9327316"));
+	EXPECT_EQ(a, uint256_t("0x2A73DA2D09576Db8b409c2583F04e378e79eFe2c3cAccb9767cc9cece86A828"));
 }
 
 
