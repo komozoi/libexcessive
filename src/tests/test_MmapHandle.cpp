@@ -467,22 +467,24 @@ TEST(MmapHandleTest, ResizeViaMmap) {
 
 TEST(MmapHandleTest, MmapWithOffset) {
 	const char* test_file = "fd_mmap_test.tmp";
+	long pagesize = sysconf(_SC_PAGESIZE);
+
 	unlink(test_file);
 	FdHandle handle = FdHandle::open(test_file, O_RDWR | O_CREAT, 0660);
 	ASSERT_TRUE(handle);
-	MmapHandle full_map = handle.getMmapHandle(0, 8192);
+	MmapHandle full_map = handle.getMmapHandle(0, pagesize * 2);
 	ASSERT_TRUE(full_map);
 
 	const char str1[] = "Start";
 	full_map.write(str1, 5);
 
-	MmapHandle offset_map = handle.getMmapHandle(4096, 4096);
+	MmapHandle offset_map = handle.getMmapHandle(pagesize, pagesize);
 	ASSERT_TRUE(offset_map);
 
 	const char str2[] = "Offset";
 	offset_map.write(str2, 6);
 
-	full_map.seek(4096, SEEK_SET);
+	full_map.seek(pagesize, SEEK_SET);
 	char buffer[6];
 	full_map.read(buffer, 6);
 	EXPECT_EQ(memcmp(buffer, str2, 6), 0);
@@ -514,7 +516,7 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 	const char* test_file = "fd_mmap_test.tmp";
 	unlink(test_file);
 
-	const size_t blockSize = 16 * 1024 * 1024;
+	const size_t blockSize = 64 * 1024 * 1024;
 	const int threadCount = 4;
 
 	FdHandle handle = FdHandle::open(test_file, O_RDWR | O_CREAT, 0660);
