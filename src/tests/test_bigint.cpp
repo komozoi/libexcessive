@@ -151,6 +151,12 @@ TEST(UnsignedFixedWidthBigIntTest, Divide) {
 	resultExpected = "0x70A08231";
 	result = numerator / denominator;
 	EXPECT_EQ(result, resultExpected);
+
+	// Divide by one (regression test for bug zeroing middle limbs)
+	numerator = "0x1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF";
+	denominator = 1;
+	result = numerator / denominator;
+	EXPECT_EQ(result, numerator);
 }
 
 TEST(UnsignedFixedWidthBigIntTest, Modulo) {

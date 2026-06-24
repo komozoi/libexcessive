@@ -397,7 +397,6 @@ void _internalBigintFastDiv(uint64_t* remainder, const uint64_t* divisor, uint64
 		uint64_t borrow = 0;
 		uint16_t wordShift = bits >> 6;
 		uint16_t numeratorBitsOld = numeratorBits;
-		uint16_t bitcntIdx = 0;
 		for (uint16_t i = wordShift; (i*64 < numeratorBitsOld || borrow) && i < size; i++) {
 			uint64_t subtractor = divisor[i - wordShift] << bitShift1;
 			if (bitShift1 && i > wordShift)
@@ -412,8 +411,6 @@ void _internalBigintFastDiv(uint64_t* remainder, const uint64_t* divisor, uint64
 				borrow = 0;
 
 			remainder[i] = temp;
-			if (temp != 0)
-				bitcntIdx = i;
 		}
 
 		if (borrow) {
@@ -437,12 +434,17 @@ void _internalBigintFastDiv(uint64_t* remainder, const uint64_t* divisor, uint64
 					carry = 0;
 
 				remainder[i] = temp;
-				if (temp)
-					bitcntIdx = i;
 			}
 		}
 
-		numeratorBits = ::countBits(remainder[bitcntIdx]) + 64*bitcntIdx;
+		// Recalculate numeratorBits by scanning down from the previous highest limb
+		numeratorBits = 0;
+		for (int i = (int)((numeratorBitsOld + 63) >> 6) - 1; i >= 0; i--) {
+			if (i < size && remainder[i]) {
+				numeratorBits = (uint16_t)countBits(remainder[i]) + (uint16_t)i * 64;
+				break;
+			}
+		}
 
 		if (quotient)
 			quotient[wordShift] |= (uint64_t)1 << bitShift1;
