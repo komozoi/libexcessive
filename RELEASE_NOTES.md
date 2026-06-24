@@ -1,6 +1,20 @@
 
 # Release Notes - v0.3.1
 
+This release is focused on bugfixes and stability improvements.  Better multithreading, less
+IO contention, and more stability.
+
+Additionally, we now officially support ARM, and FrozenBTree has been introduced to provide immutable
+on-disk indexes using Mmap.
+
+## New Features
+
+- **FrozenBTree**:
+  - Introduced `FrozenBTree` for high-performance, read-only B-Tree segments.
+  - Optimized for static data with minimal memory overhead.
+- **ARM Support**:
+  - Added initial support and testing for ARM architectures.  Goal is to support MacOS *soon* :tm:.
+
 ## Improvements
 
 - **B-Tree concurrency and critical logic**:
@@ -13,16 +27,33 @@
   - Replaced `FdHandleData::mutex` with `std::recursive_mutex` to eliminate deadlocks in complex transactions.
 - **Concurrency & Stability**:
   - Fixed `FreeSpaceFile` SEGV/double-lock crashes under heavy `ThreadPool` contention.
+- **Build System**:
+  - Improved `CMakeLists.txt` with corrected recursive globbing logic.
+  - Moved `testmain` out of the library target to ensure it is not included in dependent builds.
+  - Suppressed spurious infinite recursion warnings in certain compiler versions.
 - **Other**:
   - Added `sp<T>::numReferences()` to simplify reference count checks.
   - Added copy assignment operator to `FdHandle`.
   - Enhanced MmapHandle/FdHandle interaction.
 
+## Bug Fixes
+
+- **Bigint Division**:
+  - Fixed a severe bug in `_internalBigintFastDiv` where dividing by 1 (or other small values) would corrupt the quotient by zeroing out intermediate limbs.
+- **B-Tree Repairs**:
+  - Fixed multiple compilation errors in `BTree.h` related to missing forward declarations and incorrect inheritance.
+  - Resolved illegal local reference returns in `BTreeIterator`.
+
 ## Testing
 
-- Added comprehensive regression tests for BTree concurrency, including a new `BTreeFindNext` suite.
-- Added 9 new concurrency/safety tests for `FdHandle::pread`/`pwrite` in `FdHandleTest` suite, covering cross-thread safety, positional consistency, and queueWrite interaction.
-- Added regression test for `FreeSpaceFile` concurrent allocation and free.
+- **Bigint**:
+  - Added regression tests for the `bigint` division-by-one bug in `UnsignedFixedWidthBigIntTest`.
+- **B-Tree**:
+  - Added comprehensive regression tests for BTree concurrency, including a new `BTreeFindNext` suite.
+- **FdHandle**:
+  - Added 9 new concurrency/safety tests for `FdHandle::pread`/`pwrite` in `FdHandleTest` suite, covering cross-thread safety, positional consistency, and queueWrite interaction.
+- **FreeSpaceFile**:
+  - Added regression test for `FreeSpaceFile` concurrent allocation and free.
 
 # Release Notes - v0.3.0
 
