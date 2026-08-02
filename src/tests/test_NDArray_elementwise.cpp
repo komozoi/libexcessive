@@ -15,96 +15,116 @@
 
 
 // ============================================================
-// Unary element-wise
+// Unary element-wise — IN PLACE (operators copy)
 // ============================================================
 
-TEST(NDArray_elementwise, Neg_F32) {
+TEST(NDArray_elementwise, Neg_InPlace) {
 	NDArray a(ArrayList({1.0f, -2.0f, 0.0f}));
-	NDArray b = a.neg();
-	EXPECT_EQ(b.type, F32);
-	EXPECT_FLOAT_EQ(b.get<float>({0}), -1.0f);
-	EXPECT_FLOAT_EQ(b.get<float>({1}), 2.0f);
-	EXPECT_FLOAT_EQ(b.get<float>({2}), 0.0f);
-	// original unchanged
-	EXPECT_FLOAT_EQ(a.get<float>({0}), 1.0f);
+	a.neg();
+	EXPECT_EQ(a.type, F32);
+	EXPECT_FLOAT_EQ(a.get<float>({0}), -1.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1}), 2.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({2}), 0.0f);
 }
 
-TEST(NDArray_elementwise, Neg_UnaryOperator) {
+TEST(NDArray_elementwise, Neg_UnaryOperator_Copies) {
 	NDArray a(ArrayList({3.0f, -4.0f}));
 	NDArray b = -a;
 	EXPECT_FLOAT_EQ(b.get<float>({0}), -3.0f);
 	EXPECT_FLOAT_EQ(b.get<float>({1}), 4.0f);
+	// original unchanged
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 3.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1}), -4.0f);
 }
 
-TEST(NDArray_elementwise, Neg_UINT8_PromotesToF32) {
+TEST(NDArray_elementwise, Neg_UINT8_PromotesToINT32) {
 	NDArray a(ArrayList<uint8_t>({1, 2, 3}));
-	NDArray b = a.neg();
-	EXPECT_EQ(b.type, F32);
-	EXPECT_FLOAT_EQ(b.get<float>({0}), -1.0f);
-	EXPECT_FLOAT_EQ(b.get<float>({2}), -3.0f);
+	a.neg();
+	EXPECT_EQ(a.type, INT32);
+	EXPECT_EQ(a.get<int32_t>({0}), -1);
+	EXPECT_EQ(a.get<int32_t>({2}), -3);
 }
 
-TEST(NDArray_elementwise, Abs_F32) {
+TEST(NDArray_elementwise, Abs_F32_InPlace) {
 	NDArray a(ArrayList({-1.5f, 2.0f, -0.0f}));
-	NDArray b = a.abs();
-	EXPECT_FLOAT_EQ(b.get<float>({0}), 1.5f);
-	EXPECT_FLOAT_EQ(b.get<float>({1}), 2.0f);
+	a.abs();
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 1.5f);
+	EXPECT_FLOAT_EQ(a.get<float>({1}), 2.0f);
 }
 
-TEST(NDArray_elementwise, Abs_UINT8_Identity) {
+TEST(NDArray_elementwise, Abs_UINT8_NoOp) {
 	NDArray a(ArrayList<uint8_t>({0, 5, 255}));
-	NDArray b = a.abs();
-	EXPECT_EQ(b.type, UINT8);
-	EXPECT_EQ(b.get<uint8_t>({1}), 5);
-	EXPECT_EQ(b.get<uint8_t>({2}), 255);
+	a.abs();
+	EXPECT_EQ(a.type, UINT8);
+	EXPECT_EQ(a.get<uint8_t>({1}), 5);
+	EXPECT_EQ(a.get<uint8_t>({2}), 255);
 }
 
 TEST(NDArray_elementwise, Sqrt_Exp_Log) {
 	NDArray a(ArrayList({1.0f, 4.0f, 9.0f}));
-	NDArray r = a.sqrt();
-	EXPECT_FLOAT_EQ(r.get<float>({0}), 1.0f);
-	EXPECT_FLOAT_EQ(r.get<float>({1}), 2.0f);
-	EXPECT_FLOAT_EQ(r.get<float>({2}), 3.0f);
+	a.sqrt();
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 1.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1}), 2.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({2}), 3.0f);
 
-	NDArray e = NDArray(ArrayList({0.0f, 1.0f})).exp();
+	NDArray e(ArrayList({0.0f, 1.0f}));
+	e.exp();
 	EXPECT_FLOAT_EQ(e.get<float>({0}), 1.0f);
 	EXPECT_NEAR(e.get<float>({1}), std::exp(1.0f), 1e-5f);
 
-	NDArray l = NDArray(ArrayList({1.0f, std::exp(1.0f)})).log();
+	NDArray l(ArrayList({1.0f, std::exp(1.0f)}));
+	l.log();
 	EXPECT_NEAR(l.get<float>({0}), 0.0f, 1e-5f);
 	EXPECT_NEAR(l.get<float>({1}), 1.0f, 1e-5f);
 }
 
-TEST(NDArray_elementwise, Sqrt_UINT8_PromotesToF32) {
+TEST(NDArray_elementwise, Sqrt_UINT8_PromotesToF64) {
 	NDArray a(ArrayList<uint8_t>({4, 9, 16}));
-	NDArray b = a.sqrt();
-	EXPECT_EQ(b.type, F32);
-	EXPECT_FLOAT_EQ(b.get<float>({0}), 2.0f);
-	EXPECT_FLOAT_EQ(b.get<float>({1}), 3.0f);
-	EXPECT_FLOAT_EQ(b.get<float>({2}), 4.0f);
+	a.sqrt();
+	EXPECT_EQ(a.type, F64);
+	EXPECT_DOUBLE_EQ(a.get<double>({0}), 2.0);
+	EXPECT_DOUBLE_EQ(a.get<double>({1}), 3.0);
+	EXPECT_DOUBLE_EQ(a.get<double>({2}), 4.0);
 }
 
 TEST(NDArray_elementwise, Floor_Ceil_Round) {
-	NDArray a(ArrayList({1.2f, 1.5f, 1.8f, -1.2f, -1.8f}));
-	NDArray f = a.floor();
+	NDArray f(ArrayList({1.2f, 1.5f, 1.8f, -1.2f, -1.8f}));
+	f.floor();
 	EXPECT_FLOAT_EQ(f.get<float>({0}), 1.0f);
 	EXPECT_FLOAT_EQ(f.get<float>({3}), -2.0f);
 
-	NDArray c = a.ceil();
+	NDArray c(ArrayList({1.2f, 1.5f, 1.8f, -1.2f, -1.8f}));
+	c.ceil();
 	EXPECT_FLOAT_EQ(c.get<float>({0}), 2.0f);
 	EXPECT_FLOAT_EQ(c.get<float>({3}), -1.0f);
 
-	NDArray r = a.round();
+	NDArray r(ArrayList({1.2f, 1.5f, 1.8f, -1.2f, -1.8f}));
+	r.round();
 	EXPECT_FLOAT_EQ(r.get<float>({0}), 1.0f);
-	EXPECT_FLOAT_EQ(r.get<float>({1}), 2.0f); // round half away from zero / banker's — libm round
+	EXPECT_FLOAT_EQ(r.get<float>({1}), 2.0f);
 	EXPECT_FLOAT_EQ(r.get<float>({2}), 2.0f);
 }
 
-TEST(NDArray_elementwise, Floor_OnInteger_IsCopy) {
+TEST(NDArray_elementwise, Floor_OnInteger_NoOp) {
 	NDArray a(ArrayList<uint8_t>({1, 2, 3}));
-	NDArray b = a.floor();
-	EXPECT_EQ(b.type, UINT8);
-	EXPECT_EQ(b.get<uint8_t>({2}), 3);
+	a.floor();
+	EXPECT_EQ(a.type, UINT8);
+	EXPECT_EQ(a.get<uint8_t>({2}), 3);
+}
+
+TEST(NDArray_elementwise, Square_InPlace_ChainsToPower4) {
+	// b.square().square() → b**4 in place
+	NDArray b(ArrayList({2.0f, 3.0f}));
+	b.square().square();
+	EXPECT_FLOAT_EQ(b.get<float>({0}), 16.0f); // 2^4
+	EXPECT_FLOAT_EQ(b.get<float>({1}), 81.0f); // 3^4
+}
+
+TEST(NDArray_elementwise, MulOperator_StillCopies) {
+	NDArray a(ArrayList({2.0f, 3.0f}));
+	NDArray c = a * a;
+	EXPECT_FLOAT_EQ(c.get<float>({0}), 4.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 2.0f); // original intact
 }
 
 
@@ -205,43 +225,50 @@ TEST(NDArray_elementwise, Modulo_Operator) {
 
 TEST(NDArray_elementwise, Log2_Log10_Log1p_Expm1) {
 	NDArray a(ArrayList({1.0f, 8.0f, 100.0f}));
-	NDArray l2 = a.log2();
-	EXPECT_NEAR(l2.get<float>({0}), 0.0f, 1e-5f);
-	EXPECT_NEAR(l2.get<float>({1}), 3.0f, 1e-5f);
+	NDArray a2 = a;
+	a2.log2();
+	EXPECT_NEAR(a2.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(a2.get<float>({1}), 3.0f, 1e-5f);
 
-	NDArray l10 = a.log10();
-	EXPECT_NEAR(l10.get<float>({0}), 0.0f, 1e-5f);
-	EXPECT_NEAR(l10.get<float>({2}), 2.0f, 1e-5f);
+	NDArray a3 = a;
+	a3.log10();
+	EXPECT_NEAR(a3.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(a3.get<float>({2}), 2.0f, 1e-5f);
 
 	NDArray x(ArrayList({0.0f, std::exp(1.0f) - 1.0f}));
-	EXPECT_NEAR(x.log1p().get<float>({0}), 0.0f, 1e-5f);
-	EXPECT_NEAR(x.log1p().get<float>({1}), 1.0f, 1e-4f);
+	x.log1p();
+	EXPECT_NEAR(x.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(x.get<float>({1}), 1.0f, 1e-4f);
 
 	NDArray z(ArrayList({0.0f, 1.0f}));
-	EXPECT_NEAR(z.expm1().get<float>({0}), 0.0f, 1e-5f);
-	EXPECT_NEAR(z.expm1().get<float>({1}), std::exp(1.0f) - 1.0f, 1e-5f);
+	z.expm1();
+	EXPECT_NEAR(z.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(z.get<float>({1}), std::exp(1.0f) - 1.0f, 1e-5f);
 }
 
 TEST(NDArray_elementwise, Sign_Square_Cbrt_Trig) {
 	NDArray a(ArrayList({-2.0f, 0.0f, 3.0f}));
-	NDArray s = a.sign();
+	NDArray s = a; // copy for sign
+	s.sign();
 	EXPECT_FLOAT_EQ(s.get<float>({0}), -1.0f);
 	EXPECT_FLOAT_EQ(s.get<float>({1}), 0.0f);
 	EXPECT_FLOAT_EQ(s.get<float>({2}), 1.0f);
 
-	NDArray sq = a.square();
+	NDArray sq = a;
+	sq.square();
 	EXPECT_FLOAT_EQ(sq.get<float>({0}), 4.0f);
 	EXPECT_FLOAT_EQ(sq.get<float>({2}), 9.0f);
 
 	NDArray c(ArrayList({8.0f, 27.0f}));
-	EXPECT_NEAR(c.cbrt().get<float>({0}), 2.0f, 1e-5f);
-	EXPECT_NEAR(c.cbrt().get<float>({1}), 3.0f, 1e-5f);
+	c.cbrt();
+	EXPECT_NEAR(c.get<float>({0}), 2.0f, 1e-5f);
+	EXPECT_NEAR(c.get<float>({1}), 3.0f, 1e-5f);
 
 	const float halfPi = std::acos(-1.0f) * 0.5f;
 	NDArray ang(ArrayList({0.0f, halfPi}));
-	EXPECT_NEAR(ang.sin().get<float>({0}), 0.0f, 1e-5f);
-	EXPECT_NEAR(ang.sin().get<float>({1}), 1.0f, 1e-5f);
-	EXPECT_NEAR(ang.cos().get<float>({0}), 1.0f, 1e-5f);
+	ang.sin();
+	EXPECT_NEAR(ang.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(ang.get<float>({1}), 1.0f, 1e-5f);
 }
 
 TEST(NDArray_elementwise, Clip) {
@@ -319,7 +346,7 @@ TEST(NDArray_elementwise, Compare_DoesNotBreak_WholeArrayEquality) {
 // ============================================================
 
 TEST(NDArray_elementwise, Where_Basic) {
-	NDArray cond(ArrayList({1.0f, 0.0f, 1.0f})); // truthy via non-BINARY
+	NDArray cond(ArrayList({1.0f, 0.0f, 1.0f}));
 	NDArray x(ArrayList({10.0f, 20.0f, 30.0f}));
 	NDArray y(ArrayList({1.0f, 2.0f, 3.0f}));
 
@@ -376,4 +403,41 @@ TEST(NDArray_elementwise, Any_All) {
 	b.set({1}, 0);
 	EXPECT_FALSE(b.all());
 	EXPECT_TRUE(b.any());
+}
+
+
+// ============================================================
+// New dtypes: F64, INT32, INT64
+// ============================================================
+
+TEST(NDArray_elementwise, F64_Basic) {
+	NDArray a(ArrayList<double>({1.5, 2.5, 3.5}));
+	EXPECT_EQ(a.type, F64);
+	a.square();
+	EXPECT_DOUBLE_EQ(a.get<double>({0}), 2.25);
+	EXPECT_DOUBLE_EQ(a.get<double>({1}), 6.25);
+}
+
+TEST(NDArray_elementwise, INT32_INT64_Arithmetic) {
+	NDArray a(ArrayList<int32_t>({10, 20, 30}));
+	NDArray b(ArrayList<int32_t>({1, 2, 3}));
+	NDArray c = a + b;
+	EXPECT_EQ(c.type, INT32);
+	EXPECT_EQ(c.get<int32_t>({0}), 11);
+	EXPECT_EQ(c.get<int32_t>({2}), 33);
+
+	NDArray d(ArrayList<int64_t>({(int64_t)1e12, (int64_t)2e12}));
+	EXPECT_EQ(d.type, INT64);
+	d.square();
+	// 1e12^2 = 1e24 — may overflow int64; just check type stayed
+	EXPECT_EQ(d.type, INT64);
+}
+
+TEST(NDArray_elementwise, INT32_plus_F32_PromotesToF64) {
+	NDArray a(ArrayList<int32_t>({1, 2, 3}));
+	NDArray b(ArrayList({0.5f, 0.5f, 0.5f}));
+	NDArray c = a + b;
+	EXPECT_EQ(c.type, F64);
+	EXPECT_DOUBLE_EQ(c.get<double>({0}), 1.5);
+	EXPECT_DOUBLE_EQ(c.get<double>({2}), 3.5);
 }

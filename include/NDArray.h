@@ -26,19 +26,19 @@ enum NDArrayType {
 	//UINT4 = 0x07,
 	//INT8 = 0x0E,
 	UINT8 = 0x0F,
-	/*UINT16 = 0x12,
-	INT16 = 0x13,
-	UINT32 = 0x16,
+	//UINT16 = 0x12,
+	//INT16 = 0x13,
+	//UINT32 = 0x16,
 	INT32 = 0x17,
 	INT64 = 0x1E,
-	UINT64 = 0x1F,*/
+	//UINT64 = 0x1F,
 
 	// Float types
 	//F4 = 0x44,
 	//F8 = 0x48,
 	//F16 = 0x4A,
 	F32 = 0x4C,
-	//F64 = 0x4E
+	F64 = 0x4E,
 
 	//BIGINT = 0x80
 	UINT256 = 0x88
@@ -49,13 +49,25 @@ class NDArray {
 public:
 	NDArray(ArrayList<int> shape, NDArrayType type);
 	NDArray(ArrayList<float> vector);
+	NDArray(ArrayList<double> vector);
 	NDArray(ArrayList<uint8_t> vector);
+	NDArray(ArrayList<int32_t> vector);
+	NDArray(ArrayList<int64_t> vector);
 	NDArray(const ArrayList<int>& shape, ArrayList<float> vector);
+	NDArray(const ArrayList<int>& shape, ArrayList<double> vector);
 	NDArray(const ArrayList<int>& shape, ArrayList<uint8_t> vector);
+	NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector);
+	NDArray(const ArrayList<int>& shape, ArrayList<int64_t> vector);
 
 	// Convenience constructors for scalars
 	template <typename T, typename = std::enable_if_t<std::is_same_v<T, NDArrayType>>>
 	NDArray(T type, float value) : shape({}), type(static_cast<NDArrayType>(type)) {
+		initialize();
+		set({}, value);
+	}
+
+	template <typename T, typename = std::enable_if_t<std::is_same_v<T, NDArrayType>>>
+	NDArray(T type, double value) : shape({}), type(static_cast<NDArrayType>(type)) {
 		initialize();
 		set({}, value);
 	}
@@ -106,8 +118,29 @@ public:
 			case UINT8:
 				return static_cast<T>(uint8[offset]);
 
+			case INT32:
+				if constexpr (std::is_same_v<T, uint256_t>)
+					return uint256_t((int)int32[offset]);
+				else
+					return static_cast<T>(int32[offset]);
+
+			case INT64:
+				// Avoid ambiguous uint256_t(int64_t) — prefer uint64_t / int ctors.
+				if constexpr (std::is_same_v<T, uint256_t>)
+					return int64[offset] < 0
+						? uint256_t((int)int64[offset])
+						: uint256_t((uint64_t)int64[offset]);
+				else
+					return static_cast<T>(int64[offset]);
+
 			case F32:
 				return static_cast<T>(float32[offset]);
+
+			case F64:
+				if constexpr (std::is_same_v<T, uint256_t>)
+					return uint256_t(float64[offset]);
+				else
+					return static_cast<T>(float64[offset]);
 
 			case UINT256:
 				return convert_from_uint256<T>(uint256[offset]);
@@ -132,8 +165,17 @@ public:
 			case UINT8:
 				uint8[offset] = (uint8_t)value;
 				break;
+			case INT32:
+				int32[offset] = (int32_t)value;
+				break;
+			case INT64:
+				int64[offset] = (int64_t)value;
+				break;
 			case F32:
 				float32[offset] = (float)value;
+				break;
+			case F64:
+				float64[offset] = (double)value;
 				break;
 			case UINT256:
 				uint256[offset] = (uint256_t)value;
@@ -208,27 +250,28 @@ public:
 	NDArray& broadcastDiv(NDArray& other);
 
 	/*
-	** Element-wise unary (return a new array; promote when the op requires it)
+	** Element-wise unary — in place (return *this).  Operators copy; these do not.
+	** Example: b.square().square() → b becomes b^4 in place.
 	*/
-	NDArray neg() const;
-	NDArray abs() const;
-	NDArray sign() const;
-	NDArray square() const;
-	NDArray sqrt() const;
-	NDArray cbrt() const;
-	NDArray exp() const;
-	NDArray expm1() const;
-	NDArray log() const;
-	NDArray log2() const;
-	NDArray log10() const;
-	NDArray log1p() const;
-	NDArray sin() const;
-	NDArray cos() const;
-	NDArray tan() const;
-	NDArray floor() const;
-	NDArray ceil() const;
-	NDArray round() const;
-	/** Unary minus; same as neg(). */
+	NDArray& neg();
+	NDArray& abs();
+	NDArray& sign();
+	NDArray& square();
+	NDArray& sqrt();
+	NDArray& cbrt();
+	NDArray& exp();
+	NDArray& expm1();
+	NDArray& log();
+	NDArray& log2();
+	NDArray& log10();
+	NDArray& log1p();
+	NDArray& sin();
+	NDArray& cos();
+	NDArray& tan();
+	NDArray& floor();
+	NDArray& ceil();
+	NDArray& round();
+	/** Unary minus — returns a new array (operators copy). */
 	NDArray operator-() const;
 
 	/*
@@ -241,6 +284,7 @@ public:
 	/** Clamp each element into [lo, hi] (promotes as needed). */
 	NDArray clip(const NDArray& lo, const NDArray& hi) const;
 	NDArray clip(float lo, float hi) const;
+	NDArray clip(double lo, double hi) const;
 
 	NDArray minimum(float other) const;
 	NDArray maximum(float other) const;
@@ -275,6 +319,13 @@ public:
 	NDArray greater(float other) const;
 	NDArray greaterEqual(float other) const;
 
+	NDArray equal(double other) const;
+	NDArray notEqual(double other) const;
+	NDArray less(double other) const;
+	NDArray lessEqual(double other) const;
+	NDArray greater(double other) const;
+	NDArray greaterEqual(double other) const;
+
 	/**
 	 * Element-wise select: result[i] = condition[i] ? x[i] : y[i].
 	 * condition must be BINARY (or convertible); x and y are promoted to a
@@ -291,8 +342,9 @@ public:
 	** Reductions
 	**
 	** No-axis forms reduce to a scalar (empty shape).  Axis forms remove that
-	** axis from the shape.  sum/prod promote integer types to UINT256 so
-	** accumulation does not silently wrap; mean always returns F32.
+	** axis from the shape.  Unsigned integer sum/prod accumulate in UINT256;
+	** INT32 sum/prod use INT64; floats keep their float type.  mean uses F64
+	** except pure F32 inputs (stay F32).
 	*/
 	NDArray sum() const;
 	NDArray sum(int axis) const;
@@ -306,7 +358,7 @@ public:
 	NDArray prod(int axis) const;
 
 	/*
-	**    OPERATORS
+	**    OPERATORS  (return new arrays — they copy)
 	*/
 
 	NDArray operator+(float other) const;
@@ -373,8 +425,12 @@ private:
 	size_t computeOffset(const ArrayList<int>& indices) const;
 
 	float loadAsFloat(size_t i) const;
+	double loadAsDouble(size_t i) const;
+	int64_t loadAsI64(size_t i) const;
 	uint256_t loadAsU256(size_t i) const;
 	void storeFromFloat(size_t i, float v);
+	void storeFromDouble(size_t i, double v);
+	void storeFromI64(size_t i, int64_t v);
 	void storeFromU256(size_t i, const uint256_t& v);
 
 	/** Convert storage in place to `newType` (no-op if already that type). */
@@ -382,12 +438,15 @@ private:
 
 	void applyBinaryInPlace(const NDArray& src, ArithOp op);
 	void applyFloatScalarInPlace(float scalar, ArithOp op);
+	void applyDoubleScalarInPlace(double scalar, ArithOp op);
 	void applyIntScalarInPlace(int scalar, ArithOp op);
 
 	/** Promote *this to a common type with `other`, then apply op. */
 	NDArray& binaryOpInPlace(const NDArray& other, ArithOp op);
-	/** Promote *this for a float/double scalar, then apply op. */
+	/** Promote *this for a float scalar, then apply op. */
 	NDArray& scalarFloatOpInPlace(float other, ArithOp op);
+	/** Promote *this for a double scalar, then apply op. */
+	NDArray& scalarDoubleOpInPlace(double other, ArithOp op);
 	/** Promote *this for an int scalar, then apply op. */
 	NDArray& scalarIntOpInPlace(int other, ArithOp op);
 	/**
@@ -400,10 +459,14 @@ private:
 
 	NDArray binaryOp(const NDArray& other, ArithOp op) const;
 	NDArray scalarFloatOp(float other, ArithOp op) const;
+	NDArray scalarDoubleOp(double other, ArithOp op) const;
 	NDArray scalarIntOp(int other, ArithOp op) const;
 
-	/** Promote to a real type and apply a float unary kernel. */
-	NDArray mapRealUnary(float (*fn)(float)) const;
+	/** Promote in place to a real type and apply unary kernel (F32 or F64). */
+	NDArray& mapRealUnary(double (*fn)(double));
+
+	/** Replace storage with that of `result` (moves buffer; used by %= etc.). */
+	void stealFrom(NDArray& result);
 
 	template <typename T>
 	static T convert_from_uint256(const uint256_t& v) {
@@ -439,11 +502,14 @@ private:
 		void* memory;
 
 		uint8_t* uint8;
+		int32_t* int32;
+		int64_t* int64;
 
 		// Used for uint64 *and* binary encoding
 		uint64_t* uint64;
 
 		float* float32;
+		double* float64;
 
 		uint256_t* uint256;
 	};

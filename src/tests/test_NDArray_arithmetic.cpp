@@ -181,13 +181,13 @@ TEST(NDArray_arithmetic, UINT8_plus_FloatScalar_PromotesToF32) {
 	EXPECT_FLOAT_EQ(c.get<float>({2}), 3.5f);
 }
 
-TEST(NDArray_arithmetic, UINT8_plus_IntScalar_PromotesToF32) {
-	// int is signed; only signed storage type is F32
+TEST(NDArray_arithmetic, UINT8_plus_IntScalar_PromotesToINT32) {
+	// int is signed; promotes to INT32
 	NDArray a(ArrayList<uint8_t>({1, 2, 3}));
 	NDArray c = a + 10;
-	EXPECT_EQ(c.type, F32);
-	EXPECT_FLOAT_EQ(c.get<float>({0}), 11.0f);
-	EXPECT_FLOAT_EQ(c.get<float>({2}), 13.0f);
+	EXPECT_EQ(c.type, INT32);
+	EXPECT_EQ(c.get<int32_t>({0}), 11);
+	EXPECT_EQ(c.get<int32_t>({2}), 13);
 }
 
 TEST(NDArray_arithmetic, UINT256_plus_IntScalar_StaysUINT256) {
@@ -216,13 +216,12 @@ TEST(NDArray_arithmetic, Scalar_MulDivSub) {
 	EXPECT_FLOAT_EQ(s.get<float>({1}), 5.0f);
 }
 
-TEST(NDArray_arithmetic, DoubleScalar_TreatedAsFloat) {
-	// F64 not yet a storage type; double promotes like F32
+TEST(NDArray_arithmetic, DoubleScalar_PromotesToF64) {
 	NDArray a(ArrayList<uint8_t>({2, 4}));
 	NDArray c = a * 1.5;
-	EXPECT_EQ(c.type, F32);
-	EXPECT_FLOAT_EQ(c.get<float>({0}), 3.0f);
-	EXPECT_FLOAT_EQ(c.get<float>({1}), 6.0f);
+	EXPECT_EQ(c.type, F64);
+	EXPECT_DOUBLE_EQ(c.get<double>({0}), 3.0);
+	EXPECT_DOUBLE_EQ(c.get<double>({1}), 6.0);
 }
 
 
@@ -242,14 +241,14 @@ TEST(NDArray_arithmetic, CompoundAdd_F32) {
 	EXPECT_FLOAT_EQ(a.get<float>({1}), 8.0f);
 }
 
-TEST(NDArray_arithmetic, CompoundMul_UINT8_IntPromotesToF32) {
-	// int is signed → promote destination to F32
+TEST(NDArray_arithmetic, CompoundMul_UINT8_IntPromotesToINT32) {
+	// int is signed → promote destination to INT32
 	NDArray a(ArrayList<uint8_t>({2, 3, 4}));
 	a *= 2;
-	EXPECT_EQ(a.type, F32);
-	EXPECT_FLOAT_EQ(a.get<float>({0}), 4.0f);
-	EXPECT_FLOAT_EQ(a.get<float>({1}), 6.0f);
-	EXPECT_FLOAT_EQ(a.get<float>({2}), 8.0f);
+	EXPECT_EQ(a.type, INT32);
+	EXPECT_EQ(a.get<int32_t>({0}), 4);
+	EXPECT_EQ(a.get<int32_t>({1}), 6);
+	EXPECT_EQ(a.get<int32_t>({2}), 8);
 }
 
 TEST(NDArray_arithmetic, Compound_PromotesDestination_UINT8_plus_F32) {

@@ -56,16 +56,17 @@ TEST(NDArray_reductions, Prod_F32_And_UINT8) {
 	EXPECT_EQ(up.get<uint256_t>({}), uint256_t(24));
 }
 
-TEST(NDArray_reductions, Mean_AlwaysF32) {
+TEST(NDArray_reductions, Mean_F32_StaysF32_IntegersUseF64) {
 	NDArray a(ArrayList({1.0f, 2.0f, 3.0f, 4.0f}));
 	NDArray m = a.mean();
 	EXPECT_EQ(m.type, F32);
 	EXPECT_FLOAT_EQ(m.get<float>({}), 2.5f);
 
+	// Non-F32 inputs mean in F64 for better precision
 	NDArray u(ArrayList<uint8_t>({2, 4, 6}));
 	NDArray um = u.mean();
-	EXPECT_EQ(um.type, F32);
-	EXPECT_FLOAT_EQ(um.get<float>({}), 4.0f);
+	EXPECT_EQ(um.type, F64);
+	EXPECT_DOUBLE_EQ(um.get<double>({}), 4.0);
 }
 
 TEST(NDArray_reductions, MinMax_KeepType) {
