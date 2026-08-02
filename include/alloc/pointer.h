@@ -327,6 +327,57 @@ public:
 		return details != nullptr;
 	}
 
+	/**
+	 * @brief Compares this smart pointer to another smart pointer
+	 *
+	 * This compares the pointers themselves, as if they were raw pointers.
+	 *
+	 * @return `true` if both pointers are managing the same object, `false` otherwise.
+	 */
+	template <class U>
+	bool operator==(const sp<U>& other) const {
+		if (details == nullptr || other.details == nullptr)
+			return details == (sp_pointer_details_t*)other.details;
+		return details->getPtr() == other.details->getPtr();
+	}
+
+	/**
+	 * @brief Compares this smart pointer to another smart pointer for inequality
+	 *
+	 * This compares the pointers themselves, as if they were raw pointers.
+	 *
+	 * @return `true` if both pointers are managing different objects, `false` otherwise.
+	 */
+	template <class U>
+	bool operator!=(const sp<U>& other) const {
+		return !(*this == other);
+	}
+
+	/**
+	 * @brief Compares this smart pointer to a regular pointer
+	 *
+	 * This compares the pointers themselves, as if they were raw pointers.
+	 *
+	 * @return `true` if both pointers are managing the same object, `false` otherwise.
+	 */
+	template <class U>
+	bool operator==(const U* other) const {
+		return details ? details->getPtr() == (void*)other : other == nullptr;
+	}
+
+	/**
+	 * @brief Compares this smart pointer to a regular pointer for inequality
+	 *
+	 * This compares the pointers themselves, as if they were raw pointers.
+	 *
+	 * @return `true` if both pointers are managing different objects, `false` otherwise.
+	 */
+	template <class U>
+	bool operator!=(const U* other) const {
+		return !(*this == other);
+	}
+
+
 	// ---------- Modifiers ----------
 
 	/**
@@ -480,6 +531,30 @@ private:
 template<typename T>
 void swap(sp<T>& lhs, sp<T>& rhs) {
 	lhs.swap(rhs);
+}
+
+/**
+ * @brief Compares a regular pointer to a smart pointer
+ *
+ * This compares the pointers themselves, as if they were raw pointers.
+ *
+ * @return `true` if both pointers are managing the same object, `false` otherwise.
+ */
+template <typename T, typename U>
+bool operator==(const T* lhs, const sp<U>& rhs) {
+	return rhs == lhs;
+}
+
+/**
+ * @brief Compares a regular pointer to a smart pointer for inequality
+ *
+ * This compares the pointers themselves, as if they were raw pointers.
+ *
+ * @return `true` if both pointers are managing different objects, `false` otherwise.
+ */
+template <typename T, typename U>
+bool operator!=(const T* lhs, const sp<U>& rhs) {
+	return !(rhs == lhs);
 }
 
 #endif //LIBEXCESSIVE_POINTER_H

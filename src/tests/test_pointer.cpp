@@ -376,3 +376,93 @@ TEST(SpTest, NumReferencesWithTemplatedCopyMove) {
 	EXPECT_EQ(b.numReferences(), 2);
 	EXPECT_EQ(b2.numReferences(), 2);
 }
+
+TEST(SpTest, ComparisonOperators) {
+	struct Base { virtual ~Base() {} };
+	struct Derived : Base {};
+
+	sp<Derived> d1 = sp<Derived>::create();
+	sp<Derived> d2 = sp<Derived>::create();
+	sp<Derived> null;
+	sp<Base> b1 = d1;
+
+	// sp == sp
+	EXPECT_TRUE(d1 == d1);
+	EXPECT_TRUE(d1 == b1);
+	EXPECT_TRUE(b1 == d1);
+	EXPECT_FALSE(d1 == d2);
+	EXPECT_TRUE(null == null);
+	EXPECT_FALSE(d1 == null);
+	EXPECT_FALSE(null == d1);
+
+	// sp != sp
+	EXPECT_FALSE(d1 != d1);
+	EXPECT_FALSE(d1 != b1);
+	EXPECT_TRUE(d1 != d2);
+	EXPECT_FALSE(null != null);
+	EXPECT_TRUE(d1 != null);
+
+	// sp == ptr
+	EXPECT_TRUE(d1 == d1.get());
+	EXPECT_TRUE(b1 == d1.get());
+	EXPECT_FALSE(d1 == d2.get());
+	EXPECT_TRUE(null == (Derived*)nullptr);
+	EXPECT_FALSE(d1 == (Derived*)nullptr);
+
+	// sp != ptr
+	EXPECT_FALSE(d1 != d1.get());
+	EXPECT_TRUE(d1 != d2.get());
+	EXPECT_FALSE(null != (Derived*)nullptr);
+	EXPECT_TRUE(d1 != (Derived*)nullptr);
+
+	// ptr == sp
+	EXPECT_TRUE(d1.get() == d1);
+	EXPECT_TRUE(d1.get() == b1);
+	EXPECT_FALSE(d2.get() == d1);
+	EXPECT_TRUE((Derived*)nullptr == null);
+	EXPECT_FALSE((Derived*)nullptr == d1);
+
+	// ptr != sp
+	EXPECT_FALSE(d1.get() != d1);
+	EXPECT_TRUE(d2.get() != d1);
+	EXPECT_FALSE((Derived*)nullptr != null);
+	EXPECT_TRUE((Derived*)nullptr != d1);
+}
+
+TEST(SpTest, IncompatibleTypeComparisons) {
+	struct Unrelated {};
+	struct Base { virtual ~Base() {} };
+
+	sp<int> pi = sp<int>::create(42);
+	sp<float> pf = sp<float>::create(3.14f);
+	sp<Unrelated> pu = sp<Unrelated>::create();
+	sp<Base> pb = sp<Base>::create();
+	void* vptr = pi.get();
+	const char* cptr = "test";
+
+	// sp<T> vs sp<U> (incompatible)
+	EXPECT_FALSE(pi == pf);
+	EXPECT_TRUE(pi != pf);
+	EXPECT_FALSE(pb == pu);
+	EXPECT_TRUE(pb != pu);
+
+	// sp<T> vs U* (incompatible)
+	EXPECT_FALSE(pi == cptr);
+	EXPECT_TRUE(pi != cptr);
+	EXPECT_TRUE(pi == vptr); // sp<int> vs void*
+	EXPECT_FALSE(pf == vptr);
+
+	// U* vs sp<T> (incompatible)
+	EXPECT_FALSE(cptr == pi);
+	EXPECT_TRUE(cptr != pi);
+	EXPECT_TRUE(vptr == pi);
+	EXPECT_FALSE(vptr == pf);
+
+	// Null comparisons
+	sp<int> null_i;
+	sp<float> null_f;
+	EXPECT_TRUE(null_i == null_f);
+	EXPECT_FALSE(null_i != null_f);
+	EXPECT_TRUE(null_i == (char*)nullptr);
+	EXPECT_TRUE((char*)nullptr == null_i);
+}
