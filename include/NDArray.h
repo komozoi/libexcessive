@@ -176,17 +176,36 @@ public:
 	NDArray& div(NDArray& other);
 
 	/**
-	 * Adds two NDArrays of different shapes, with `*this` being bigger and `other` being broadcasted to match the shape of `*this`.
+	 * Adds `other` into `*this` with broadcasting.
 	 *
-	 * `other.shape` must be a prefix of `this->shape`
+	 * `other.shape` must be a prefix of `this->shape`.  Each element of
+	 * `other` is applied to a contiguous block of `*this` corresponding to
+	 * the remaining (trailing) dimensions.
 	 *
-	 * Updates `*this`, so no copies or allocations are performed.
-	 * Both arrays must have the same type.
+	 * Promotes `*this` when needed so precision is not lost.
 	 *
-	 * @param other array to add
+	 * @param other array to add (broadcast along outer axes)
 	 * @return *this
 	 */
 	NDArray& broadcastAdd(NDArray& other);
+
+	/**
+	 * Subtracts a broadcasted `other` from `*this` (prefix-shape rule).
+	 * Promotes `*this` when needed so precision is not lost.
+	 */
+	NDArray& broadcastSub(NDArray& other);
+
+	/**
+	 * Multiplies `*this` by a broadcasted `other` (prefix-shape rule).
+	 * Promotes `*this` when needed so precision is not lost.
+	 */
+	NDArray& broadcastMul(NDArray& other);
+
+	/**
+	 * Divides `*this` by a broadcasted `other` (prefix-shape rule).
+	 * Promotes `*this` when needed so precision is not lost.
+	 */
+	NDArray& broadcastDiv(NDArray& other);
 
 	/*
 	**    OPERATORS
@@ -260,6 +279,13 @@ private:
 	NDArray& scalarFloatOpInPlace(float other, ArithOp op);
 	/** Promote *this for an int scalar, then apply op. */
 	NDArray& scalarIntOpInPlace(int other, ArithOp op);
+	/**
+	 * Broadcast `other` (shape prefix of *this) and apply op in place.
+	 * Promotes *this to a common type with `other` first when needed.
+	 */
+	NDArray& broadcastOpInPlace(const NDArray& other, ArithOp op);
+	/** Apply broadcast op; requires same type and prefix shape. */
+	void applyBroadcastInPlace(const NDArray& src, ArithOp op);
 
 	NDArray binaryOp(const NDArray& other, ArithOp op) const;
 	NDArray scalarFloatOp(float other, ArithOp op) const;

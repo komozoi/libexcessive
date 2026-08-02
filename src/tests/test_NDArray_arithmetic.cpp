@@ -345,7 +345,7 @@ TEST(NDArray_arithmetic, NamedSubMulDiv) {
 
 
 // ============================================================
-// broadcastAdd — other.shape is a prefix of this->shape
+// Broadcast ops — other.shape is a prefix of this->shape
 // ============================================================
 
 TEST(NDArray_arithmetic, BroadcastAdd_Prefix) {
@@ -366,6 +366,53 @@ TEST(NDArray_arithmetic, BroadcastAdd_Prefix) {
 	EXPECT_FLOAT_EQ(a.get<float>({1, 2}), 21.0f);
 }
 
+TEST(NDArray_arithmetic, BroadcastSub_Prefix) {
+	NDArray a({2, 2}, ArrayList({
+		10.0f, 10.0f,
+		20.0f, 20.0f
+	}));
+	NDArray b(ArrayList({3.0f, 5.0f}));
+
+	a.broadcastSub(b);
+
+	EXPECT_FLOAT_EQ(a.get<float>({0, 0}), 7.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 1}), 7.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 0}), 15.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 1}), 15.0f);
+}
+
+TEST(NDArray_arithmetic, BroadcastMul_Prefix) {
+	NDArray a({2, 3}, ArrayList({
+		1.0f, 2.0f, 3.0f,
+		4.0f, 5.0f, 6.0f
+	}));
+	NDArray b(ArrayList({10.0f, 100.0f}));
+
+	a.broadcastMul(b);
+
+	EXPECT_FLOAT_EQ(a.get<float>({0, 0}), 10.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 1}), 20.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 2}), 30.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 0}), 400.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 1}), 500.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 2}), 600.0f);
+}
+
+TEST(NDArray_arithmetic, BroadcastDiv_Prefix) {
+	NDArray a({2, 2}, ArrayList({
+		10.0f, 20.0f,
+		30.0f, 40.0f
+	}));
+	NDArray b(ArrayList({2.0f, 10.0f}));
+
+	a.broadcastDiv(b);
+
+	EXPECT_FLOAT_EQ(a.get<float>({0, 0}), 5.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 1}), 10.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 0}), 3.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 1}), 4.0f);
+}
+
 TEST(NDArray_arithmetic, BroadcastAdd_FullPrefix) {
 	// other shape equals this shape → same as element-wise
 	NDArray a(ArrayList({1.0f, 2.0f, 3.0f}));
@@ -376,16 +423,38 @@ TEST(NDArray_arithmetic, BroadcastAdd_FullPrefix) {
 	EXPECT_FLOAT_EQ(a.get<float>({2}), 9.0f);
 }
 
-TEST(NDArray_arithmetic, BroadcastAdd_NotPrefix_Throws) {
+TEST(NDArray_arithmetic, Broadcast_NotPrefix_Throws) {
 	NDArray a({2, 3}, F32);
 	NDArray b({3}, F32); // not a prefix of [2,3]
 	EXPECT_THROW(a.broadcastAdd(b), std::invalid_argument);
+	EXPECT_THROW(a.broadcastSub(b), std::invalid_argument);
+	EXPECT_THROW(a.broadcastMul(b), std::invalid_argument);
+	EXPECT_THROW(a.broadcastDiv(b), std::invalid_argument);
 }
 
-TEST(NDArray_arithmetic, BroadcastAdd_TypeMismatch_Throws) {
-	NDArray a({2, 2}, F32);
-	NDArray b({2}, UINT8);
-	EXPECT_THROW(a.broadcastAdd(b), std::invalid_argument);
+TEST(NDArray_arithmetic, Broadcast_PromotesDestination) {
+	// UINT8 destination + F32 broadcast source → promote to F32
+	NDArray a({2, 2}, ArrayList<uint8_t>({1, 1, 1, 1}));
+	NDArray b(ArrayList({0.5f, 2.0f}));
+
+	a.broadcastAdd(b);
+	EXPECT_EQ(a.type, F32);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 0}), 1.5f);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 1}), 1.5f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 0}), 3.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 1}), 3.0f);
+}
+
+TEST(NDArray_arithmetic, Broadcast_ScalarOther) {
+	// other with empty shape (scalar) is a prefix of everything
+	NDArray a({2, 2}, ArrayList({1.0f, 2.0f, 3.0f, 4.0f}));
+	NDArray s(F32, 10.0f);
+
+	a.broadcastMul(s);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 0}), 10.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 1}), 20.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 0}), 30.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 1}), 40.0f);
 }
 
 

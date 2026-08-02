@@ -675,42 +675,113 @@ NDArray& NDArray::div(NDArray& other) {
 	return binaryOpInPlace(other, ArithOp::Div);
 }
 
-NDArray& NDArray::broadcastAdd(NDArray& other) {
-	if (type != other.type)
-		throw std::invalid_argument("NDArray::broadcastAdd: type mismatch");
+NDArray& NDArray::broadcastOpInPlace(const NDArray& other, ArithOp op) {
 	if (!isPrefixShape(other.shape, shape))
-		throw std::invalid_argument("NDArray::broadcastAdd: other.shape must be a prefix of this->shape");
+		throw std::invalid_argument("NDArray: other.shape must be a prefix of this->shape for broadcast");
 
+	NDArrayType resultType = promoteTypes(type, other.type);
+	promoteInPlace(resultType);
+
+	// Point at `other` if already the result type; otherwise convert into a temporary.
+	// (operator= is deleted, so we branch rather than reassign.)
+	if (other.type == resultType) {
+		applyBroadcastInPlace(other, op);
+	} else {
+		NDArray tmp = other.convert(resultType);
+		applyBroadcastInPlace(tmp, op);
+	}
+	return *this;
+}
+
+void NDArray::applyBroadcastInPlace(const NDArray& src, ArithOp op) {
+	// Precondition: src.type == this->type, src.shape is a prefix of this->shape.
 	const size_t thisN = numElements();
-	const size_t otherN = other.numElements();
+	const size_t otherN = src.numElements();
 	const size_t block = (otherN == 0) ? thisN : (thisN / otherN);
 
-	// other indexes the outer dimensions; each other[i] is added to a contiguous block.
+	// src indexes the outer dimensions; each src[i] is applied to a contiguous block.
 	for (size_t i = 0; i < otherN; ++i) {
 		for (size_t j = 0; j < block; ++j) {
 			const size_t idx = i * block + j;
 			switch (type) {
 				case F32:
-					float32[idx] += other.float32[i];
+					switch (op) {
+						case ArithOp::Add: float32[idx] += src.float32[i]; break;
+						case ArithOp::Sub: float32[idx] -= src.float32[i]; break;
+						case ArithOp::Mul: float32[idx] *= src.float32[i]; break;
+						case ArithOp::Div: float32[idx] /= src.float32[i]; break;
+					}
 					break;
 				case UINT8:
-					uint8[idx] = (uint8_t)(uint8[idx] + other.uint8[i]);
+					switch (op) {
+						case ArithOp::Add:
+							uint8[idx] = (uint8_t)(uint8[idx] + src.uint8[i]);
+							break;
+						case ArithOp::Sub:
+							uint8[idx] = (uint8_t)(uint8[idx] - src.uint8[i]);
+							break;
+						case ArithOp::Mul:
+							uint8[idx] = (uint8_t)(uint8[idx] * src.uint8[i]);
+							break;
+						case ArithOp::Div:
+							uint8[idx] = (uint8_t)(uint8[idx] / src.uint8[i]);
+							break;
+					}
 					break;
 				case UINT256:
-					uint256[idx] += other.uint256[i];
+					switch (op) {
+						case ArithOp::Add:
+							uint256[idx] += src.uint256[i];
+							break;
+						case ArithOp::Sub:
+							uint256[idx] -= src.uint256[i];
+							break;
+						case ArithOp::Mul:
+							uint256[idx] = uint256[idx] * src.uint256[i];
+							break;
+						case ArithOp::Div:
+							uint256[idx] = uint256[idx] / src.uint256[i];
+							break;
+					}
 					break;
 				case BINARY: {
 					uint8_t a = binaryGet(uint64, idx);
-					uint8_t b = binaryGet(other.uint64, i);
-					binarySet(uint64, idx, (uint8_t)((a + b) & 1));
+					uint8_t b = binaryGet(src.uint64, i);
+					uint8_t r = 0;
+					switch (op) {
+						case ArithOp::Add: r = (uint8_t)((a + b) & 1); break;
+						case ArithOp::Sub: r = (uint8_t)((a - b) & 1); break;
+						case ArithOp::Mul: r = (uint8_t)(a & b); break;
+						case ArithOp::Div:
+							if (b == 0)
+								throw std::invalid_argument("NDArray: division by zero");
+							r = a;
+							break;
+					}
+					binarySet(uint64, idx, r);
 					break;
 				}
 				default:
-					throw std::runtime_error("NDArray::broadcastAdd: invalid type");
+					throw std::runtime_error("NDArray: invalid type in broadcast arithmetic");
 			}
 		}
 	}
-	return *this;
+}
+
+NDArray& NDArray::broadcastAdd(NDArray& other) {
+	return broadcastOpInPlace(other, ArithOp::Add);
+}
+
+NDArray& NDArray::broadcastSub(NDArray& other) {
+	return broadcastOpInPlace(other, ArithOp::Sub);
+}
+
+NDArray& NDArray::broadcastMul(NDArray& other) {
+	return broadcastOpInPlace(other, ArithOp::Mul);
+}
+
+NDArray& NDArray::broadcastDiv(NDArray& other) {
+	return broadcastOpInPlace(other, ArithOp::Div);
 }
 
 
