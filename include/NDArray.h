@@ -212,9 +212,19 @@ public:
 	*/
 	NDArray neg() const;
 	NDArray abs() const;
+	NDArray sign() const;
+	NDArray square() const;
 	NDArray sqrt() const;
+	NDArray cbrt() const;
 	NDArray exp() const;
+	NDArray expm1() const;
 	NDArray log() const;
+	NDArray log2() const;
+	NDArray log10() const;
+	NDArray log1p() const;
+	NDArray sin() const;
+	NDArray cos() const;
+	NDArray tan() const;
 	NDArray floor() const;
 	NDArray ceil() const;
 	NDArray round() const;
@@ -228,11 +238,19 @@ public:
 	NDArray maximum(const NDArray& other) const;
 	NDArray pow(const NDArray& other) const;
 	NDArray mod(const NDArray& other) const;
+	/** Clamp each element into [lo, hi] (promotes as needed). */
+	NDArray clip(const NDArray& lo, const NDArray& hi) const;
+	NDArray clip(float lo, float hi) const;
 
 	NDArray minimum(float other) const;
 	NDArray maximum(float other) const;
 	NDArray pow(float other) const;
 	NDArray mod(float other) const;
+
+	NDArray minimum(double other) const;
+	NDArray maximum(double other) const;
+	NDArray pow(double other) const;
+	NDArray mod(double other) const;
 
 	NDArray minimum(int other) const;
 	NDArray maximum(int other) const;
@@ -295,41 +313,50 @@ public:
 	NDArray operator-(float other) const;
 	NDArray operator*(float other) const;
 	NDArray operator/(float other) const;
+	NDArray operator%(float other) const;
 
 	NDArray operator+(int other) const;
 	NDArray operator-(int other) const;
 	NDArray operator*(int other) const;
 	NDArray operator/(int other) const;
+	NDArray operator%(int other) const;
 
 	NDArray operator+(double other) const;
 	NDArray operator-(double other) const;
 	NDArray operator*(double other) const;
 	NDArray operator/(double other) const;
+	NDArray operator%(double other) const;
 
 	NDArray operator+(const NDArray& other) const;
 	NDArray operator-(const NDArray& other) const;
 	NDArray operator*(const NDArray& other) const;
 	NDArray operator/(const NDArray& other) const;
+	/** Element-wise modulo; same as mod(). */
+	NDArray operator%(const NDArray& other) const;
 
 	NDArray& operator+=(float other);
 	NDArray& operator-=(float other);
 	NDArray& operator*=(float other);
 	NDArray& operator/=(float other);
+	NDArray& operator%=(float other);
 
 	NDArray& operator+=(int other);
 	NDArray& operator-=(int other);
 	NDArray& operator*=(int other);
 	NDArray& operator/=(int other);
+	NDArray& operator%=(int other);
 
 	NDArray& operator+=(double other);
 	NDArray& operator-=(double other);
 	NDArray& operator*=(double other);
 	NDArray& operator/=(double other);
+	NDArray& operator%=(double other);
 
 	NDArray& operator+=(const NDArray& other);
 	NDArray& operator-=(const NDArray& other);
 	NDArray& operator*=(const NDArray& other);
 	NDArray& operator/=(const NDArray& other);
+	NDArray& operator%=(const NDArray& other);
 
 	const ArrayList<int> shape;
 	// Mutable so in-place arithmetic can promote without reallocating a new NDArray object.
@@ -374,6 +401,9 @@ private:
 	NDArray binaryOp(const NDArray& other, ArithOp op) const;
 	NDArray scalarFloatOp(float other, ArithOp op) const;
 	NDArray scalarIntOp(int other, ArithOp op) const;
+
+	/** Promote to a real type and apply a float unary kernel. */
+	NDArray mapRealUnary(float (*fn)(float)) const;
 
 	template <typename T>
 	static T convert_from_uint256(const uint256_t& v) {

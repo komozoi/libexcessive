@@ -183,6 +183,84 @@ TEST(NDArray_elementwise, Scalar_Minimum_Pow) {
 	EXPECT_FLOAT_EQ(p.get<float>({2}), 9.0f);
 }
 
+TEST(NDArray_elementwise, Modulo_Operator) {
+	NDArray a(ArrayList({10.0f, 17.0f, 9.0f}));
+	NDArray b(ArrayList({3.0f, 5.0f, 4.0f}));
+
+	NDArray m = a % b;
+	EXPECT_FLOAT_EQ(m.get<float>({0}), 1.0f);
+	EXPECT_FLOAT_EQ(m.get<float>({1}), 2.0f);
+	EXPECT_FLOAT_EQ(m.get<float>({2}), 1.0f);
+
+	NDArray s = a % 4.0f;
+	EXPECT_FLOAT_EQ(s.get<float>({0}), 2.0f);
+	EXPECT_FLOAT_EQ(s.get<float>({1}), 1.0f);
+	EXPECT_FLOAT_EQ(s.get<float>({2}), 1.0f);
+
+	a %= b;
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 1.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1}), 2.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({2}), 1.0f);
+}
+
+TEST(NDArray_elementwise, Log2_Log10_Log1p_Expm1) {
+	NDArray a(ArrayList({1.0f, 8.0f, 100.0f}));
+	NDArray l2 = a.log2();
+	EXPECT_NEAR(l2.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(l2.get<float>({1}), 3.0f, 1e-5f);
+
+	NDArray l10 = a.log10();
+	EXPECT_NEAR(l10.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(l10.get<float>({2}), 2.0f, 1e-5f);
+
+	NDArray x(ArrayList({0.0f, std::exp(1.0f) - 1.0f}));
+	EXPECT_NEAR(x.log1p().get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(x.log1p().get<float>({1}), 1.0f, 1e-4f);
+
+	NDArray z(ArrayList({0.0f, 1.0f}));
+	EXPECT_NEAR(z.expm1().get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(z.expm1().get<float>({1}), std::exp(1.0f) - 1.0f, 1e-5f);
+}
+
+TEST(NDArray_elementwise, Sign_Square_Cbrt_Trig) {
+	NDArray a(ArrayList({-2.0f, 0.0f, 3.0f}));
+	NDArray s = a.sign();
+	EXPECT_FLOAT_EQ(s.get<float>({0}), -1.0f);
+	EXPECT_FLOAT_EQ(s.get<float>({1}), 0.0f);
+	EXPECT_FLOAT_EQ(s.get<float>({2}), 1.0f);
+
+	NDArray sq = a.square();
+	EXPECT_FLOAT_EQ(sq.get<float>({0}), 4.0f);
+	EXPECT_FLOAT_EQ(sq.get<float>({2}), 9.0f);
+
+	NDArray c(ArrayList({8.0f, 27.0f}));
+	EXPECT_NEAR(c.cbrt().get<float>({0}), 2.0f, 1e-5f);
+	EXPECT_NEAR(c.cbrt().get<float>({1}), 3.0f, 1e-5f);
+
+	const float halfPi = std::acos(-1.0f) * 0.5f;
+	NDArray ang(ArrayList({0.0f, halfPi}));
+	EXPECT_NEAR(ang.sin().get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(ang.sin().get<float>({1}), 1.0f, 1e-5f);
+	EXPECT_NEAR(ang.cos().get<float>({0}), 1.0f, 1e-5f);
+}
+
+TEST(NDArray_elementwise, Clip) {
+	NDArray a(ArrayList({-1.0f, 0.5f, 2.0f, 5.0f}));
+	NDArray c = a.clip(0.0f, 2.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({0}), 0.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({1}), 0.5f);
+	EXPECT_FLOAT_EQ(c.get<float>({2}), 2.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({3}), 2.0f);
+
+	NDArray lo(ArrayList({0.0f, 0.0f, 1.0f, 1.0f}));
+	NDArray hi(ArrayList({1.0f, 1.0f, 3.0f, 3.0f}));
+	NDArray c2 = a.clip(lo, hi);
+	EXPECT_FLOAT_EQ(c2.get<float>({0}), 0.0f);
+	EXPECT_FLOAT_EQ(c2.get<float>({1}), 0.5f);
+	EXPECT_FLOAT_EQ(c2.get<float>({2}), 2.0f);
+	EXPECT_FLOAT_EQ(c2.get<float>({3}), 3.0f);
+}
+
 
 // ============================================================
 // Comparisons → BINARY

@@ -819,21 +819,25 @@ NDArray NDArray::operator+(const NDArray& other) const { return binaryOp(other, 
 NDArray NDArray::operator-(const NDArray& other) const { return binaryOp(other, ArithOp::Sub); }
 NDArray NDArray::operator*(const NDArray& other) const { return binaryOp(other, ArithOp::Mul); }
 NDArray NDArray::operator/(const NDArray& other) const { return binaryOp(other, ArithOp::Div); }
+NDArray NDArray::operator%(const NDArray& other) const { return mod(other); }
 
 NDArray NDArray::operator+(float other) const { return scalarFloatOp(other, ArithOp::Add); }
 NDArray NDArray::operator-(float other) const { return scalarFloatOp(other, ArithOp::Sub); }
 NDArray NDArray::operator*(float other) const { return scalarFloatOp(other, ArithOp::Mul); }
 NDArray NDArray::operator/(float other) const { return scalarFloatOp(other, ArithOp::Div); }
+NDArray NDArray::operator%(float other) const { return mod(other); }
 
 NDArray NDArray::operator+(double other) const { return scalarFloatOp((float)other, ArithOp::Add); }
 NDArray NDArray::operator-(double other) const { return scalarFloatOp((float)other, ArithOp::Sub); }
 NDArray NDArray::operator*(double other) const { return scalarFloatOp((float)other, ArithOp::Mul); }
 NDArray NDArray::operator/(double other) const { return scalarFloatOp((float)other, ArithOp::Div); }
+NDArray NDArray::operator%(double other) const { return mod((float)other); }
 
 NDArray NDArray::operator+(int other) const { return scalarIntOp(other, ArithOp::Add); }
 NDArray NDArray::operator-(int other) const { return scalarIntOp(other, ArithOp::Sub); }
 NDArray NDArray::operator*(int other) const { return scalarIntOp(other, ArithOp::Mul); }
 NDArray NDArray::operator/(int other) const { return scalarIntOp(other, ArithOp::Div); }
+NDArray NDArray::operator%(int other) const { return mod(other); }
 
 
 // ---- compound assignment (in place; promote destination when needed) -------
@@ -850,6 +854,17 @@ NDArray& NDArray::operator*=(const NDArray& other) {
 NDArray& NDArray::operator/=(const NDArray& other) {
 	return binaryOpInPlace(other, ArithOp::Div);
 }
+NDArray& NDArray::operator%=(const NDArray& other) {
+	// mod is not an ArithOp kernel; compute then steal storage (promote via mod()).
+	NDArray result = mod(other);
+	free(memory);
+	memory = result.memory;
+	memorySize = result.memorySize;
+	type = result.type;
+	result.memory = nullptr;
+	result.memorySize = 0;
+	return *this;
+}
 
 NDArray& NDArray::operator+=(float other) {
 	return scalarFloatOpInPlace(other, ArithOp::Add);
@@ -863,11 +878,22 @@ NDArray& NDArray::operator*=(float other) {
 NDArray& NDArray::operator/=(float other) {
 	return scalarFloatOpInPlace(other, ArithOp::Div);
 }
+NDArray& NDArray::operator%=(float other) {
+	NDArray result = mod(other);
+	free(memory);
+	memory = result.memory;
+	memorySize = result.memorySize;
+	type = result.type;
+	result.memory = nullptr;
+	result.memorySize = 0;
+	return *this;
+}
 
 NDArray& NDArray::operator+=(double other) { return *this += (float)other; }
 NDArray& NDArray::operator-=(double other) { return *this -= (float)other; }
 NDArray& NDArray::operator*=(double other) { return *this *= (float)other; }
 NDArray& NDArray::operator/=(double other) { return *this /= (float)other; }
+NDArray& NDArray::operator%=(double other) { return *this %= (float)other; }
 
 NDArray& NDArray::operator+=(int other) {
 	return scalarIntOpInPlace(other, ArithOp::Add);
@@ -880,6 +906,16 @@ NDArray& NDArray::operator*=(int other) {
 }
 NDArray& NDArray::operator/=(int other) {
 	return scalarIntOpInPlace(other, ArithOp::Div);
+}
+NDArray& NDArray::operator%=(int other) {
+	NDArray result = mod(other);
+	free(memory);
+	memory = result.memory;
+	memorySize = result.memorySize;
+	type = result.type;
+	result.memory = nullptr;
+	result.memorySize = 0;
+	return *this;
 }
 
 
@@ -942,58 +978,91 @@ NDArray NDArray::abs() const {
 	return out;
 }
 
-NDArray NDArray::sqrt() const {
+NDArray NDArray::mapRealUnary(float (*fn)(float)) const {
 	NDArray out = convert(typeForRealUnary(type));
 	const size_t n = out.numElements();
 	for (size_t i = 0; i < n; ++i)
-		out.float32[i] = std::sqrt(out.float32[i]);
+		out.float32[i] = fn(out.float32[i]);
 	return out;
 }
 
-NDArray NDArray::exp() const {
-	NDArray out = convert(typeForRealUnary(type));
-	const size_t n = out.numElements();
-	for (size_t i = 0; i < n; ++i)
-		out.float32[i] = std::exp(out.float32[i]);
-	return out;
+static float unary_sqrt(float x) { return std::sqrt(x); }
+static float unary_cbrt(float x) { return std::cbrt(x); }
+static float unary_exp(float x) { return std::exp(x); }
+static float unary_expm1(float x) { return std::expm1(x); }
+static float unary_log(float x) { return std::log(x); }
+static float unary_log2(float x) { return std::log2(x); }
+static float unary_log10(float x) { return std::log10(x); }
+static float unary_log1p(float x) { return std::log1p(x); }
+static float unary_sin(float x) { return std::sin(x); }
+static float unary_cos(float x) { return std::cos(x); }
+static float unary_tan(float x) { return std::tan(x); }
+static float unary_floor(float x) { return std::floor(x); }
+static float unary_ceil(float x) { return std::ceil(x); }
+static float unary_round(float x) { return std::round(x); }
+
+NDArray NDArray::sign() const {
+	// F32 → {-1,0,1}; unsigned / binary → {0,1} in the same type.
+	if (type == F32) {
+		NDArray out = convert(F32);
+		const size_t n = out.numElements();
+		for (size_t i = 0; i < n; ++i) {
+			float v = out.float32[i];
+			out.float32[i] = (v > 0.0f) ? 1.0f : ((v < 0.0f) ? -1.0f : 0.0f);
+		}
+		return out;
+	}
+	if (type == UINT8) {
+		NDArray out = convert(UINT8);
+		const size_t n = out.numElements();
+		for (size_t i = 0; i < n; ++i)
+			out.uint8[i] = out.uint8[i] ? 1 : 0;
+		return out;
+	}
+	if (type == UINT256) {
+		NDArray out = convert(UINT256);
+		const size_t n = out.numElements();
+		for (size_t i = 0; i < n; ++i)
+			out.uint256[i] = (out.uint256[i] == uint256_t(0)) ? uint256_t(0) : uint256_t(1);
+		return out;
+	}
+	// BINARY: already 0/1
+	return convert(BINARY);
 }
 
-NDArray NDArray::log() const {
-	NDArray out = convert(typeForRealUnary(type));
-	const size_t n = out.numElements();
-	for (size_t i = 0; i < n; ++i)
-		out.float32[i] = std::log(out.float32[i]);
-	return out;
+NDArray NDArray::square() const {
+	// Element-wise x*x via existing mul (handles promotion / type rules).
+	return (*this) * (*this);
 }
+
+NDArray NDArray::sqrt() const { return mapRealUnary(unary_sqrt); }
+NDArray NDArray::cbrt() const { return mapRealUnary(unary_cbrt); }
+NDArray NDArray::exp() const { return mapRealUnary(unary_exp); }
+NDArray NDArray::expm1() const { return mapRealUnary(unary_expm1); }
+NDArray NDArray::log() const { return mapRealUnary(unary_log); }
+NDArray NDArray::log2() const { return mapRealUnary(unary_log2); }
+NDArray NDArray::log10() const { return mapRealUnary(unary_log10); }
+NDArray NDArray::log1p() const { return mapRealUnary(unary_log1p); }
+NDArray NDArray::sin() const { return mapRealUnary(unary_sin); }
+NDArray NDArray::cos() const { return mapRealUnary(unary_cos); }
+NDArray NDArray::tan() const { return mapRealUnary(unary_tan); }
 
 NDArray NDArray::floor() const {
 	if (!isFloatingPoint(type))
 		return convert(type);
-	NDArray out = convert(F32);
-	const size_t n = out.numElements();
-	for (size_t i = 0; i < n; ++i)
-		out.float32[i] = std::floor(out.float32[i]);
-	return out;
+	return mapRealUnary(unary_floor);
 }
 
 NDArray NDArray::ceil() const {
 	if (!isFloatingPoint(type))
 		return convert(type);
-	NDArray out = convert(F32);
-	const size_t n = out.numElements();
-	for (size_t i = 0; i < n; ++i)
-		out.float32[i] = std::ceil(out.float32[i]);
-	return out;
+	return mapRealUnary(unary_ceil);
 }
 
 NDArray NDArray::round() const {
 	if (!isFloatingPoint(type))
 		return convert(type);
-	NDArray out = convert(F32);
-	const size_t n = out.numElements();
-	for (size_t i = 0; i < n; ++i)
-		out.float32[i] = std::round(out.float32[i]);
-	return out;
+	return mapRealUnary(unary_round);
 }
 
 
@@ -1544,10 +1613,23 @@ NDArray NDArray::maximum(const NDArray& other) const { return Impl::elemBinArray
 NDArray NDArray::pow(const NDArray& other) const { return Impl::elemBinArrays(*this, other, ElemBinOp::Pow); }
 NDArray NDArray::mod(const NDArray& other) const { return Impl::elemBinArrays(*this, other, ElemBinOp::Mod); }
 
+NDArray NDArray::clip(const NDArray& lo, const NDArray& hi) const {
+	return this->maximum(lo).minimum(hi);
+}
+
+NDArray NDArray::clip(float lo, float hi) const {
+	return this->maximum(lo).minimum(hi);
+}
+
 NDArray NDArray::minimum(float other) const { return Impl::elemBinFloatScalar(*this, other, ElemBinOp::Min); }
 NDArray NDArray::maximum(float other) const { return Impl::elemBinFloatScalar(*this, other, ElemBinOp::Max); }
 NDArray NDArray::pow(float other) const { return Impl::elemBinFloatScalar(*this, other, ElemBinOp::Pow); }
 NDArray NDArray::mod(float other) const { return Impl::elemBinFloatScalar(*this, other, ElemBinOp::Mod); }
+
+NDArray NDArray::minimum(double other) const { return minimum((float)other); }
+NDArray NDArray::maximum(double other) const { return maximum((float)other); }
+NDArray NDArray::pow(double other) const { return pow((float)other); }
+NDArray NDArray::mod(double other) const { return mod((float)other); }
 
 NDArray NDArray::minimum(int other) const { return Impl::elemBinIntScalar(*this, other, ElemBinOp::Min); }
 NDArray NDArray::maximum(int other) const { return Impl::elemBinIntScalar(*this, other, ElemBinOp::Max); }
