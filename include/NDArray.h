@@ -301,6 +301,11 @@ public:
 	NDArray pow(int other) const;
 	NDArray mod(int other) const;
 
+	NDArray minimum(int64_t other) const;
+	NDArray maximum(int64_t other) const;
+	NDArray pow(int64_t other) const;
+	NDArray mod(int64_t other) const;
+
 	/*
 	** Element-wise comparisons → BINARY mask (same shape).
 	** Whole-array equality remains operator== → bool.
@@ -373,6 +378,12 @@ public:
 	NDArray operator/(int other) const;
 	NDArray operator%(int other) const;
 
+	NDArray operator+(int64_t other) const;
+	NDArray operator-(int64_t other) const;
+	NDArray operator*(int64_t other) const;
+	NDArray operator/(int64_t other) const;
+	NDArray operator%(int64_t other) const;
+
 	NDArray operator+(double other) const;
 	NDArray operator-(double other) const;
 	NDArray operator*(double other) const;
@@ -397,6 +408,12 @@ public:
 	NDArray& operator*=(int other);
 	NDArray& operator/=(int other);
 	NDArray& operator%=(int other);
+
+	NDArray& operator+=(int64_t other);
+	NDArray& operator-=(int64_t other);
+	NDArray& operator*=(int64_t other);
+	NDArray& operator/=(int64_t other);
+	NDArray& operator%=(int64_t other);
 
 	NDArray& operator+=(double other);
 	NDArray& operator-=(double other);
@@ -449,6 +466,9 @@ private:
 	NDArray& scalarDoubleOpInPlace(double other, ArithOp op);
 	/** Promote *this for an int scalar, then apply op. */
 	NDArray& scalarIntOpInPlace(int other, ArithOp op);
+	/** Promote *this for an int64 scalar, then apply op. */
+	NDArray& scalarInt64OpInPlace(int64_t other, ArithOp op);
+	void applyInt64ScalarInPlace(int64_t scalar, ArithOp op);
 	/**
 	 * Broadcast `other` (shape prefix of *this) and apply op in place.
 	 * Promotes *this to a common type with `other` first when needed.
@@ -461,6 +481,7 @@ private:
 	NDArray scalarFloatOp(float other, ArithOp op) const;
 	NDArray scalarDoubleOp(double other, ArithOp op) const;
 	NDArray scalarIntOp(int other, ArithOp op) const;
+	NDArray scalarInt64Op(int64_t other, ArithOp op) const;
 
 	/** Promote in place to a real type and apply unary kernel (F32 or F64). */
 	NDArray& mapRealUnary(double (*fn)(double));
@@ -514,6 +535,35 @@ private:
 		uint256_t* uint256;
 	};
 };
+
+
+/*
+** Left-hand scalar operators:  scalar ⊕ NDArray
+** (Member operators already cover NDArray ⊕ scalar.)
+*/
+NDArray operator+(float lhs, const NDArray& rhs);
+NDArray operator-(float lhs, const NDArray& rhs);
+NDArray operator*(float lhs, const NDArray& rhs);
+NDArray operator/(float lhs, const NDArray& rhs);
+NDArray operator%(float lhs, const NDArray& rhs);
+
+NDArray operator+(double lhs, const NDArray& rhs);
+NDArray operator-(double lhs, const NDArray& rhs);
+NDArray operator*(double lhs, const NDArray& rhs);
+NDArray operator/(double lhs, const NDArray& rhs);
+NDArray operator%(double lhs, const NDArray& rhs);
+
+NDArray operator+(int lhs, const NDArray& rhs);
+NDArray operator-(int lhs, const NDArray& rhs);
+NDArray operator*(int lhs, const NDArray& rhs);
+NDArray operator/(int lhs, const NDArray& rhs);
+NDArray operator%(int lhs, const NDArray& rhs);
+
+NDArray operator+(int64_t lhs, const NDArray& rhs);
+NDArray operator-(int64_t lhs, const NDArray& rhs);
+NDArray operator*(int64_t lhs, const NDArray& rhs);
+NDArray operator/(int64_t lhs, const NDArray& rhs);
+NDArray operator%(int64_t lhs, const NDArray& rhs);
 
 
 #endif //AGENT_CLUSTER_NDARRAY_H

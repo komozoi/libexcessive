@@ -130,6 +130,12 @@ static NDArrayType promoteWithIntScalar(NDArrayType arrayType) {
 	return promoteTypes(arrayType, INT32);
 }
 
+static NDArrayType promoteWithInt64Scalar(NDArrayType arrayType) {
+	if (arrayType == UINT256)
+		return UINT256;
+	return promoteTypes(arrayType, INT64);
+}
+
 /** Real unary ops (log, sin, …): stay in current float width, else promote to F64. */
 static NDArrayType typeForRealUnary(NDArrayType t) {
 	if (t == F32)
@@ -776,6 +782,84 @@ void NDArray::applyIntScalarInPlace(int scalar, ArithOp op) {
 	}
 }
 
+void NDArray::applyInt64ScalarInPlace(int64_t scalar, ArithOp op) {
+	const size_t n = numElements();
+	switch (type) {
+		case F32:
+		case F64:
+			applyDoubleScalarInPlace((double)scalar, op);
+			break;
+		case UINT8: {
+			uint8_t s = (uint8_t)scalar;
+			switch (op) {
+				case ArithOp::Add: addBasic(uint8, s, n); break;
+				case ArithOp::Sub: subBasic(uint8, s, n); break;
+				case ArithOp::Mul: mulBasic(uint8, s, n); break;
+				case ArithOp::Div: divBasic(uint8, s, n); break;
+			}
+			break;
+		}
+		case INT32: {
+			int32_t s = (int32_t)scalar;
+			switch (op) {
+				case ArithOp::Add: addBasic(int32, s, n); break;
+				case ArithOp::Sub: subBasic(int32, s, n); break;
+				case ArithOp::Mul: mulBasic(int32, s, n); break;
+				case ArithOp::Div: divBasic(int32, s, n); break;
+			}
+			break;
+		}
+		case INT64: {
+			switch (op) {
+				case ArithOp::Add: addBasic(int64, scalar, n); break;
+				case ArithOp::Sub: subBasic(int64, scalar, n); break;
+				case ArithOp::Mul: mulBasic(int64, scalar, n); break;
+				case ArithOp::Div: divBasic(int64, scalar, n); break;
+			}
+			break;
+		}
+		case UINT256: {
+			uint256_t s = (scalar < 0)
+				? uint256_t((int)scalar)
+				: uint256_t((uint64_t)scalar);
+			switch (op) {
+				case ArithOp::Add: addBasic(uint256, s, n); break;
+				case ArithOp::Sub: subBasic(uint256, s, n); break;
+				case ArithOp::Mul:
+					for (size_t i = 0; i < n; ++i)
+						uint256[i] = uint256[i] * s;
+					break;
+				case ArithOp::Div:
+					for (size_t i = 0; i < n; ++i)
+						uint256[i] = uint256[i] / s;
+					break;
+			}
+			break;
+		}
+		case BINARY: {
+			uint8_t s = scalar > 0 ? 1 : 0;
+			for (size_t i = 0; i < n; ++i) {
+				uint8_t a = binaryGet(uint64, i);
+				uint8_t r = 0;
+				switch (op) {
+					case ArithOp::Add: r = (uint8_t)((a + s) & 1); break;
+					case ArithOp::Sub: r = (uint8_t)((a - s) & 1); break;
+					case ArithOp::Mul: r = (uint8_t)(a & s); break;
+					case ArithOp::Div:
+						if (s == 0)
+							throw std::invalid_argument("NDArray: division by zero");
+						r = a;
+						break;
+				}
+				binarySet(uint64, i, r);
+			}
+			break;
+		}
+		default:
+			throw std::runtime_error("NDArray: invalid type in scalar arithmetic");
+	}
+}
+
 
 // ---- named / compound in-place ---------------------------------------------
 
@@ -810,6 +894,15 @@ NDArray& NDArray::scalarIntOpInPlace(int other, ArithOp op) {
 		applyDoubleScalarInPlace((double)other, op);
 	else
 		applyIntScalarInPlace(other, op);
+	return *this;
+}
+
+NDArray& NDArray::scalarInt64OpInPlace(int64_t other, ArithOp op) {
+	promoteInPlace(promoteWithInt64Scalar(type));
+	if (type == F32 || type == F64)
+		applyDoubleScalarInPlace((double)other, op);
+	else
+		applyInt64ScalarInPlace(other, op);
 	return *this;
 }
 
@@ -952,6 +1045,16 @@ NDArray NDArray::scalarIntOp(int other, ArithOp op) const {
 	return result;
 }
 
+NDArray NDArray::scalarInt64Op(int64_t other, ArithOp op) const {
+	NDArrayType rt = promoteWithInt64Scalar(type);
+	NDArray result = convert(rt);
+	if (rt == F32 || rt == F64)
+		result.applyDoubleScalarInPlace((double)other, op);
+	else
+		result.applyInt64ScalarInPlace(other, op);
+	return result;
+}
+
 NDArray NDArray::operator+(const NDArray& other) const { return binaryOp(other, ArithOp::Add); }
 NDArray NDArray::operator-(const NDArray& other) const { return binaryOp(other, ArithOp::Sub); }
 NDArray NDArray::operator*(const NDArray& other) const { return binaryOp(other, ArithOp::Mul); }
@@ -975,6 +1078,12 @@ NDArray NDArray::operator-(int other) const { return scalarIntOp(other, ArithOp:
 NDArray NDArray::operator*(int other) const { return scalarIntOp(other, ArithOp::Mul); }
 NDArray NDArray::operator/(int other) const { return scalarIntOp(other, ArithOp::Div); }
 NDArray NDArray::operator%(int other) const { return mod(other); }
+
+NDArray NDArray::operator+(int64_t other) const { return scalarInt64Op(other, ArithOp::Add); }
+NDArray NDArray::operator-(int64_t other) const { return scalarInt64Op(other, ArithOp::Sub); }
+NDArray NDArray::operator*(int64_t other) const { return scalarInt64Op(other, ArithOp::Mul); }
+NDArray NDArray::operator/(int64_t other) const { return scalarInt64Op(other, ArithOp::Div); }
+NDArray NDArray::operator%(int64_t other) const { return mod(other); }
 
 NDArray& NDArray::operator+=(const NDArray& other) { return binaryOpInPlace(other, ArithOp::Add); }
 NDArray& NDArray::operator-=(const NDArray& other) { return binaryOpInPlace(other, ArithOp::Sub); }
@@ -1011,6 +1120,16 @@ NDArray& NDArray::operator-=(int other) { return scalarIntOpInPlace(other, Arith
 NDArray& NDArray::operator*=(int other) { return scalarIntOpInPlace(other, ArithOp::Mul); }
 NDArray& NDArray::operator/=(int other) { return scalarIntOpInPlace(other, ArithOp::Div); }
 NDArray& NDArray::operator%=(int other) {
+	NDArray result = mod(other);
+	stealFrom(result);
+	return *this;
+}
+
+NDArray& NDArray::operator+=(int64_t other) { return scalarInt64OpInPlace(other, ArithOp::Add); }
+NDArray& NDArray::operator-=(int64_t other) { return scalarInt64OpInPlace(other, ArithOp::Sub); }
+NDArray& NDArray::operator*=(int64_t other) { return scalarInt64OpInPlace(other, ArithOp::Mul); }
+NDArray& NDArray::operator/=(int64_t other) { return scalarInt64OpInPlace(other, ArithOp::Div); }
+NDArray& NDArray::operator%=(int64_t other) {
 	NDArray result = mod(other);
 	stealFrom(result);
 	return *this;
@@ -1864,6 +1983,78 @@ NDArray NDArray::maximum(int other) const { return Impl::elemBinIntScalar(*this,
 NDArray NDArray::pow(int other) const { return Impl::elemBinIntScalar(*this, other, ElemBinOp::Pow); }
 NDArray NDArray::mod(int other) const { return Impl::elemBinIntScalar(*this, other, ElemBinOp::Mod); }
 
+// int64 scalar min/max/pow/mod: promote to INT64 then run integer kernel
+NDArray NDArray::minimum(int64_t other) const {
+	NDArrayType rt = promoteWithInt64Scalar(type);
+	if (rt == F32 || rt == F64)
+		return minimum((double)other);
+	NDArray left = convert(rt);
+	const size_t n = left.numElements();
+	if (left.type == INT64) {
+		for (size_t i = 0; i < n; ++i)
+			left.int64[i] = left.int64[i] < other ? left.int64[i] : other;
+	} else if (left.type == INT32) {
+		int32_t s = (int32_t)other;
+		for (size_t i = 0; i < n; ++i)
+			left.int32[i] = left.int32[i] < s ? left.int32[i] : s;
+	} else {
+		return Impl::elemBinIntScalar(*this, (int)other, ElemBinOp::Min);
+	}
+	return left;
+}
+NDArray NDArray::maximum(int64_t other) const {
+	NDArrayType rt = promoteWithInt64Scalar(type);
+	if (rt == F32 || rt == F64)
+		return maximum((double)other);
+	NDArray left = convert(rt);
+	const size_t n = left.numElements();
+	if (left.type == INT64) {
+		for (size_t i = 0; i < n; ++i)
+			left.int64[i] = left.int64[i] > other ? left.int64[i] : other;
+	} else if (left.type == INT32) {
+		int32_t s = (int32_t)other;
+		for (size_t i = 0; i < n; ++i)
+			left.int32[i] = left.int32[i] > s ? left.int32[i] : s;
+	} else {
+		return Impl::elemBinIntScalar(*this, (int)other, ElemBinOp::Max);
+	}
+	return left;
+}
+NDArray NDArray::pow(int64_t other) const {
+	NDArrayType rt = promoteWithInt64Scalar(type);
+	if (rt == F32 || rt == F64)
+		return pow((double)other);
+	NDArray left = convert(rt);
+	const size_t n = left.numElements();
+	for (size_t i = 0; i < n; ++i) {
+		int64_t base = left.loadAsI64(i);
+		int64_t r = 1;
+		int64_t b = base;
+		uint64_t exp = other < 0 ? 0 : (uint64_t)other;
+		if (other < 0)
+			throw std::invalid_argument("NDArray::pow: negative exponent on integer");
+		while (exp) {
+			if (exp & 1ULL) r *= b;
+			b *= b;
+			exp >>= 1;
+		}
+		left.storeFromI64(i, r);
+	}
+	return left;
+}
+NDArray NDArray::mod(int64_t other) const {
+	NDArrayType rt = promoteWithInt64Scalar(type);
+	if (rt == F32 || rt == F64)
+		return mod((double)other);
+	if (other == 0)
+		throw std::invalid_argument("NDArray::mod: division by zero");
+	NDArray left = convert(rt);
+	const size_t n = left.numElements();
+	for (size_t i = 0; i < n; ++i)
+		left.storeFromI64(i, left.loadAsI64(i) % other);
+	return left;
+}
+
 NDArray NDArray::equal(const NDArray& other) const { return Impl::compareArrays(*this, other, CmpOp::Eq); }
 NDArray NDArray::notEqual(const NDArray& other) const { return Impl::compareArrays(*this, other, CmpOp::Ne); }
 NDArray NDArray::less(const NDArray& other) const { return Impl::compareArrays(*this, other, CmpOp::Lt); }
@@ -1916,6 +2107,60 @@ NDArray NDArray::max() const { return Impl::reduceAll(*this, ReduceOp::Max); }
 NDArray NDArray::max(int axis) const { return Impl::reduceAxis(*this, axis, ReduceOp::Max); }
 NDArray NDArray::prod() const { return Impl::reduceAll(*this, ReduceOp::Prod); }
 NDArray NDArray::prod(int axis) const { return Impl::reduceAxis(*this, axis, ReduceOp::Prod); }
+
+
+// ---- left-hand scalar operators:  scalar ⊕ NDArray -------------------------
+
+namespace {
+
+/** Dense array of `value` with the same shape as `ref`, starting in `seedType`. */
+NDArray fullLike(const NDArray& ref, NDArrayType seedType, double value) {
+	NDArray out(ref.shape, seedType);
+	// zero-initialized; add scalar (may promote further via compound op)
+	if (seedType == F32)
+		out += (float)value;
+	else if (seedType == F64)
+		out += value;
+	else if (seedType == INT32)
+		out += (int)value;
+	else if (seedType == INT64)
+		out += (int64_t)value;
+	else
+		out += (float)value;
+	return out;
+}
+
+NDArray fullLikeInt64(const NDArray& ref, int64_t value) {
+	ArrayList<int64_t> data;
+	data.addCopies(value, (int)ref.numElements());
+	return NDArray(ref.shape, std::move(data));
+}
+
+} // namespace
+
+NDArray operator+(float lhs, const NDArray& rhs) { return rhs + lhs; }
+NDArray operator*(float lhs, const NDArray& rhs) { return rhs * lhs; }
+NDArray operator-(float lhs, const NDArray& rhs) { return (-rhs) + lhs; }
+NDArray operator/(float lhs, const NDArray& rhs) { return fullLike(rhs, F32, lhs) / rhs; }
+NDArray operator%(float lhs, const NDArray& rhs) { return fullLike(rhs, F32, lhs) % rhs; }
+
+NDArray operator+(double lhs, const NDArray& rhs) { return rhs + lhs; }
+NDArray operator*(double lhs, const NDArray& rhs) { return rhs * lhs; }
+NDArray operator-(double lhs, const NDArray& rhs) { return (-rhs) + lhs; }
+NDArray operator/(double lhs, const NDArray& rhs) { return fullLike(rhs, F64, lhs) / rhs; }
+NDArray operator%(double lhs, const NDArray& rhs) { return fullLike(rhs, F64, lhs) % rhs; }
+
+NDArray operator+(int lhs, const NDArray& rhs) { return rhs + lhs; }
+NDArray operator*(int lhs, const NDArray& rhs) { return rhs * lhs; }
+NDArray operator-(int lhs, const NDArray& rhs) { return (-rhs) + lhs; }
+NDArray operator/(int lhs, const NDArray& rhs) { return fullLike(rhs, INT32, lhs) / rhs; }
+NDArray operator%(int lhs, const NDArray& rhs) { return fullLike(rhs, INT32, lhs) % rhs; }
+
+NDArray operator+(int64_t lhs, const NDArray& rhs) { return rhs + lhs; }
+NDArray operator*(int64_t lhs, const NDArray& rhs) { return rhs * lhs; }
+NDArray operator-(int64_t lhs, const NDArray& rhs) { return (-rhs) + lhs; }
+NDArray operator/(int64_t lhs, const NDArray& rhs) { return fullLikeInt64(rhs, lhs) / rhs; }
+NDArray operator%(int64_t lhs, const NDArray& rhs) { return fullLikeInt64(rhs, lhs) % rhs; }
 
 namespace {
 struct TypeRuleAnchor {

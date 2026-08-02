@@ -490,3 +490,78 @@ TEST(NDArray_arithmetic, ScalarArray_Ops) {
 	NDArray d = a * 2.0f;
 	EXPECT_FLOAT_EQ(d.get<float>({}), 10.0f);
 }
+
+
+// ============================================================
+// Left-hand scalar operators:  scalar ⊕ NDArray
+// ============================================================
+
+TEST(NDArray_arithmetic, LeftScalar_Float) {
+	NDArray a(ArrayList({2.0f, 4.0f, 5.0f}));
+
+	NDArray s = 10.0f + a;
+	EXPECT_FLOAT_EQ(s.get<float>({0}), 12.0f);
+	EXPECT_FLOAT_EQ(s.get<float>({2}), 15.0f);
+
+	NDArray d = 10.0f - a;
+	EXPECT_FLOAT_EQ(d.get<float>({0}), 8.0f);
+	EXPECT_FLOAT_EQ(d.get<float>({1}), 6.0f);
+
+	NDArray m = 3.0f * a;
+	EXPECT_FLOAT_EQ(m.get<float>({0}), 6.0f);
+	EXPECT_FLOAT_EQ(m.get<float>({1}), 12.0f);
+
+	NDArray q = 20.0f / a;
+	EXPECT_FLOAT_EQ(q.get<float>({0}), 10.0f);
+	EXPECT_FLOAT_EQ(q.get<float>({1}), 5.0f);
+
+	NDArray r = 11.0f % a;
+	EXPECT_FLOAT_EQ(r.get<float>({0}), 1.0f); // 11 % 2
+	EXPECT_FLOAT_EQ(r.get<float>({1}), 3.0f); // 11 % 4
+}
+
+TEST(NDArray_arithmetic, LeftScalar_Int_Div) {
+	// The motivating case: int / NDArray
+	NDArray a(ArrayList<int32_t>({2, 4, 5}));
+	NDArray q = 20 / a;
+	EXPECT_EQ(q.type, INT32);
+	EXPECT_EQ(q.get<int32_t>({0}), 10);
+	EXPECT_EQ(q.get<int32_t>({1}), 5);
+	EXPECT_EQ(q.get<int32_t>({2}), 4);
+
+	NDArray r = 11 % a;
+	EXPECT_EQ(r.get<int32_t>({0}), 1);
+	EXPECT_EQ(r.get<int32_t>({1}), 3);
+	EXPECT_EQ(r.get<int32_t>({2}), 1);
+
+	NDArray d = 10 - a;
+	EXPECT_EQ(d.get<int32_t>({0}), 8);
+	EXPECT_EQ(d.get<int32_t>({2}), 5);
+}
+
+TEST(NDArray_arithmetic, LeftScalar_Double) {
+	NDArray a(ArrayList({2.0f, 4.0f}));
+	NDArray q = 1.5 / a;
+	EXPECT_EQ(q.type, F64);
+	EXPECT_DOUBLE_EQ(q.get<double>({0}), 0.75);
+	EXPECT_DOUBLE_EQ(q.get<double>({1}), 0.375);
+}
+
+TEST(NDArray_arithmetic, LeftScalar_Int64) {
+	NDArray a(ArrayList<int64_t>({100, 200}));
+	NDArray q = (int64_t)1000 / a;
+	EXPECT_EQ(q.type, INT64);
+	EXPECT_EQ(q.get<int64_t>({0}), 10);
+	EXPECT_EQ(q.get<int64_t>({1}), 5);
+
+	NDArray s = (int64_t)3 * a;
+	EXPECT_EQ(s.get<int64_t>({0}), 300);
+}
+
+TEST(NDArray_arithmetic, LeftScalar_DoesNotMutateRhs) {
+	NDArray a(ArrayList({2.0f, 4.0f}));
+	NDArray b = 10.0f / a;
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 2.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1}), 4.0f);
+	EXPECT_FLOAT_EQ(b.get<float>({0}), 5.0f);
+}
