@@ -208,6 +208,86 @@ public:
 	NDArray& broadcastDiv(NDArray& other);
 
 	/*
+	** Element-wise unary (return a new array; promote when the op requires it)
+	*/
+	NDArray neg() const;
+	NDArray abs() const;
+	NDArray sqrt() const;
+	NDArray exp() const;
+	NDArray log() const;
+	NDArray floor() const;
+	NDArray ceil() const;
+	NDArray round() const;
+	/** Unary minus; same as neg(). */
+	NDArray operator-() const;
+
+	/*
+	** Element-wise binary (return a new array; same promote-on-op rules as + / *)
+	*/
+	NDArray minimum(const NDArray& other) const;
+	NDArray maximum(const NDArray& other) const;
+	NDArray pow(const NDArray& other) const;
+	NDArray mod(const NDArray& other) const;
+
+	NDArray minimum(float other) const;
+	NDArray maximum(float other) const;
+	NDArray pow(float other) const;
+	NDArray mod(float other) const;
+
+	NDArray minimum(int other) const;
+	NDArray maximum(int other) const;
+	NDArray pow(int other) const;
+	NDArray mod(int other) const;
+
+	/*
+	** Element-wise comparisons → BINARY mask (same shape).
+	** Whole-array equality remains operator== → bool.
+	*/
+	NDArray equal(const NDArray& other) const;
+	NDArray notEqual(const NDArray& other) const;
+	NDArray less(const NDArray& other) const;
+	NDArray lessEqual(const NDArray& other) const;
+	NDArray greater(const NDArray& other) const;
+	NDArray greaterEqual(const NDArray& other) const;
+
+	NDArray equal(float other) const;
+	NDArray notEqual(float other) const;
+	NDArray less(float other) const;
+	NDArray lessEqual(float other) const;
+	NDArray greater(float other) const;
+	NDArray greaterEqual(float other) const;
+
+	/**
+	 * Element-wise select: result[i] = condition[i] ? x[i] : y[i].
+	 * condition must be BINARY (or convertible); x and y are promoted to a
+	 * common type. All three must share the same shape.
+	 */
+	static NDArray where(const NDArray& condition, const NDArray& x, const NDArray& y);
+
+	/** True if any element is non-zero / true. */
+	bool any() const;
+	/** True if every element is non-zero / true. */
+	bool all() const;
+
+	/*
+	** Reductions
+	**
+	** No-axis forms reduce to a scalar (empty shape).  Axis forms remove that
+	** axis from the shape.  sum/prod promote integer types to UINT256 so
+	** accumulation does not silently wrap; mean always returns F32.
+	*/
+	NDArray sum() const;
+	NDArray sum(int axis) const;
+	NDArray mean() const;
+	NDArray mean(int axis) const;
+	NDArray min() const;
+	NDArray min(int axis) const;
+	NDArray max() const;
+	NDArray max(int axis) const;
+	NDArray prod() const;
+	NDArray prod(int axis) const;
+
+	/*
 	**    OPERATORS
 	*/
 
@@ -257,6 +337,10 @@ public:
 
 private:
 	enum class ArithOp { Add, Sub, Mul, Div };
+
+	/** .cpp-only helpers that need access to storage pointers. */
+	struct Impl;
+	friend struct Impl;
 
 	size_t initialize();
 	size_t computeOffset(const ArrayList<int>& indices) const;
