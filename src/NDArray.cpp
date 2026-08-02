@@ -13,6 +13,103 @@
 #include <utility>
 
 
+
+/*
+** TYPE RULES
+*/
+
+static bool isSimpleType(NDArrayType type) {
+	return type == UINT8 || type == F32;
+}
+
+static bool isFloatingPoint(NDArrayType type) {
+	return type == F32;
+}
+
+static bool isSigned(NDArrayType type) {
+	return type == F32;
+}
+
+/**
+ *
+ * @param type type to inspect
+ * @return `n` where `2^n` is the largest power of 2 that can fit in the type while keeping integer precision
+ */
+static int maxPowerOfTypeIntPrecision(NDArrayType type) {
+	switch (type) {
+		case BINARY:
+			return 0;
+		case UINT8:
+			return 7;
+		case F32:
+			return 24;
+		case UINT256:
+			return 255;
+		default:
+			// Should be unreachable
+			throw std::invalid_argument("Invalid type");
+	}
+}
+
+/**
+ *
+ * @param type type to inspect
+ * @return `n` where `2^n` is the largest power of 2 that can fit in the type
+ */
+static int maxPowerOfType(NDArrayType type) {
+	switch (type) {
+		case BINARY:
+			return 0;
+		case UINT8:
+			return 7;
+		case F32:
+			return 128;
+		case UINT256:
+			return 255;
+		default:
+			// Should be unreachable
+			throw std::invalid_argument("Invalid type");
+	}
+}
+
+static bool isLosslessConversion(NDArrayType from, NDArrayType to) {
+	if (maxPowerOfTypeIntPrecision(to) < maxPowerOfTypeIntPrecision(from))
+		return false;
+	if (isSigned(from) && !isSigned(to))
+		return false;
+	return true;
+}
+
+
+
+template<typename A, typename B>
+static void addBasic(A* a, B* b, size_t size) {
+	for (size_t i = 0; i < size; ++i)
+		a[i] += (A)b[i];
+}
+
+
+template<typename A, typename B>
+static void subBasic(A* a, B* b, size_t size) {
+	for (size_t i = 0; i < size; ++i)
+		a[i] -= (A)b[i];
+}
+
+
+template<typename A, typename B>
+static void mulBasic(A* a, B* b, size_t size) {
+	for (size_t i = 0; i < size; ++i)
+		a[i] *= (A)b[i];
+}
+
+
+template<typename A, typename B>
+static void divBasic(A* a, B* b, size_t size) {
+	for (size_t i = 0; i < size; ++i)
+		a[i] /= (A)b[i];
+}
+
+
 NDArray::NDArray(ArrayList<int> shape, NDArrayType type) : shape(std::move(shape)), type(type) {
 	initialize();
 }

@@ -123,7 +123,27 @@ public:
 	** Mathematical operations (operator overloads also present, these are the basic forms)
 	*/
 
+	/**
+	 * Adds two NDArrays of the same shape element-wise.
+	 *
+	 * Updates `*this`, so no copies or allocations are performed.
+	 *
+	 * @param other array to add
+	 * @return *this
+	 */
+	NDArray& add(NDArray& other);
 
+	/**
+	 * Adds two NDArrays of different shapes, with `*this` being bigger and `other` being broadcasted to match the shape of `*this`.
+	 *
+	 * `other.shape` must be a prefix of `this->shape`
+	 *
+	 * Updates `*this`, so no copies or allocations are performed.
+	 *
+	 * @param other array to add
+	 * @return *this
+	 */
+	NDArray& broadcastAdd(NDArray& other);
 
 	/*
 	**    OPERATORS
