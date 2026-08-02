@@ -66,9 +66,31 @@ public:
 		set({}, value);
 	}
 
+	NDArray(const NDArray& other);
+	NDArray(NDArray&& other) noexcept;
 	~NDArray();
 
+	// const shape: assignment would be ill-formed; copies use the copy ctor.
+	// (type is mutable so in-place arithmetic can promote.)
+	NDArray& operator=(const NDArray&) = delete;
+	NDArray& operator=(NDArray&&) = delete;
+
 	bool operator==(const NDArray& nds) const;
+
+	/**
+	 * Explicitly convert this array to a new element type.
+	 *
+	 * This is the only API that is allowed to drop precision / range: the
+	 * programmer is asking for the conversion. Element values are cast
+	 * according to the source and destination types.
+	 *
+	 * @param newType destination element type
+	 * @return a new NDArray with the same shape and converted contents
+	 */
+	NDArray convert(NDArrayType newType) const;
+
+	/** Number of logical elements (product of shape; 1 for a scalar). */
+	size_t numElements() const;
 
 	template <typename T>
 	T get(std::initializer_list<int> indices) const {
@@ -126,7 +148,9 @@ public:
 	/**
 	 * Adds two NDArrays of the same shape element-wise.
 	 *
-	 * Updates `*this`, so no copies or allocations are performed.
+	 * Updates `*this` in place.  If the result type must be wider than
+	 * `this->type` to avoid losing precision, `*this` is promoted (contents
+	 * converted) first.
 	 *
 	 * @param other array to add
 	 * @return *this
@@ -134,11 +158,30 @@ public:
 	NDArray& add(NDArray& other);
 
 	/**
+	 * Subtracts `other` from `*this` element-wise (same shape).
+	 * Promotes `*this` when needed so precision is not lost.
+	 */
+	NDArray& sub(NDArray& other);
+
+	/**
+	 * Multiplies two NDArrays of the same shape element-wise.
+	 * Promotes `*this` when needed so precision is not lost.
+	 */
+	NDArray& mul(NDArray& other);
+
+	/**
+	 * Divides `*this` by `other` element-wise (same shape).
+	 * Promotes `*this` when needed so precision is not lost.
+	 */
+	NDArray& div(NDArray& other);
+
+	/**
 	 * Adds two NDArrays of different shapes, with `*this` being bigger and `other` being broadcasted to match the shape of `*this`.
 	 *
 	 * `other.shape` must be a prefix of `this->shape`
 	 *
 	 * Updates `*this`, so no copies or allocations are performed.
+	 * Both arrays must have the same type.
 	 *
 	 * @param other array to add
 	 * @return *this
@@ -190,11 +233,37 @@ public:
 	NDArray& operator/=(const NDArray& other);
 
 	const ArrayList<int> shape;
-	const NDArrayType type;
+	// Mutable so in-place arithmetic can promote without reallocating a new NDArray object.
+	NDArrayType type;
 
 private:
+	enum class ArithOp { Add, Sub, Mul, Div };
+
 	size_t initialize();
 	size_t computeOffset(const ArrayList<int>& indices) const;
+
+	float loadAsFloat(size_t i) const;
+	uint256_t loadAsU256(size_t i) const;
+	void storeFromFloat(size_t i, float v);
+	void storeFromU256(size_t i, const uint256_t& v);
+
+	/** Convert storage in place to `newType` (no-op if already that type). */
+	void promoteInPlace(NDArrayType newType);
+
+	void applyBinaryInPlace(const NDArray& src, ArithOp op);
+	void applyFloatScalarInPlace(float scalar, ArithOp op);
+	void applyIntScalarInPlace(int scalar, ArithOp op);
+
+	/** Promote *this to a common type with `other`, then apply op. */
+	NDArray& binaryOpInPlace(const NDArray& other, ArithOp op);
+	/** Promote *this for a float/double scalar, then apply op. */
+	NDArray& scalarFloatOpInPlace(float other, ArithOp op);
+	/** Promote *this for an int scalar, then apply op. */
+	NDArray& scalarIntOpInPlace(int other, ArithOp op);
+
+	NDArray binaryOp(const NDArray& other, ArithOp op) const;
+	NDArray scalarFloatOp(float other, ArithOp op) const;
+	NDArray scalarIntOp(int other, ArithOp op) const;
 
 	template <typename T>
 	static T convert_from_uint256(const uint256_t& v) {
