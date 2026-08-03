@@ -1354,6 +1354,17 @@ static double d_log1p(double x) { return std::log1p(x); }
 static double d_sin(double x) { return std::sin(x); }
 static double d_cos(double x) { return std::cos(x); }
 static double d_tan(double x) { return std::tan(x); }
+static double d_asin(double x) { return std::asin(x); }
+static double d_acos(double x) { return std::acos(x); }
+static double d_atan(double x) { return std::atan(x); }
+static double d_sinh(double x) { return std::sinh(x); }
+static double d_cosh(double x) { return std::cosh(x); }
+static double d_tanh(double x) { return std::tanh(x); }
+static double d_asinh(double x) { return std::asinh(x); }
+static double d_acosh(double x) { return std::acosh(x); }
+static double d_atanh(double x) { return std::atanh(x); }
+static double d_deg2rad(double x) { return x * (3.14159265358979323846 / 180.0); }
+static double d_rad2deg(double x) { return x * (180.0 / 3.14159265358979323846); }
 static double d_floor(double x) { return std::floor(x); }
 static double d_ceil(double x) { return std::ceil(x); }
 static double d_round(double x) { return std::round(x); }
@@ -1369,6 +1380,17 @@ NDArray& NDArray::log1p() { return mapRealUnary(d_log1p); }
 NDArray& NDArray::sin() { return mapRealUnary(d_sin); }
 NDArray& NDArray::cos() { return mapRealUnary(d_cos); }
 NDArray& NDArray::tan() { return mapRealUnary(d_tan); }
+NDArray& NDArray::asin() { return mapRealUnary(d_asin); }
+NDArray& NDArray::acos() { return mapRealUnary(d_acos); }
+NDArray& NDArray::atan() { return mapRealUnary(d_atan); }
+NDArray& NDArray::sinh() { return mapRealUnary(d_sinh); }
+NDArray& NDArray::cosh() { return mapRealUnary(d_cosh); }
+NDArray& NDArray::tanh() { return mapRealUnary(d_tanh); }
+NDArray& NDArray::asinh() { return mapRealUnary(d_asinh); }
+NDArray& NDArray::acosh() { return mapRealUnary(d_acosh); }
+NDArray& NDArray::atanh() { return mapRealUnary(d_atanh); }
+NDArray& NDArray::deg2rad() { return mapRealUnary(d_deg2rad); }
+NDArray& NDArray::rad2deg() { return mapRealUnary(d_rad2deg); }
 
 NDArray& NDArray::floor() {
 	if (!isFloatingPoint(type))
@@ -1385,6 +1407,90 @@ NDArray& NDArray::round() {
 		return *this;
 	return mapRealUnary(d_round);
 }
+
+// ---- binary real functions (return new arrays) -----------------------------
+
+NDArray NDArray::atan2(const NDArray& x) const {
+	requireSameShape(*this, x);
+	// Result is real-valued; promote both to a common float type
+	NDArrayType rt = promoteTypes(typeForRealUnary(type), typeForRealUnary(x.type));
+	// typeForRealUnary may throw on UINT256; if both are already F32 keep F32
+	if (type == F32 && x.type == F32)
+		rt = F32;
+	else if (isFloatingPoint(type) && isFloatingPoint(x.type))
+		rt = promoteTypes(type, x.type);
+	else
+		rt = F64;
+
+	NDArray y = convert(rt);
+	NDArray xx = x.convert(rt);
+	const size_t n = y.numElements();
+	if (rt == F32) {
+		for (size_t i = 0; i < n; ++i)
+			y.float32[i] = (float)std::atan2((double)y.float32[i], (double)xx.float32[i]);
+	} else {
+		for (size_t i = 0; i < n; ++i)
+			y.float64[i] = std::atan2(y.float64[i], xx.float64[i]);
+	}
+	return y;
+}
+
+NDArray NDArray::atan2(double x) const {
+	NDArrayType rt = (type == F32) ? F32 : typeForRealUnary(type);
+	NDArray y = convert(rt);
+	const size_t n = y.numElements();
+	if (rt == F32) {
+		for (size_t i = 0; i < n; ++i)
+			y.float32[i] = (float)std::atan2((double)y.float32[i], x);
+	} else {
+		for (size_t i = 0; i < n; ++i)
+			y.float64[i] = std::atan2(y.float64[i], x);
+	}
+	return y;
+}
+
+NDArray NDArray::atan2(float x) const { return atan2((double)x); }
+NDArray NDArray::atan2(int x) const { return atan2((double)x); }
+
+NDArray NDArray::hypot(const NDArray& x) const {
+	requireSameShape(*this, x);
+	NDArrayType rt;
+	if (type == F32 && x.type == F32)
+		rt = F32;
+	else if (isFloatingPoint(type) && isFloatingPoint(x.type))
+		rt = promoteTypes(type, x.type);
+	else
+		rt = F64;
+
+	NDArray a = convert(rt);
+	NDArray b = x.convert(rt);
+	const size_t n = a.numElements();
+	if (rt == F32) {
+		for (size_t i = 0; i < n; ++i)
+			a.float32[i] = (float)std::hypot((double)a.float32[i], (double)b.float32[i]);
+	} else {
+		for (size_t i = 0; i < n; ++i)
+			a.float64[i] = std::hypot(a.float64[i], b.float64[i]);
+	}
+	return a;
+}
+
+NDArray NDArray::hypot(double x) const {
+	NDArrayType rt = (type == F32) ? F32 : typeForRealUnary(type);
+	NDArray a = convert(rt);
+	const size_t n = a.numElements();
+	if (rt == F32) {
+		for (size_t i = 0; i < n; ++i)
+			a.float32[i] = (float)std::hypot((double)a.float32[i], x);
+	} else {
+		for (size_t i = 0; i < n; ++i)
+			a.float64[i] = std::hypot(a.float64[i], x);
+	}
+	return a;
+}
+
+NDArray NDArray::hypot(float x) const { return hypot((double)x); }
+NDArray NDArray::hypot(int x) const { return hypot((double)x); }
 
 
 // ---- element-wise binary (return new) — via Impl ---------------------------

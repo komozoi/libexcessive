@@ -286,9 +286,23 @@ public:
 	NDArray& log2();
 	NDArray& log10();
 	NDArray& log1p();
+	// Trigonometric (radians), inverse, hyperbolic — in place; promote to F32/F64 as needed
 	NDArray& sin();
 	NDArray& cos();
 	NDArray& tan();
+	NDArray& asin();
+	NDArray& acos();
+	NDArray& atan();
+	NDArray& sinh();
+	NDArray& cosh();
+	NDArray& tanh();
+	NDArray& asinh();
+	NDArray& acosh();
+	NDArray& atanh();
+	/** Degrees ↔ radians (in place). */
+	NDArray& deg2rad();
+	NDArray& rad2deg();
+
 	NDArray& floor();
 	NDArray& ceil();
 	NDArray& round();
@@ -297,6 +311,21 @@ public:
 	NDArray squared() const;
 	NDArray negated() const;
 	NDArray absolute() const;
+
+	/**
+	 * Two-argument arctangent: atan2(*this, x) element-wise (returns new array).
+	 * Same convention as std::atan2(y, x) with *this as y.
+	 */
+	NDArray atan2(const NDArray& x) const;
+	NDArray atan2(double x) const;
+	NDArray atan2(float x) const;
+	NDArray atan2(int x) const;
+
+	/** Hypotenuse: hypot(*this, x) = sqrt(this² + x²), returns new array. */
+	NDArray hypot(const NDArray& x) const;
+	NDArray hypot(double x) const;
+	NDArray hypot(float x) const;
+	NDArray hypot(int x) const;
 
 	/** Unary minus — returns a new array (operators copy). */
 	NDArray operator-() const;

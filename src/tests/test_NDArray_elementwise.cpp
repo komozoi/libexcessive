@@ -271,6 +271,82 @@ TEST(NDArray_elementwise, Sign_Square_Cbrt_Trig) {
 	EXPECT_NEAR(ang.get<float>({1}), 1.0f, 1e-5f);
 }
 
+TEST(NDArray_elementwise, InverseTrig) {
+	NDArray a(ArrayList({0.0f, 1.0f, -1.0f}));
+	NDArray as = a;
+	as.asin();
+	EXPECT_NEAR(as.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(as.get<float>({1}), std::asin(1.0f), 1e-5f);
+	EXPECT_NEAR(as.get<float>({2}), std::asin(-1.0f), 1e-5f);
+
+	NDArray ac(ArrayList({1.0f, 0.0f}));
+	ac.acos();
+	EXPECT_NEAR(ac.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(ac.get<float>({1}), std::acos(0.0f), 1e-5f);
+
+	NDArray at(ArrayList({0.0f, 1.0f}));
+	at.atan();
+	EXPECT_NEAR(at.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(at.get<float>({1}), std::atan(1.0f), 1e-5f);
+}
+
+TEST(NDArray_elementwise, Hyperbolic) {
+	NDArray a(ArrayList({0.0f, 1.0f}));
+	NDArray sh = a;
+	sh.sinh();
+	EXPECT_NEAR(sh.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(sh.get<float>({1}), std::sinh(1.0f), 1e-5f);
+
+	NDArray ch = a;
+	ch.cosh();
+	EXPECT_NEAR(ch.get<float>({0}), 1.0f, 1e-5f);
+	EXPECT_NEAR(ch.get<float>({1}), std::cosh(1.0f), 1e-5f);
+
+	NDArray th = a;
+	th.tanh();
+	EXPECT_NEAR(th.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(th.get<float>({1}), std::tanh(1.0f), 1e-5f);
+
+	NDArray ash(ArrayList({0.0f, 1.0f}));
+	ash.asinh();
+	EXPECT_NEAR(ash.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(ash.get<float>({1}), std::asinh(1.0f), 1e-5f);
+}
+
+TEST(NDArray_elementwise, DegRad) {
+	NDArray d(ArrayList({0.0f, 180.0f, 90.0f}));
+	d.deg2rad();
+	EXPECT_NEAR(d.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(d.get<float>({1}), (float)std::acos(-1.0), 1e-5f);
+	EXPECT_NEAR(d.get<float>({2}), (float)std::acos(-1.0) * 0.5f, 1e-5f);
+
+	NDArray r(ArrayList({0.0f, (float)std::acos(-1.0)}));
+	r.rad2deg();
+	EXPECT_NEAR(r.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(r.get<float>({1}), 180.0f, 1e-4f);
+}
+
+TEST(NDArray_elementwise, Atan2_Hypot) {
+	NDArray y(ArrayList({0.0f, 1.0f, 1.0f}));
+	NDArray x(ArrayList({1.0f, 0.0f, 1.0f}));
+	NDArray a = y.atan2(x);
+	EXPECT_NEAR(a.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(a.get<float>({1}), (float)std::acos(-1.0) * 0.5f, 1e-5f);
+	EXPECT_NEAR(a.get<float>({2}), (float)std::atan2(1.0, 1.0), 1e-5f);
+
+	// inputs not mutated
+	EXPECT_FLOAT_EQ(y.get<float>({1}), 1.0f);
+
+	NDArray h = y.hypot(x);
+	EXPECT_NEAR(h.get<float>({0}), 1.0f, 1e-5f);
+	EXPECT_NEAR(h.get<float>({1}), 1.0f, 1e-5f);
+	EXPECT_NEAR(h.get<float>({2}), std::sqrt(2.0f), 1e-5f);
+
+	NDArray h2 = y.hypot(0.0);
+	EXPECT_NEAR(h2.get<float>({0}), 0.0f, 1e-5f);
+	EXPECT_NEAR(h2.get<float>({1}), 1.0f, 1e-5f);
+}
+
 TEST(NDArray_elementwise, Clip) {
 	NDArray a(ArrayList({-1.0f, 0.5f, 2.0f, 5.0f}));
 	NDArray c = a.clip(0.0f, 2.0f);
