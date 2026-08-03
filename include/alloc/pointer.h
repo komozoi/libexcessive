@@ -137,6 +137,39 @@ struct is_sp : std::false_type {};
 template<typename T>
 struct is_sp<sp<T>> : std::true_type {};
 
+/**
+ * @brief Whether `sp<From>` may alias-cast to `sp<To>` (shared control block).
+ *
+ * Allows:
+ * - **Upcast / same type**: `From*` is implicitly convertible to `To*` (existing behavior).
+ * - **Downcast**: `To` derives from polymorphic `From` (e.g. `sp<Super>` → `sp<Abstract>` when the
+ *   dynamic type is a further concrete subclass). Validated at runtime with `dynamic_cast`.
+ *
+ * Const/volatile may be added but not removed.
+ */
+template<typename From, typename To>
+struct sp_can_cast {
+private:
+	using FromBare = std::remove_cv_t<From>;
+	using ToBare = std::remove_cv_t<To>;
+
+public:
+	static constexpr bool upcast = std::is_convertible<From*, To*>::value;
+
+	static constexpr bool downcast =
+		!upcast &&
+		std::is_base_of<FromBare, ToBare>::value &&
+		!std::is_same<FromBare, ToBare>::value &&
+		std::is_polymorphic<FromBare>::value &&
+		(std::is_const<From>::value ? std::is_const<To>::value : true) &&
+		(std::is_volatile<From>::value ? std::is_volatile<To>::value : true);
+
+	static constexpr bool value = upcast || downcast;
+};
+
+template<typename From, typename To>
+inline constexpr bool sp_can_cast_v = sp_can_cast<From, To>::value;
+
 
 /**
  * @class sp
@@ -216,12 +249,25 @@ public:
 	}
 
 	/**
-	 * @brief Templated move constructor. Allows conversion from sp<U> to sp<T> if U* is convertible to T*.
+	 * @brief Templated move constructor. Converts `sp<U>` → `sp<T>` when castable (upcast or downcast).
 	 * @tparam U The type of the object managed by the source sp instance.
 	 * @param other The source sp instance.
+	 *
+	 * Downcasts are checked with `dynamic_cast`; on failure this is null and `other` is left unchanged.
 	 */
-	template<typename U, typename = typename std::enable_if<std::is_convertible<U*, T*>::value>::type>
-	sp(sp<U>&& other) noexcept : details((sp_pointer_details_t*)other.details), type(other.type) {
+	template<typename U, typename = typename std::enable_if<sp_can_cast<U, T>::value>::type>
+	sp(sp<U>&& other) noexcept : details(nullptr), type(NULLPTR) {
+		if (!other.details)
+			return;
+
+		if constexpr (!std::is_convertible<U*, T*>::value) {
+			// Downcast: validate dynamic type before stealing the control block
+			if (dynamic_cast<T*>(other.get()) == nullptr)
+				return;
+		}
+
+		details = (sp_pointer_details_t*)other.details;
+		type = other.type;
 		other.details = nullptr;
 		other.type = NULLPTR;
 	}
@@ -237,13 +283,26 @@ public:
 	}
 
 	/**
-	 * @brief Templated move assignment operator. Allows conversion from sp<U> to sp<T> if U* is convertible to T*.
+	 * @brief Templated move assignment. Converts `sp<U>` → `sp<T>` when castable (upcast or downcast).
 	 * @tparam U The type of the object managed by the source sp instance.
 	 * @param other The source sp instance.
 	 * @return Reference to this sp instance.
+	 *
+	 * Downcasts are checked with `dynamic_cast`; on failure this is reset to null and `other` is left unchanged.
 	 */
-	template<typename U, typename = typename std::enable_if<std::is_convertible<U*, T*>::value>::type>
+	template<typename U, typename = typename std::enable_if<sp_can_cast<U, T>::value>::type>
 	sp& operator=(sp<U>&& other) noexcept {
+		if (!other.details) {
+			reset();
+			return *this;
+		}
+
+		if constexpr (!std::is_convertible<U*, T*>::value) {
+			// Failed downcast: leave both sides unchanged
+			if (dynamic_cast<T*>(other.get()) == nullptr)
+				return *this;
+		}
+
 		reset();
 		details = (sp_pointer_details_t*)other.details;
 		type = other.type;
@@ -263,11 +322,14 @@ public:
 	}
 
 	/**
-	 * @brief Templated copy constructor. Allows conversion from sp<U> to sp<T> if U* is convertible to T*.
+	 * @brief Templated copy constructor. Converts `sp<U>` → `sp<T>` when castable (upcast or downcast).
 	 * @tparam U The type of the object managed by the source sp instance.
 	 * @param other The source sp instance.
+	 *
+	 * Enables `sp<Abstract>(superSp)` and C-style `(sp<Abstract>)superSp` for polymorphic downcasts.
+	 * Failed downcasts yield a null `sp`.
 	 */
-	template<typename U, typename = typename std::enable_if<std::is_convertible<U*, T*>::value>::type>
+	template<typename U, typename = typename std::enable_if<sp_can_cast<U, T>::value>::type>
 	sp(sp<U> const& other) {
 		acquire_from_templated_copy(other);
 	}
@@ -288,12 +350,12 @@ public:
 	}
 
 	/**
-	 * @brief Templated copy assignment operator. Allows conversion from sp<U> to sp<T> if U* is convertible to T*.
+	 * @brief Templated copy assignment. Converts `sp<U>` → `sp<T>` when castable (upcast or downcast).
 	 * @tparam U The type of the object managed by the source sp instance.
 	 * @param other The source sp instance.
 	 * @return Reference to this sp instance.
 	 */
-	template<typename U, typename = typename std::enable_if<std::is_convertible<U*, T*>::value>::type>
+	template<typename U, typename = typename std::enable_if<sp_can_cast<U, T>::value>::type>
 	sp& operator=(sp<U> const& other) {
 		reset();
 		acquire_from_templated_copy(other);
@@ -507,15 +569,25 @@ private:
 
 	/**
 	 * @brief Shared logic for templated copy construction and assignment.
-	 * Handles reference counting and type transitions.
+	 * Handles reference counting, type transitions, and polymorphic downcast checks.
 	 * @tparam U The type of the object managed by the source sp instance.
 	 * @param other The source sp instance.
 	 */
 	template<typename U>
 	void acquire_from_templated_copy(sp<U> const& other) {
-		details = (sp_pointer_details_t*)other.details;
-		if (!details)
+		details = nullptr;
+		type = NULLPTR;
+
+		if (!other.details)
 			return;
+
+		// Upcast: implicit pointer conversion. Downcast: require dynamic type match.
+		if constexpr (!std::is_convertible<U*, T*>::value) {
+			if (dynamic_cast<T*>(other.get()) == nullptr)
+				return;
+		}
+
+		details = (sp_pointer_details_t*)other.details;
 
 		if (other.type == UNIQUE) {
 			// UNIQUE copied -> copy becomes COW, original stays UNIQUE
