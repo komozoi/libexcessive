@@ -146,34 +146,51 @@ TEST(NDArray_select, LeftScalar_Comparison) {
 // divWhere
 // ============================================================
 
-TEST(NDArray_select, DivWhere_ScalarWhenZero) {
+TEST(NDArray_select, SafeDiv_ScalarWhenZero) {
 	NDArray num(ArrayList({10.0f, 20.0f, 30.0f}));
 	NDArray den(ArrayList({2.0f, 0.0f, 5.0f}));
 
-	NDArray r = NDArray::divWhere(num, den, -1.0f);
+	NDArray r = num.safeDiv(den, -1.0f);
 	EXPECT_FLOAT_EQ(r.get<float>({0}), 5.0f);
 	EXPECT_FLOAT_EQ(r.get<float>({1}), -1.0f); // zero den
 	EXPECT_FLOAT_EQ(r.get<float>({2}), 6.0f);
 }
 
-TEST(NDArray_select, DivWhere_ArrayWhenZero) {
+TEST(NDArray_select, SafeDiv_ArrayWhenZero) {
 	NDArray num(ArrayList({8.0f, 9.0f}));
 	NDArray den(ArrayList({2.0f, 0.0f}));
 	NDArray alt(ArrayList({100.0f, 200.0f}));
 
-	NDArray r = NDArray::divWhere(num, den, alt);
+	NDArray r = num.safeDiv(den, alt);
 	EXPECT_FLOAT_EQ(r.get<float>({0}), 4.0f);
 	EXPECT_FLOAT_EQ(r.get<float>({1}), 200.0f);
 }
 
-TEST(NDArray_select, DivWhere_Integer) {
+TEST(NDArray_select, SafeDiv_Integer) {
 	NDArray num(ArrayList<int32_t>({10, 20, 30}));
 	NDArray den(ArrayList<int32_t>({2, 0, 5}));
-	NDArray r = NDArray::divWhere(num, den, -1);
+	NDArray r = num.safeDiv(den, -1);
 	EXPECT_EQ(r.type, INT32);
 	EXPECT_EQ(r.get<int32_t>({0}), 5);
 	EXPECT_EQ(r.get<int32_t>({1}), -1);
 	EXPECT_EQ(r.get<int32_t>({2}), 6);
+}
+
+TEST(NDArray_select, Select_ScalarArms) {
+	NDArray mask(ArrayList({1.0f, 0.0f, 1.0f}));
+	NDArray r = NDArray::select(mask, 10.0, -1);
+	EXPECT_EQ(r.type, F64);
+	EXPECT_DOUBLE_EQ(r.get<double>({0}), 10.0);
+	EXPECT_DOUBLE_EQ(r.get<double>({1}), -1.0);
+	EXPECT_DOUBLE_EQ(r.get<double>({2}), 10.0);
+}
+
+TEST(NDArray_select, Choose_ScalarArms) {
+	NDArray a(ArrayList({1.0f, 5.0f}));
+	NDArray b(ArrayList({2.0f, 3.0f}));
+	NDArray r = (a > b).choose(100.0f, 0.0f);
+	EXPECT_FLOAT_EQ(r.get<float>({0}), 0.0f);
+	EXPECT_FLOAT_EQ(r.get<float>({1}), 100.0f);
 }
 
 
@@ -194,6 +211,30 @@ TEST(NDArray_select, Piecewise_FirstMaskWins) {
 	EXPECT_FLOAT_EQ(r.get<float>({2}), 300.0f); // m1
 }
 
+TEST(NDArray_select, Piecewise_ScalarOtherwise_NoFullArrayNeeded) {
+	// Scalar -1.0 is only written where selected; no fullLike required.
+	NDArray m0(ArrayList({1.0f, 0.0f, 0.0f}));
+	NDArray v0(ArrayList({10.0f, 20.0f, 30.0f}));
+	NDArray r = NDArray::piecewise(m0, v0, -1.0);
+	EXPECT_EQ(r.type, F64); // double otherwise promotes
+	EXPECT_DOUBLE_EQ(r.get<double>({0}), 10.0);
+	EXPECT_DOUBLE_EQ(r.get<double>({1}), -1.0);
+	EXPECT_DOUBLE_EQ(r.get<double>({2}), -1.0);
+}
+
+TEST(NDArray_select, Piecewise_TruthyMaskAndScalar) {
+	// piecewise(vb==0, when_vb0, b, main, -1.0) pattern
+	NDArray b(ArrayList({2.0f, 0.0f, 3.0f}));
+	NDArray main(ArrayList({7.0f, 8.0f, 9.0f}));
+	NDArray when0(ArrayList({1.0f, 1.0f, 1.0f}));
+	NDArray vb(ArrayList({0.0f, 1.0f, 1.0f}));
+
+	NDArray r = NDArray::piecewise(vb == 0.0, when0, b, main, -1.0);
+	EXPECT_DOUBLE_EQ(r.get<double>({0}), 1.0);  // vb==0
+	EXPECT_DOUBLE_EQ(r.get<double>({1}), -1.0); // b==0 → otherwise
+	EXPECT_DOUBLE_EQ(r.get<double>({2}), 9.0);  // b truthy → main
+}
+
 
 // ============================================================
 // End-to-end sample fn (zero-denominator branches)
@@ -204,19 +245,22 @@ TEST(NDArray_select, Piecewise_FirstMaskWins) {
  *   if (vb == 0) return va / (b*b);
  *   if (b == 0) return -1;
  *   return (a*a*vb + b*b*va) / (b*b*b*b);
+ *
+ * piecewise(vb==0, when_vb0, b, main, -1):
+ *   if vb==0 → when_vb0; else if b truthy → main; else → -1
+ *   (i.e. b==0 → -1 without a second equality mask)
  */
 static NDArray sampleFn(const NDArray& a, const NDArray& b,
                         const NDArray& va, const NDArray& vb) {
 	NDArray b2 = b.squared();
 	NDArray b4 = b2.squared();
-	NDArray when_vb0 = NDArray::divWhere(va, b2, 0.0); // both-zero → 0 (or set policy)
-	NDArray num = a.squared() * vb + b2 * va;
-	NDArray main = NDArray::divWhere(num, b4, 0.0);
+	NDArray when_vb0 = va.safeDiv(b2, 0.0);
+	NDArray main = (a.squared() * vb + b2 * va).safeDiv(b4, 0.0);
 
 	return NDArray::piecewise(
-		vb.equal(0.0), when_vb0,
-		b.equal(0.0), NDArray::fullLike(b, -1.0),
-		main);
+		vb == 0.0, when_vb0,
+		b, main,
+		-1.0);
 }
 
 TEST(NDArray_select, SampleFn_NormalBranch) {

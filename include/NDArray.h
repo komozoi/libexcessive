@@ -336,32 +336,21 @@ public:
 	/*
 	** Element-wise comparisons → BINARY mask (same shape).
 	**
-	** Whole-array equality remains operator== → bool (not element-wise).
-	** Element-wise relational operators (>, <, >=, <=, !=) return BINARY masks
-	** so ternary-style selection is written as:
-	**   select(a > b, vb, va);           // preferred (C++ cannot overload ?:)
-	**   (a > b).choose(vb, va);          // same, method on the mask
+	** Whole-array equality: operator==(const NDArray&) → bool.
+	** Element-wise vs scalar: operator==(float|double|int) → BINARY, e.g. vb == 0.0
+	** Element-wise relational: >, <, >=, <=, != → BINARY
+	**
+	** Ternary-style selection (C++ cannot overload ?:):
+	**   select(a > b, vb, va);
+	**   (a > b).choose(vb, va);
 	*/
+	/** Element-wise array comparison (BINARY). Prefer operators for scalars. */
 	NDArray equal(const NDArray& other) const;
 	NDArray notEqual(const NDArray& other) const;
 	NDArray less(const NDArray& other) const;
 	NDArray lessEqual(const NDArray& other) const;
 	NDArray greater(const NDArray& other) const;
 	NDArray greaterEqual(const NDArray& other) const;
-
-	NDArray equal(float other) const;
-	NDArray notEqual(float other) const;
-	NDArray less(float other) const;
-	NDArray lessEqual(float other) const;
-	NDArray greater(float other) const;
-	NDArray greaterEqual(float other) const;
-
-	NDArray equal(double other) const;
-	NDArray notEqual(double other) const;
-	NDArray less(double other) const;
-	NDArray lessEqual(double other) const;
-	NDArray greater(double other) const;
-	NDArray greaterEqual(double other) const;
 
 	/** Element-wise relational operators → BINARY (not whole-array). */
 	NDArray operator>(const NDArray& other) const;
@@ -370,69 +359,89 @@ public:
 	NDArray operator<=(const NDArray& other) const;
 	NDArray operator!=(const NDArray& other) const;
 
+	/** Element-wise equality / inequality vs scalar → BINARY. */
+	NDArray operator==(float other) const;
+	NDArray operator!=(float other) const;
 	NDArray operator>(float other) const;
 	NDArray operator<(float other) const;
 	NDArray operator>=(float other) const;
 	NDArray operator<=(float other) const;
-	NDArray operator!=(float other) const;
 
+	NDArray operator==(double other) const;
+	NDArray operator!=(double other) const;
 	NDArray operator>(double other) const;
 	NDArray operator<(double other) const;
 	NDArray operator>=(double other) const;
 	NDArray operator<=(double other) const;
-	NDArray operator!=(double other) const;
 
+	NDArray operator==(int other) const;
+	NDArray operator!=(int other) const;
 	NDArray operator>(int other) const;
 	NDArray operator<(int other) const;
 	NDArray operator>=(int other) const;
 	NDArray operator<=(int other) const;
-	NDArray operator!=(int other) const;
+
+	/**
+	 * NDArray or scalar (int / float / double / int64_t) for value slots in
+	 * select, choose, safeDiv, piecewise, etc. Scalars are written into the
+	 * result only when chosen — no full temporary array is allocated for them.
+	 */
+	class ArrayOrScalar {
+	public:
+		ArrayOrScalar(const NDArray& a);
+		ArrayOrScalar(double v);
+		ArrayOrScalar(float v);
+		ArrayOrScalar(int v);
+		ArrayOrScalar(int64_t v);
+
+	private:
+		friend class NDArray;
+		friend struct Impl;
+		enum Kind { Array, ScalarDouble, ScalarInt };
+		Kind kind;
+		const NDArray* arr;
+		double d;
+		int64_t i;
+	};
 
 	/**
 	 * Element-wise select: result[i] = condition[i] ? x[i] : y[i].
 	 *
-	 * All arguments are fully evaluated before selection (not short-circuiting).
-	 * Prefer divWhere when a branch would divide by zero.
-	 * condition is treated as truthy (BINARY or any non-zero). x and y are
-	 * promoted to a common type. All three must share the same shape.
-	 *
-	 * C++ cannot overload `?:`; use select/where/choose for ternary logic:
+	 * x and y may be NDArray or scalars (ArrayOrScalar). Prefer safeDiv when a
+	 * branch would divide by zero. C++ cannot overload `?:`; use:
 	 *   select(a > b, vb, va)
+	 *   (a > b).choose(vb, va)
 	 */
-	static NDArray where(const NDArray& condition, const NDArray& x, const NDArray& y);
-	/** Alias of where (NumPy/TF naming). */
-	static NDArray select(const NDArray& condition, const NDArray& x, const NDArray& y);
+	static NDArray where(const NDArray& condition, ArrayOrScalar x, ArrayOrScalar y);
+	/** Alias of where. */
+	static NDArray select(const NDArray& condition, ArrayOrScalar x, ArrayOrScalar y);
 
 	/**
-	 * Instance form of select: treat *this as the condition mask.
+	 * Instance form of select: *this is the condition mask.
 	 *   (a > b).choose(vb, va)  ≡  select(a > b, vb, va)
 	 */
-	NDArray choose(const NDArray& ifTrue, const NDArray& ifFalse) const;
+	NDArray choose(ArrayOrScalar ifTrue, ArrayOrScalar ifFalse) const;
 
 	/**
-	 * Element-wise division that never divides by zero:
-	 *   out[i] = (den[i] == 0) ? whenZero[i] : num[i] / den[i]
-	 * Result type promotes num and den; whenZero is converted into that type.
+	 * Element-wise *this / den, never dividing by zero:
+	 *   out[i] = (den[i] == 0) ? whenZero : (*this)[i] / den[i]
+	 * whenZero may be an array (same shape) or a scalar.
 	 */
-	static NDArray divWhere(const NDArray& num, const NDArray& den, const NDArray& whenZero);
-	static NDArray divWhere(const NDArray& num, const NDArray& den, double whenZero);
-	static NDArray divWhere(const NDArray& num, const NDArray& den, float whenZero);
-	static NDArray divWhere(const NDArray& num, const NDArray& den, int whenZero);
+	NDArray safeDiv(const NDArray& den, ArrayOrScalar whenZero) const;
 
 	/**
 	 * Ordered multi-branch select (first true mask wins; last arg is default).
-	 * Value arrays are still fully computed by the caller before the call —
-	 * build zero-denominator branches with divWhere, not raw operator/.
+	 * Value arms are ArrayOrScalar (NDArray or int/float/double).
+	 *
+	 * Example:
+	 *   piecewise(vb == 0.0, when_vb0, b, main, -1.0)
 	 */
-	static NDArray piecewise(const NDArray& m0, const NDArray& v0,
-	                         const NDArray& otherwise);
-	static NDArray piecewise(const NDArray& m0, const NDArray& v0,
-	                         const NDArray& m1, const NDArray& v1,
-	                         const NDArray& otherwise);
-	static NDArray piecewise(const NDArray& m0, const NDArray& v0,
-	                         const NDArray& m1, const NDArray& v1,
-	                         const NDArray& m2, const NDArray& v2,
-	                         const NDArray& otherwise);
+	static NDArray piecewise(const NDArray& m0, ArrayOrScalar v0, ArrayOrScalar otherwise);
+	static NDArray piecewise(const NDArray& m0, ArrayOrScalar v0,
+	                         const NDArray& m1, ArrayOrScalar v1, ArrayOrScalar otherwise);
+	static NDArray piecewise(const NDArray& m0, ArrayOrScalar v0,
+	                         const NDArray& m1, ArrayOrScalar v1,
+	                         const NDArray& m2, ArrayOrScalar v2, ArrayOrScalar otherwise);
 
 	/** True if any element is non-zero / true. */
 	bool any() const;
@@ -666,23 +675,26 @@ NDArray operator/(int64_t lhs, const NDArray& rhs);
 NDArray operator%(int64_t lhs, const NDArray& rhs);
 
 /** Left-hand scalar comparisons → BINARY mask (element-wise). */
+NDArray operator==(float lhs, const NDArray& rhs);
+NDArray operator!=(float lhs, const NDArray& rhs);
 NDArray operator>(float lhs, const NDArray& rhs);
 NDArray operator<(float lhs, const NDArray& rhs);
 NDArray operator>=(float lhs, const NDArray& rhs);
 NDArray operator<=(float lhs, const NDArray& rhs);
-NDArray operator!=(float lhs, const NDArray& rhs);
 
+NDArray operator==(double lhs, const NDArray& rhs);
+NDArray operator!=(double lhs, const NDArray& rhs);
 NDArray operator>(double lhs, const NDArray& rhs);
 NDArray operator<(double lhs, const NDArray& rhs);
 NDArray operator>=(double lhs, const NDArray& rhs);
 NDArray operator<=(double lhs, const NDArray& rhs);
-NDArray operator!=(double lhs, const NDArray& rhs);
 
+NDArray operator==(int lhs, const NDArray& rhs);
+NDArray operator!=(int lhs, const NDArray& rhs);
 NDArray operator>(int lhs, const NDArray& rhs);
 NDArray operator<(int lhs, const NDArray& rhs);
 NDArray operator>=(int lhs, const NDArray& rhs);
 NDArray operator<=(int lhs, const NDArray& rhs);
-NDArray operator!=(int lhs, const NDArray& rhs);
 
 
 #endif //AGENT_CLUSTER_NDARRAY_H

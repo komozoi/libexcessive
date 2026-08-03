@@ -326,10 +326,15 @@ TEST(NDArray_elementwise, Compare_Promotes_UINT8_F32) {
 
 TEST(NDArray_elementwise, Compare_FloatScalar) {
 	NDArray a(ArrayList({1.0f, 2.0f, 3.0f}));
-	NDArray m = a.greater(2.0f);
+	NDArray m = a > 2.0f;
 	EXPECT_EQ(m.get<int>({0}), 0);
 	EXPECT_EQ(m.get<int>({1}), 0);
 	EXPECT_EQ(m.get<int>({2}), 1);
+
+	NDArray eq0 = a == 2.0f;
+	EXPECT_EQ(eq0.get<int>({0}), 0);
+	EXPECT_EQ(eq0.get<int>({1}), 1);
+	EXPECT_EQ(eq0.get<int>({2}), 0);
 }
 
 TEST(NDArray_elementwise, Compare_DoesNotBreak_WholeArrayEquality) {
