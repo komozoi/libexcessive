@@ -758,14 +758,16 @@ public:
 	}
 
 	/**
-	 * @brief Const overload returning `sp<const T>`.
+	 * @brief Const overload which prevents mutation of this object
 	 * @throws std::bad_weak_ptr if this object is not currently owned by an `sp`.
 	 */
-	sp<const T> ptr() const {
+	sp<T> ptr() const {
 		sp<T> strong = weak_this_.lock();
 		if (!strong)
 			throw std::bad_weak_ptr();
-		return strong;
+
+		// Returns a non-const pointer, which copies on modify
+		return strong.getWritableCopy();
 	}
 
 private:
