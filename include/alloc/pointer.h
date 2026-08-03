@@ -20,6 +20,9 @@
 #define LIBEXCESSIVE_POINTER_H
 
 #include <atomic>
+#include <memory>
+#include <type_traits>
+#include <utility>
 
 #include "Allocator.h"
 
@@ -55,6 +58,9 @@ struct compressed_pointer_details {
 /**
  * @struct sp_pointer_details_t
  * @brief Internal control block for `sp<T>`, managing the reference count and object storage.
+ *
+ * The concrete control block embeds the managed object in the same allocation (see
+ * `sp_pointer_details_concrete_t`) so there is a single heap allocation per managed instance.
  */
 struct sp_pointer_details_t {
 	std::atomic<uint32_t> refs; /**< Atomic reference counter. */
@@ -78,6 +84,8 @@ struct sp_pointer_details_t {
  * @struct sp_pointer_details_concrete_t
  * @brief Concrete implementation of `sp_pointer_details_t` for a specific type `U`.
  * @tparam U The actual type of the managed object.
+ *
+ * Object and control data share one allocation: `[sp_pointer_details_concrete_t = header + U data]`.
  */
 template<typename U>
 struct sp_pointer_details_concrete_t : public sp_pointer_details_t {
@@ -104,6 +112,21 @@ struct sp_pointer_details_concrete_t : public sp_pointer_details_t {
 // Originally based on https://codereview.stackexchange.com/a/163857
 template<class T>
 class sp;
+
+template<class T>
+class wp;
+
+template<class T, SpPointerType P>
+class SpManaged;
+
+/**
+ * @brief Catch-all: types that do not inherit `SpManaged` need no ownership registration.
+ *
+ * When `T` inherits `SpManaged<Base, ...>`, ADL finds the friend overload declared in
+ * `SpManaged`, which registers `weak_this_` even if the concrete type is a subclass of `Base`.
+ */
+template<class Y>
+inline void sp_enable_weak_this(const void*, Y*, const sp<Y>&) {}
 
 /**
  * @brief Trait to check if a type is a specialization of `sp`.
@@ -148,6 +171,7 @@ public:
 	template<typename... Args>
 	explicit sp(SpPointerType type, Args&&... args) : type(type) {
 		details = new sp_pointer_details_concrete_t<T>(std::forward<Args>(args)...);
+		try_accept_owner();
 	}
 
 	/**
@@ -171,6 +195,7 @@ public:
 	template<typename U, typename = typename std::enable_if<!is_sp<typename std::decay<U>::type>::value>::type>
 	explicit sp(U&& value) : type(UNIQUE) {
 		details = new sp_pointer_details_concrete_t<T>(std::forward<U>(value));
+		try_accept_owner();
 	}
 
 	/**
@@ -179,6 +204,7 @@ public:
 	 */
 	explicit sp(const T& value) : type(UNIQUE) {
 		details = new sp_pointer_details_concrete_t<T>(value);
+		try_accept_owner();
 	}
 
 	/**
@@ -435,12 +461,30 @@ private:
 	 * @param d Pointer to the control block.
 	 * @param t Initial ownership model type.
 	 */
-	sp(sp_pointer_details_t* d, SpPointerType t) : details(d), type(t) {}
+	sp(sp_pointer_details_t* d, SpPointerType t) : details(d), type(t) {
+		try_accept_owner();
+	}
 
 	template<typename U>
 	friend class sp;
 
+	template<typename U>
+	friend class wp;
+
+	template<class U, SpPointerType P>
+	friend class SpManaged;
+
 	// ---------- Internals ----------
+
+	/**
+	 * @brief If `T` (or a base of `T`) inherits `SpManaged<Base, ...>`, register ownership so `ptr()` works.
+	 *
+	 * Uses ADL so a subclass managed as `sp<Derived>` still registers the `SpManaged<Base>` base.
+	 */
+	void try_accept_owner() {
+		if (T* obj = get())
+			sp_enable_weak_this(obj, obj, *this);
+	}
 
 	/**
 	 * @brief Shared logic for copy construction and assignment.
@@ -514,6 +558,7 @@ private:
 
 		details = old->copy();
 		type = SHARED;
+		try_accept_owner();
 
 		// drop old ref
 		if (old->refs.fetch_sub(1, std::memory_order_acq_rel) == 1) {
@@ -556,5 +601,199 @@ template <typename T, typename U>
 bool operator!=(const T* lhs, const sp<U>& rhs) {
 	return !(rhs == lhs);
 }
+
+/**
+ * @class wp
+ * @tparam T The type of the object being observed.
+ * @brief Non-owning weak observer of an `sp<T>`-managed object.
+ *
+ * `lock()` / `expired()` are only safe while at least one `sp` owns it
+ */
+template<class T>
+class wp {
+public:
+	wp() : details(nullptr) {}
+
+	wp(std::nullptr_t) : details(nullptr) {}
+
+	/**
+	 * @brief Constructs a weak observer from a strong pointer.
+	 */
+	wp(const sp<T>& owner) : details(owner.details) {}
+
+	/**
+	 * @brief Constructs a weak observer from a convertible strong pointer.
+	 */
+	template<typename U, typename = typename std::enable_if<std::is_convertible<U*, T*>::value>::type>
+	wp(const sp<U>& owner) : details(owner.details) {}
+
+	wp(const wp& other) = default;
+	wp& operator=(const wp& other) = default;
+
+	wp(wp&& other) noexcept : details(other.details) {
+		other.details = nullptr;
+	}
+
+	wp& operator=(wp&& other) noexcept {
+		details = other.details;
+		other.details = nullptr;
+		return *this;
+	}
+
+	wp& operator=(const sp<T>& owner) {
+		details = owner.details;
+		return *this;
+	}
+
+	template<typename U, typename = typename std::enable_if<std::is_convertible<U*, T*>::value>::type>
+	wp& operator=(const sp<U>& owner) {
+		details = owner.details;
+		return *this;
+	}
+
+	wp& operator=(std::nullptr_t) {
+		details = nullptr;
+		return *this;
+	}
+
+	/**
+	 * @brief Clears this weak observer.
+	 */
+	void reset() {
+		details = nullptr;
+	}
+
+	/**
+	 * @brief Returns true if there is no associated object or no remaining strong references.
+	 *
+	 * Only valid to call while the control block may still exist (e.g. from a live managed object).
+	 */
+	bool expired() const {
+		return details == nullptr || details->refs.load(std::memory_order_acquire) == 0;
+	}
+
+	/**
+	 * @brief Attempts to obtain a strong `sp<T>` if the object is still owned.
+	 * @return A non-null `sp` if a strong reference could be taken; empty otherwise.
+	 */
+	sp<T> lock() const {
+		if (!details)
+			return sp<T>();
+
+		uint32_t n = details->refs.load(std::memory_order_acquire);
+		while (n != 0) {
+			if (details->refs.compare_exchange_weak(n, n + 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
+				return sp<T>(details, SHARED);
+			}
+		}
+		return sp<T>();
+	}
+
+	/**
+	 * @brief True if this observer is associated with a control block (may still be expired).
+	 */
+	explicit operator bool() const {
+		return details != nullptr;
+	}
+
+private:
+	sp_pointer_details_t* details;
+
+	template<typename U>
+	friend class wp;
+
+	template<typename U>
+	friend class sp;
+};
+
+/**
+ * @class SpManaged
+ * @tparam T The type registered with `wp` / returned by `ptr()`
+ * @tparam P Ownership model used when this type is first adopted by an `sp`
+ * @brief Base class enabling an object to recover an `sp` to itself (like `enable_shared_from_this`).
+ *
+ * Inherit as: `class Foo : public SpManaged<Foo, SHARED> { ... };`
+ * Subclasses of `Foo` inherit `ptr()` and receive `sp<Foo>` (the superclass type). Construct with
+ * `sp<Derived>` / `sp<Foo>`; ownership registration works for the whole hierarchy via ADL.
+ *
+ * `weak_this_` is stored inside the object (same allocation as the control block + managed type).
+ * Copy/move of the managed value does not transfer ownership registration; the smart-pointer
+ * machinery re-registers when a new block is first owned.
+ */
+template<class T, SpPointerType P = SHARED>
+class SpManaged {
+private:
+	mutable wp<T> weak_this_;
+
+protected:
+	SpManaged() = default;
+
+	/** Copy does not share ownership registration; leave `weak_this_` empty. */
+	SpManaged(const SpManaged&) {}
+
+	SpManaged& operator=(const SpManaged&) {
+		return *this;
+	}
+
+	/** Move does not transfer ownership registration; leave `weak_this_` empty. */
+	SpManaged(SpManaged&&) noexcept {}
+
+	SpManaged& operator=(SpManaged&&) noexcept {
+		return *this;
+	}
+
+public:
+	using __sp_managed_marker = T;
+	static constexpr SpPointerType __sp_managed_pointer_type = P;
+
+	/**
+	 * @brief Returns a strong pointer to this object as `sp<T>` (the `SpManaged` CRTP type).
+	 * @throws std::bad_weak_ptr if this object is not currently owned by an `sp`.
+	 */
+	sp<T> ptr() {
+		sp<T> strong = weak_this_.lock();
+		if (!strong)
+			throw std::bad_weak_ptr();
+		return strong;
+	}
+
+	/**
+	 * @brief Const overload returning `sp<const T>`.
+	 * @throws std::bad_weak_ptr if this object is not currently owned by an `sp`.
+	 */
+	sp<const T> ptr() const {
+		sp<T> strong = weak_this_.lock();
+		if (!strong)
+			throw std::bad_weak_ptr();
+		return strong;
+	}
+
+private:
+	/**
+	 * @brief Called when ownership is first taken. Accepts `sp` to `T` or any type convertible to `T*`.
+	 */
+	template<class U>
+	void __accept_owner(const sp<U>& owner) const {
+		static_assert(std::is_convertible<U*, T*>::value,
+			"sp type must be convertible to SpManaged's registered type");
+		if (weak_this_.expired())
+			weak_this_ = owner;
+	}
+
+	/**
+	 * @brief ADL-found registration for this `SpManaged` specialization (including subclasses of `T`).
+	 *
+	 * `T` is fixed by the `SpManaged` instantiation (not deduced from the argument), so
+	 * `sp<Derived>` still registers when `Derived` inherits `T` / `SpManaged<T>`.
+	 */
+	template<class Y>
+	friend void sp_enable_weak_this(const SpManaged* managed, Y* /*y*/, const sp<Y>& owner) {
+		if (managed)
+			managed->__accept_owner(owner);
+	}
+
+	template<class U>
+	friend class sp;
+};
 
 #endif //LIBEXCESSIVE_POINTER_H
