@@ -192,30 +192,33 @@ public:
 	 *
 	 * Updates `*this` in place.  If the result type must be wider than
 	 * `this->type` to avoid losing precision, `*this` is promoted (contents
-	 * converted) first.
+	 * converted) first.  Does not mutate `other`.
 	 *
 	 * @param other array to add
 	 * @return *this
 	 */
-	NDArray& add(NDArray& other);
+	NDArray& add(const NDArray& other);
 
 	/**
 	 * Subtracts `other` from `*this` element-wise (same shape).
 	 * Promotes `*this` when needed so precision is not lost.
+	 * Does not mutate `other`.
 	 */
-	NDArray& sub(NDArray& other);
+	NDArray& sub(const NDArray& other);
 
 	/**
 	 * Multiplies two NDArrays of the same shape element-wise.
 	 * Promotes `*this` when needed so precision is not lost.
+	 * Does not mutate `other`.
 	 */
-	NDArray& mul(NDArray& other);
+	NDArray& mul(const NDArray& other);
 
 	/**
 	 * Divides `*this` by `other` element-wise (same shape).
 	 * Promotes `*this` when needed so precision is not lost.
+	 * Does not mutate `other`.
 	 */
-	NDArray& div(NDArray& other);
+	NDArray& div(const NDArray& other);
 
 	/**
 	 * Adds `other` into `*this` with broadcasting.
@@ -225,29 +228,33 @@ public:
 	 * the remaining (trailing) dimensions.
 	 *
 	 * Promotes `*this` when needed so precision is not lost.
+	 * Does not mutate `other`.
 	 *
 	 * @param other array to add (broadcast along outer axes)
 	 * @return *this
 	 */
-	NDArray& broadcastAdd(NDArray& other);
+	NDArray& broadcastAdd(const NDArray& other);
 
 	/**
 	 * Subtracts a broadcasted `other` from `*this` (prefix-shape rule).
 	 * Promotes `*this` when needed so precision is not lost.
+	 * Does not mutate `other`.
 	 */
-	NDArray& broadcastSub(NDArray& other);
+	NDArray& broadcastSub(const NDArray& other);
 
 	/**
 	 * Multiplies `*this` by a broadcasted `other` (prefix-shape rule).
 	 * Promotes `*this` when needed so precision is not lost.
+	 * Does not mutate `other`.
 	 */
-	NDArray& broadcastMul(NDArray& other);
+	NDArray& broadcastMul(const NDArray& other);
 
 	/**
 	 * Divides `*this` by a broadcasted `other` (prefix-shape rule).
 	 * Promotes `*this` when needed so precision is not lost.
+	 * Does not mutate `other`.
 	 */
-	NDArray& broadcastDiv(NDArray& other);
+	NDArray& broadcastDiv(const NDArray& other);
 
 	/*
 	** Factories (return new arrays)

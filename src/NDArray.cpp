@@ -977,10 +977,10 @@ NDArray& NDArray::scalarInt64OpInPlace(int64_t other, ArithOp op) {
 	return *this;
 }
 
-NDArray& NDArray::add(NDArray& other) { return binaryOpInPlace(other, ArithOp::Add); }
-NDArray& NDArray::sub(NDArray& other) { return binaryOpInPlace(other, ArithOp::Sub); }
-NDArray& NDArray::mul(NDArray& other) { return binaryOpInPlace(other, ArithOp::Mul); }
-NDArray& NDArray::div(NDArray& other) { return binaryOpInPlace(other, ArithOp::Div); }
+NDArray& NDArray::add(const NDArray& other) { return binaryOpInPlace(other, ArithOp::Add); }
+NDArray& NDArray::sub(const NDArray& other) { return binaryOpInPlace(other, ArithOp::Sub); }
+NDArray& NDArray::mul(const NDArray& other) { return binaryOpInPlace(other, ArithOp::Mul); }
+NDArray& NDArray::div(const NDArray& other) { return binaryOpInPlace(other, ArithOp::Div); }
 
 void NDArray::applyBroadcastInPlace(const NDArray& src, ArithOp op) {
 	const size_t thisN = numElements();
@@ -1077,10 +1077,10 @@ NDArray& NDArray::broadcastOpInPlace(const NDArray& other, ArithOp op) {
 	return *this;
 }
 
-NDArray& NDArray::broadcastAdd(NDArray& other) { return broadcastOpInPlace(other, ArithOp::Add); }
-NDArray& NDArray::broadcastSub(NDArray& other) { return broadcastOpInPlace(other, ArithOp::Sub); }
-NDArray& NDArray::broadcastMul(NDArray& other) { return broadcastOpInPlace(other, ArithOp::Mul); }
-NDArray& NDArray::broadcastDiv(NDArray& other) { return broadcastOpInPlace(other, ArithOp::Div); }
+NDArray& NDArray::broadcastAdd(const NDArray& other) { return broadcastOpInPlace(other, ArithOp::Add); }
+NDArray& NDArray::broadcastSub(const NDArray& other) { return broadcastOpInPlace(other, ArithOp::Sub); }
+NDArray& NDArray::broadcastMul(const NDArray& other) { return broadcastOpInPlace(other, ArithOp::Mul); }
+NDArray& NDArray::broadcastDiv(const NDArray& other) { return broadcastOpInPlace(other, ArithOp::Div); }
 
 
 // ---- binary operators (copy) -----------------------------------------------
