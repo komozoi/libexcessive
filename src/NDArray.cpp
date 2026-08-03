@@ -403,6 +403,76 @@ void NDArray::stealFrom(NDArray& result) {
 	result.memorySize = 0;
 }
 
+void NDArray::fillFromDouble(double value) {
+	const size_t n = numElements();
+	for (size_t i = 0; i < n; ++i)
+		storeFromDouble(i, value);
+}
+
+void NDArray::fillFromI64(int64_t value) {
+	const size_t n = numElements();
+	for (size_t i = 0; i < n; ++i)
+		storeFromI64(i, value);
+}
+
+NDArray NDArray::zeros(const ArrayList<int>& shape, NDArrayType type) {
+	return NDArray(shape, type);
+}
+
+NDArray NDArray::ones(const ArrayList<int>& shape, NDArrayType type) {
+	NDArray out(shape, type);
+	out.fillFromDouble(1.0);
+	return out;
+}
+
+NDArray NDArray::full(const ArrayList<int>& shape, NDArrayType type, float value) {
+	NDArray out(shape, type);
+	out.fillFromDouble((double)value);
+	return out;
+}
+
+NDArray NDArray::full(const ArrayList<int>& shape, NDArrayType type, double value) {
+	NDArray out(shape, type);
+	out.fillFromDouble(value);
+	return out;
+}
+
+NDArray NDArray::full(const ArrayList<int>& shape, NDArrayType type, int value) {
+	NDArray out(shape, type);
+	out.fillFromI64((int64_t)value);
+	return out;
+}
+
+NDArray NDArray::full(const ArrayList<int>& shape, NDArrayType type, int64_t value) {
+	NDArray out(shape, type);
+	out.fillFromI64(value);
+	return out;
+}
+
+NDArray NDArray::zerosLike(const NDArray& ref) {
+	return zeros(ref.shape, ref.type);
+}
+
+NDArray NDArray::onesLike(const NDArray& ref) {
+	return ones(ref.shape, ref.type);
+}
+
+NDArray NDArray::fullLike(const NDArray& ref, float value) {
+	return full(ref.shape, ref.type, value);
+}
+
+NDArray NDArray::fullLike(const NDArray& ref, double value) {
+	return full(ref.shape, ref.type, value);
+}
+
+NDArray NDArray::fullLike(const NDArray& ref, int value) {
+	return full(ref.shape, ref.type, value);
+}
+
+NDArray NDArray::fullLike(const NDArray& ref, int64_t value) {
+	return full(ref.shape, ref.type, value);
+}
+
 
 // ---- load / store ----------------------------------------------------------
 
@@ -1183,6 +1253,24 @@ NDArray NDArray::operator-() const {
 	return out;
 }
 
+NDArray NDArray::squared() const {
+	NDArray out(*this);
+	out.square();
+	return out;
+}
+
+NDArray NDArray::negated() const {
+	NDArray out(*this);
+	out.neg();
+	return out;
+}
+
+NDArray NDArray::absolute() const {
+	NDArray out(*this);
+	out.abs();
+	return out;
+}
+
 NDArray& NDArray::abs() {
 	const size_t n = numElements();
 	switch (type) {
@@ -1643,24 +1731,19 @@ struct NDArray::Impl {
 		return out;
 	}
 
-	static NDArray where(const NDArray& condition, const NDArray& x, const NDArray& y) {
+	/** Single-pass select: out[i] = truthy(cond[i]) ? x[i] : y[i]. */
+	static NDArray select(const NDArray& condition, const NDArray& x, const NDArray& y) {
 		requireSameShape(condition, x);
 		requireSameShape(condition, y);
-
-		NDArray mask(condition.shape, BINARY);
-		const size_t n = condition.numElements();
-		for (size_t i = 0; i < n; ++i) {
-			bool t = condition.loadAsDouble(i) != 0.0;
-			binarySet(mask.uint64, i, t ? 1 : 0);
-		}
 
 		NDArrayType rt = (x.type == y.type) ? x.type : promoteTypes(x.type, y.type);
 		NDArray xv = x.convert(rt);
 		NDArray yv = y.convert(rt);
 		NDArray out(condition.shape, rt);
+		const size_t n = condition.numElements();
 
 		for (size_t i = 0; i < n; ++i) {
-			bool takeX = binaryGet(mask.uint64, i) != 0;
+			bool takeX = condition.loadAsDouble(i) != 0.0;
 			switch (rt) {
 				case F32: out.float32[i] = takeX ? xv.float32[i] : yv.float32[i]; break;
 				case F64: out.float64[i] = takeX ? xv.float64[i] : yv.float64[i]; break;
@@ -1671,8 +1754,163 @@ struct NDArray::Impl {
 				case BINARY:
 					binarySet(out.uint64, i, takeX ? binaryGet(xv.uint64, i) : binaryGet(yv.uint64, i));
 					break;
-				default: throw std::runtime_error("NDArray::where: invalid type");
+				default: throw std::runtime_error("NDArray::select: invalid type");
 			}
+		}
+		return out;
+	}
+
+	static bool isZeroElement(const NDArray& a, size_t i) {
+		switch (a.type) {
+			case BINARY: return binaryGet(a.uint64, i) == 0;
+			case UINT8: return a.uint8[i] == 0;
+			case INT32: return a.int32[i] == 0;
+			case INT64: return a.int64[i] == 0;
+			case F32: return a.float32[i] == 0.0f;
+			case F64: return a.float64[i] == 0.0;
+			case UINT256: return a.uint256[i] == uint256_t(0);
+			default: return a.loadAsDouble(i) == 0.0;
+		}
+	}
+
+	static void copyElement(NDArray& out, size_t oi, const NDArray& src, size_t si) {
+		switch (out.type) {
+			case F32: out.float32[oi] = src.float32[si]; break;
+			case F64: out.float64[oi] = src.float64[si]; break;
+			case UINT8: out.uint8[oi] = src.uint8[si]; break;
+			case INT32: out.int32[oi] = src.int32[si]; break;
+			case INT64: out.int64[oi] = src.int64[si]; break;
+			case UINT256: out.uint256[oi] = src.uint256[si]; break;
+			case BINARY:
+				binarySet(out.uint64, oi, binaryGet(src.uint64, si));
+				break;
+			default: throw std::runtime_error("copyElement: invalid type");
+		}
+	}
+
+	static void divElement(NDArray& out, size_t i, const NDArray& num, const NDArray& den) {
+		// Precondition: num, den, out share type == out.type; den[i] != 0
+		switch (out.type) {
+			case F32: out.float32[i] = num.float32[i] / den.float32[i]; break;
+			case F64: out.float64[i] = num.float64[i] / den.float64[i]; break;
+			case UINT8: out.uint8[i] = (uint8_t)(num.uint8[i] / den.uint8[i]); break;
+			case INT32: out.int32[i] = num.int32[i] / den.int32[i]; break;
+			case INT64: out.int64[i] = num.int64[i] / den.int64[i]; break;
+			case UINT256: out.uint256[i] = num.uint256[i] / den.uint256[i]; break;
+			case BINARY:
+				// 0/1 or 1/1 only
+				binarySet(out.uint64, i, binaryGet(num.uint64, i));
+				break;
+			default: throw std::runtime_error("divElement: invalid type");
+		}
+	}
+
+	static NDArray divWhere(const NDArray& num, const NDArray& den, const NDArray& whenZero) {
+		requireSameShape(num, den);
+		requireSameShape(num, whenZero);
+		NDArrayType rt = promoteTypes(num.type, den.type);
+		NDArray N = num.convert(rt);
+		NDArray D = den.convert(rt);
+		NDArray Z = whenZero.convert(rt);
+		NDArray out(num.shape, rt);
+		const size_t n = num.numElements();
+		for (size_t i = 0; i < n; ++i) {
+			if (isZeroElement(D, i))
+				copyElement(out, i, Z, i);
+			else
+				divElement(out, i, N, D);
+		}
+		return out;
+	}
+
+	static NDArray divWhereScalar(const NDArray& num, const NDArray& den, double whenZero) {
+		requireSameShape(num, den);
+		NDArrayType rt = promoteTypes(num.type, den.type);
+		NDArray N = num.convert(rt);
+		NDArray D = den.convert(rt);
+		NDArray out(num.shape, rt);
+		const size_t n = num.numElements();
+		for (size_t i = 0; i < n; ++i) {
+			if (isZeroElement(D, i))
+				out.storeFromDouble(i, whenZero);
+			else
+				divElement(out, i, N, D);
+		}
+		return out;
+	}
+
+	static NDArray piecewise1(const NDArray& m0, const NDArray& v0, const NDArray& otherwise) {
+		requireSameShape(m0, v0);
+		requireSameShape(m0, otherwise);
+		NDArrayType rt = (v0.type == otherwise.type) ? v0.type : promoteTypes(v0.type, otherwise.type);
+		NDArray V0 = v0.convert(rt);
+		NDArray O = otherwise.convert(rt);
+		NDArray out(m0.shape, rt);
+		const size_t n = m0.numElements();
+		for (size_t i = 0; i < n; ++i) {
+			if (m0.loadAsDouble(i) != 0.0)
+				copyElement(out, i, V0, i);
+			else
+				copyElement(out, i, O, i);
+		}
+		return out;
+	}
+
+	static NDArray piecewise2(const NDArray& m0, const NDArray& v0,
+	                          const NDArray& m1, const NDArray& v1,
+	                          const NDArray& otherwise) {
+		requireSameShape(m0, v0);
+		requireSameShape(m0, m1);
+		requireSameShape(m0, v1);
+		requireSameShape(m0, otherwise);
+		NDArrayType rt = v0.type;
+		if (v1.type != rt) rt = promoteTypes(rt, v1.type);
+		if (otherwise.type != rt) rt = promoteTypes(rt, otherwise.type);
+		NDArray V0 = v0.convert(rt);
+		NDArray V1 = v1.convert(rt);
+		NDArray O = otherwise.convert(rt);
+		NDArray out(m0.shape, rt);
+		const size_t n = m0.numElements();
+		for (size_t i = 0; i < n; ++i) {
+			if (m0.loadAsDouble(i) != 0.0)
+				copyElement(out, i, V0, i);
+			else if (m1.loadAsDouble(i) != 0.0)
+				copyElement(out, i, V1, i);
+			else
+				copyElement(out, i, O, i);
+		}
+		return out;
+	}
+
+	static NDArray piecewise3(const NDArray& m0, const NDArray& v0,
+	                          const NDArray& m1, const NDArray& v1,
+	                          const NDArray& m2, const NDArray& v2,
+	                          const NDArray& otherwise) {
+		requireSameShape(m0, v0);
+		requireSameShape(m0, m1);
+		requireSameShape(m0, v1);
+		requireSameShape(m0, m2);
+		requireSameShape(m0, v2);
+		requireSameShape(m0, otherwise);
+		NDArrayType rt = v0.type;
+		if (v1.type != rt) rt = promoteTypes(rt, v1.type);
+		if (v2.type != rt) rt = promoteTypes(rt, v2.type);
+		if (otherwise.type != rt) rt = promoteTypes(rt, otherwise.type);
+		NDArray V0 = v0.convert(rt);
+		NDArray V1 = v1.convert(rt);
+		NDArray V2 = v2.convert(rt);
+		NDArray O = otherwise.convert(rt);
+		NDArray out(m0.shape, rt);
+		const size_t n = m0.numElements();
+		for (size_t i = 0; i < n; ++i) {
+			if (m0.loadAsDouble(i) != 0.0)
+				copyElement(out, i, V0, i);
+			else if (m1.loadAsDouble(i) != 0.0)
+				copyElement(out, i, V1, i);
+			else if (m2.loadAsDouble(i) != 0.0)
+				copyElement(out, i, V2, i);
+			else
+				copyElement(out, i, O, i);
 		}
 		return out;
 	}
@@ -2076,8 +2314,74 @@ NDArray NDArray::lessEqual(double other) const { return Impl::compareDoubleScala
 NDArray NDArray::greater(double other) const { return Impl::compareDoubleScalar(*this, other, CmpOp::Gt); }
 NDArray NDArray::greaterEqual(double other) const { return Impl::compareDoubleScalar(*this, other, CmpOp::Ge); }
 
+// Element-wise relational operators (BINARY masks). operator== remains whole-array bool.
+NDArray NDArray::operator>(const NDArray& other) const { return greater(other); }
+NDArray NDArray::operator<(const NDArray& other) const { return less(other); }
+NDArray NDArray::operator>=(const NDArray& other) const { return greaterEqual(other); }
+NDArray NDArray::operator<=(const NDArray& other) const { return lessEqual(other); }
+NDArray NDArray::operator!=(const NDArray& other) const { return notEqual(other); }
+
+NDArray NDArray::operator>(float other) const { return greater(other); }
+NDArray NDArray::operator<(float other) const { return less(other); }
+NDArray NDArray::operator>=(float other) const { return greaterEqual(other); }
+NDArray NDArray::operator<=(float other) const { return lessEqual(other); }
+NDArray NDArray::operator!=(float other) const { return notEqual(other); }
+
+NDArray NDArray::operator>(double other) const { return greater(other); }
+NDArray NDArray::operator<(double other) const { return less(other); }
+NDArray NDArray::operator>=(double other) const { return greaterEqual(other); }
+NDArray NDArray::operator<=(double other) const { return lessEqual(other); }
+NDArray NDArray::operator!=(double other) const { return notEqual(other); }
+
+NDArray NDArray::operator>(int other) const { return greater((double)other); }
+NDArray NDArray::operator<(int other) const { return less((double)other); }
+NDArray NDArray::operator>=(int other) const { return greaterEqual((double)other); }
+NDArray NDArray::operator<=(int other) const { return lessEqual((double)other); }
+NDArray NDArray::operator!=(int other) const { return notEqual((double)other); }
+
 NDArray NDArray::where(const NDArray& condition, const NDArray& x, const NDArray& y) {
-	return Impl::where(condition, x, y);
+	return Impl::select(condition, x, y);
+}
+
+NDArray NDArray::select(const NDArray& condition, const NDArray& x, const NDArray& y) {
+	return Impl::select(condition, x, y);
+}
+
+NDArray NDArray::choose(const NDArray& ifTrue, const NDArray& ifFalse) const {
+	return Impl::select(*this, ifTrue, ifFalse);
+}
+
+NDArray NDArray::divWhere(const NDArray& num, const NDArray& den, const NDArray& whenZero) {
+	return Impl::divWhere(num, den, whenZero);
+}
+
+NDArray NDArray::divWhere(const NDArray& num, const NDArray& den, double whenZero) {
+	return Impl::divWhereScalar(num, den, whenZero);
+}
+
+NDArray NDArray::divWhere(const NDArray& num, const NDArray& den, float whenZero) {
+	return Impl::divWhereScalar(num, den, (double)whenZero);
+}
+
+NDArray NDArray::divWhere(const NDArray& num, const NDArray& den, int whenZero) {
+	return Impl::divWhereScalar(num, den, (double)whenZero);
+}
+
+NDArray NDArray::piecewise(const NDArray& m0, const NDArray& v0, const NDArray& otherwise) {
+	return Impl::piecewise1(m0, v0, otherwise);
+}
+
+NDArray NDArray::piecewise(const NDArray& m0, const NDArray& v0,
+                           const NDArray& m1, const NDArray& v1,
+                           const NDArray& otherwise) {
+	return Impl::piecewise2(m0, v0, m1, v1, otherwise);
+}
+
+NDArray NDArray::piecewise(const NDArray& m0, const NDArray& v0,
+                           const NDArray& m1, const NDArray& v1,
+                           const NDArray& m2, const NDArray& v2,
+                           const NDArray& otherwise) {
+	return Impl::piecewise3(m0, v0, m1, v1, m2, v2, otherwise);
 }
 
 bool NDArray::any() const {
@@ -2161,6 +2465,25 @@ NDArray operator*(int64_t lhs, const NDArray& rhs) { return rhs * lhs; }
 NDArray operator-(int64_t lhs, const NDArray& rhs) { return (-rhs) + lhs; }
 NDArray operator/(int64_t lhs, const NDArray& rhs) { return fullLikeInt64(rhs, lhs) / rhs; }
 NDArray operator%(int64_t lhs, const NDArray& rhs) { return fullLikeInt64(rhs, lhs) % rhs; }
+
+// Left-hand scalar comparisons:  3 > a  ≡  a < 3
+NDArray operator>(float lhs, const NDArray& rhs) { return rhs < lhs; }
+NDArray operator<(float lhs, const NDArray& rhs) { return rhs > lhs; }
+NDArray operator>=(float lhs, const NDArray& rhs) { return rhs <= lhs; }
+NDArray operator<=(float lhs, const NDArray& rhs) { return rhs >= lhs; }
+NDArray operator!=(float lhs, const NDArray& rhs) { return rhs != lhs; }
+
+NDArray operator>(double lhs, const NDArray& rhs) { return rhs < lhs; }
+NDArray operator<(double lhs, const NDArray& rhs) { return rhs > lhs; }
+NDArray operator>=(double lhs, const NDArray& rhs) { return rhs <= lhs; }
+NDArray operator<=(double lhs, const NDArray& rhs) { return rhs >= lhs; }
+NDArray operator!=(double lhs, const NDArray& rhs) { return rhs != lhs; }
+
+NDArray operator>(int lhs, const NDArray& rhs) { return rhs < lhs; }
+NDArray operator<(int lhs, const NDArray& rhs) { return rhs > lhs; }
+NDArray operator>=(int lhs, const NDArray& rhs) { return rhs <= lhs; }
+NDArray operator<=(int lhs, const NDArray& rhs) { return rhs >= lhs; }
+NDArray operator!=(int lhs, const NDArray& rhs) { return rhs != lhs; }
 
 namespace {
 struct TypeRuleAnchor {
