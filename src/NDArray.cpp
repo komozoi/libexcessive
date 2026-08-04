@@ -249,105 +249,221 @@ static bool isPrefixShape(const ArrayList<int>& prefix, const ArrayList<int>& fu
 }
 
 
+// ---- NDArrayBuffer ---------------------------------------------------------
+
+NDArrayBuffer::NDArrayBuffer(size_t bytes, NDArrayType t) : byteSize(bytes), elementType(t) {
+	data = malloc(bytes ? bytes : 1);
+	if (bytes)
+		bzero(data, bytes);
+}
+
+NDArrayBuffer::NDArrayBuffer(const NDArrayBuffer& other)
+	: byteSize(other.byteSize), elementType(other.elementType) {
+	data = malloc(byteSize ? byteSize : 1);
+	if (byteSize && other.data)
+		memcpy(data, other.data, byteSize);
+}
+
+NDArrayBuffer::NDArrayBuffer(NDArrayBuffer&& other) noexcept
+	: data(other.data), byteSize(other.byteSize), elementType(other.elementType) {
+	other.data = nullptr;
+	other.byteSize = 0;
+}
+
+NDArrayBuffer& NDArrayBuffer::operator=(const NDArrayBuffer& other) {
+	if (this != &other) {
+		free(data);
+		byteSize = other.byteSize;
+		elementType = other.elementType;
+		data = malloc(byteSize ? byteSize : 1);
+		if (byteSize && other.data)
+			memcpy(data, other.data, byteSize);
+	}
+	return *this;
+}
+
+NDArrayBuffer& NDArrayBuffer::operator=(NDArrayBuffer&& other) noexcept {
+	if (this != &other) {
+		free(data);
+		data = other.data;
+		byteSize = other.byteSize;
+		elementType = other.elementType;
+		other.data = nullptr;
+		other.byteSize = 0;
+	}
+	return *this;
+}
+
+NDArrayBuffer::~NDArrayBuffer() {
+	free(data);
+	data = nullptr;
+}
+
+
 // ---- construction ----------------------------------------------------------
 
-NDArray::NDArray(ArrayList<int> shape, NDArrayType type) : shape(std::move(shape)), type(type) {
+void NDArray::rebindPointers() {
+	if (buffer && buffer.get()) {
+		memory = buffer.get()->data;
+		memorySize = buffer.get()->byteSize;
+	} else {
+		memory = nullptr;
+		memorySize = 0;
+	}
+}
+
+void NDArray::ensureWritable() {
+	if (!buffer)
+		return;
+	// sp::mut() only detaches when pointerType()==COPY_ON_WRITE; after the first
+	// detach it marks the handle SHARED, so a later NDArray copy would share a
+	// SHARED buffer and mut() would mutate every alias. Detach on refcount alone
+	// so CoW stays correct for NDArray regardless of the underlying SpPointerType.
+	if (buffer.numReferences() > 1)
+		buffer = buffer.copy(UNIQUE);
+	rebindPointers();
+}
+
+size_t NDArray::bufferBytesFor(NDArrayType t, size_t numElems) {
+	switch (t) {
+		case BINARY:
+			return ((numElems + 63) / 64) * 8;
+		case UINT8:
+			return numElems;
+		case INT32:
+		case F32:
+			return numElems * 4;
+		case INT64:
+		case F64:
+			return numElems * 8;
+		case UINT256:
+			return numElems * 32;
+		default:
+			return numElems;
+	}
+}
+
+ArrayList<size_t> NDArray::rowMajorStrides(const ArrayList<int>& shape) {
+	ArrayList<size_t> st;
+	for (int i = 0; i < shape.size(); ++i)
+		st.add((size_t)0);
+	size_t stride = 1;
+	for (int d = shape.size() - 1; d >= 0; --d) {
+		st.set(d, stride);
+		int dim = shape.get(d);
+		stride *= (size_t)(dim > 0 ? dim : 1);
+	}
+	return st;
+}
+
+NDArray::NDArray(ArrayList<int> shape, NDArrayType type) : shape(std::move(shape)), type(type), memory(nullptr) {
 	initialize();
 }
 
-NDArray::NDArray(ArrayList<float> vector) : shape({vector.size()}), type(F32) {
+NDArray::NDArray(ArrayList<float> vector) : shape({vector.size()}), type(F32), memory(nullptr) {
 	initialize();
 	memcpy(float32, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(ArrayList<double> vector) : shape({vector.size()}), type(F64) {
+NDArray::NDArray(ArrayList<double> vector) : shape({vector.size()}), type(F64), memory(nullptr) {
 	initialize();
 	memcpy(float64, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(ArrayList<uint8_t> vector) : shape({vector.size()}), type(UINT8) {
+NDArray::NDArray(ArrayList<uint8_t> vector) : shape({vector.size()}), type(UINT8), memory(nullptr) {
 	initialize();
 	memcpy(uint8, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(ArrayList<int32_t> vector) : shape({vector.size()}), type(INT32) {
+NDArray::NDArray(ArrayList<int32_t> vector) : shape({vector.size()}), type(INT32), memory(nullptr) {
 	initialize();
 	memcpy(int32, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(ArrayList<int64_t> vector) : shape({vector.size()}), type(INT64) {
+NDArray::NDArray(ArrayList<int64_t> vector) : shape({vector.size()}), type(INT64), memory(nullptr) {
 	initialize();
 	memcpy(int64, vector.getMemory(), memorySize);
 }
 
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<float> vector) : shape(shape), type(F32) {
+NDArray::NDArray(const ArrayList<int>& shape, ArrayList<float> vector) : shape(shape), type(F32), memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
 	memcpy(float32, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<double> vector) : shape(shape), type(F64) {
+NDArray::NDArray(const ArrayList<int>& shape, ArrayList<double> vector) : shape(shape), type(F64), memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
 	memcpy(float64, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<uint8_t> vector) : shape(shape), type(UINT8) {
+NDArray::NDArray(const ArrayList<int>& shape, ArrayList<uint8_t> vector) : shape(shape), type(UINT8), memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
 	memcpy(uint8, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector) : shape(shape), type(INT32) {
+NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector) : shape(shape), type(INT32), memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
 	memcpy(int32, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int64_t> vector) : shape(shape), type(INT64) {
+NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int64_t> vector) : shape(shape), type(INT64), memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
 	memcpy(int64, vector.getMemory(), memorySize);
 }
 
-NDArray::NDArray(const NDArray& other) : shape(other.shape), type(other.type), memorySize(other.memorySize) {
-	memory = malloc(memorySize ? memorySize : 1);
-	if (memorySize)
-		memcpy(memory, other.memory, memorySize);
+NDArray::NDArray(const NDArray& other)
+	: shape(other.shape), type(other.type), memory(nullptr) {
+	// Always share as COPY_ON_WRITE so a subsequent write detaches even if the
+	// source handle was left SHARED by an earlier sp::mut() detach.
+	if (other.buffer)
+		buffer = other.buffer.getWritableCopy();
+	rebindPointers();
 }
 
 NDArray::NDArray(NDArray&& other) noexcept
-	: shape(other.shape), type(other.type), memorySize(other.memorySize) {
-	memory = other.memory;
+	: shape(std::move(other.shape)), type(other.type), buffer(std::move(other.buffer)), memory(nullptr) {
+	rebindPointers();
 	other.memory = nullptr;
 	other.memorySize = 0;
+}
+
+NDArray& NDArray::operator=(const NDArray& other) {
+	if (this != &other) {
+		shape = other.shape;
+		type = other.type;
+		if (other.buffer)
+			buffer = other.buffer.getWritableCopy();
+		else
+			buffer = nullptr;
+		rebindPointers();
+	}
+	return *this;
+}
+
+NDArray& NDArray::operator=(NDArray&& other) noexcept {
+	if (this != &other) {
+		shape = std::move(other.shape);
+		type = other.type;
+		buffer = std::move(other.buffer);
+		rebindPointers();
+		other.memory = nullptr;
+		other.memorySize = 0;
+	}
+	return *this;
 }
 
 size_t NDArray::initialize() {
 	size_t totalElements = 1;
 	for (int i = 0; i < shape.size(); ++i)
-		totalElements *= shape.get(i);
+		totalElements *= (size_t)(shape.get(i) > 0 ? shape.get(i) : 0);
+	if (shape.size() == 0)
+		totalElements = 1;
 
-	switch (type) {
-		case BINARY:
-			memorySize = ((totalElements + 63) / 64) * 8;
-			break;
-		case UINT8:
-			memorySize = totalElements;
-			break;
-		case INT32:
-		case F32:
-			memorySize = totalElements * 4;
-			break;
-		case INT64:
-		case F64:
-			memorySize = totalElements * 8;
-			break;
-		case UINT256:
-			memorySize = totalElements * 32;
-			break;
-	}
-
-	memory = malloc(memorySize ? memorySize : 1);
-	if (memorySize)
-		bzero(memory, memorySize);
+	memorySize = bufferBytesFor(type, totalElements);
+	// UNIQUE sole owner; first NDArray copy becomes COPY_ON_WRITE via sp copy rules.
+	buffer = sp<NDArrayBuffer>(UNIQUE, memorySize, type);
+	rebindPointers();
 	return totalElements;
 }
 
@@ -379,7 +495,8 @@ bool NDArray::operator==(const NDArray& other) const {
 }
 
 NDArray::~NDArray() {
-	free(memory);
+	memory = nullptr;
+	memorySize = 0;
 }
 
 size_t NDArray::computeOffset(const ArrayList<int>& indices) const {
@@ -389,31 +506,249 @@ size_t NDArray::computeOffset(const ArrayList<int>& indices) const {
 		int idx = indices.get(d);
 		if (idx < 0 || idx >= shape.get(d))
 			throw std::out_of_range("index out of bounds");
-		offset += idx * stride;
-		stride *= shape.get(d);
+		offset += (size_t)idx * stride;
+		stride *= (size_t)shape.get(d);
 	}
 	return offset;
 }
 
 void NDArray::stealFrom(NDArray& result) {
-	free(memory);
-	memory = result.memory;
-	memorySize = result.memorySize;
+	shape = std::move(result.shape);
 	type = result.type;
+	buffer = std::move(result.buffer);
+	rebindPointers();
 	result.memory = nullptr;
 	result.memorySize = 0;
 }
 
 void NDArray::fillFromDouble(double value) {
+	ensureWritable();
 	const size_t n = numElements();
 	for (size_t i = 0; i < n; ++i)
 		storeFromDouble(i, value);
 }
 
 void NDArray::fillFromI64(int64_t value) {
+	ensureWritable();
 	const size_t n = numElements();
 	for (size_t i = 0; i < n; ++i)
 		storeFromI64(i, value);
+}
+
+ArrayList<size_t> NDArray::strides() const {
+	return rowMajorStrides(shape);
+}
+
+bool NDArray::isBroadcastableTo(const ArrayList<int>& targetShape) const {
+	return view().isBroadcastableTo(targetShape);
+}
+
+NDArrayView NDArray::view() const {
+	return NDArrayView(buffer, shape, rowMajorStrides(shape), 0, type);
+}
+
+NDArrayView NDArray::broadcastTo(const ArrayList<int>& targetShape) const {
+	return view().broadcastTo(targetShape);
+}
+
+NDArrayView NDArray::reshapeView(const ArrayList<int>& newShape) const {
+	return view().reshape(newShape);
+}
+
+NDArrayRef NDArray::operator[](int i) {
+	ArrayList<int> idx;
+	idx.add(i);
+	return NDArrayRef(this, std::move(idx));
+}
+
+NDArrayCRef NDArray::operator[](int i) const {
+	ArrayList<int> idx;
+	idx.add(i);
+	return NDArrayCRef(this, std::move(idx));
+}
+
+
+// ---- NDArrayRef / NDArrayCRef ----------------------------------------------
+
+NDArrayRef::NDArrayRef(NDArray* parent, ArrayList<int> indices)
+	: parent(parent), indices(std::move(indices)) {}
+
+NDArrayRef NDArrayRef::operator[](int i) {
+	ArrayList<int> next = indices;
+	next.add(i);
+	return NDArrayRef(parent, std::move(next));
+}
+
+NDArrayCRef::NDArrayCRef(const NDArray* parent, ArrayList<int> indices)
+	: parent(parent), indices(std::move(indices)) {}
+
+NDArrayCRef NDArrayCRef::operator[](int i) const {
+	ArrayList<int> next = indices;
+	next.add(i);
+	return NDArrayCRef(parent, std::move(next));
+}
+
+
+// ---- NDArrayView -----------------------------------------------------------
+
+NDArrayView::NDArrayView(sp<NDArrayBuffer> buf, ArrayList<int> shape_, ArrayList<size_t> strides_,
+                         size_t offset_, NDArrayType type_)
+	: shape(std::move(shape_)), strides(std::move(strides_)), offset(offset_), type(type_),
+	  buffer(std::move(buf)) {}
+
+size_t NDArrayView::numElements() const {
+	if (shape.size() == 0)
+		return 1;
+	size_t n = 1;
+	for (int i = 0; i < shape.size(); ++i)
+		n *= (size_t)(shape.get(i) > 0 ? shape.get(i) : 0);
+	return n;
+}
+
+bool NDArrayView::isContiguous() const {
+	size_t expect = 1;
+	for (int d = shape.size() - 1; d >= 0; --d) {
+		if (shape.get(d) <= 1)
+			continue;
+		if (d >= strides.size() || strides.get(d) != expect)
+			return false;
+		expect *= (size_t)shape.get(d);
+	}
+	return offset == 0;
+}
+
+size_t NDArrayView::computeOffset(const ArrayList<int>& indices) const {
+	if (indices.size() != shape.size())
+		throw std::out_of_range("NDArrayView::computeOffset - rank mismatch");
+	size_t o = offset;
+	for (int d = 0; d < shape.size(); ++d) {
+		int idx = indices.get(d);
+		if (idx < 0 || idx >= shape.get(d))
+			throw std::out_of_range("NDArrayView: index out of bounds");
+		o += (size_t)idx * strides.get(d);
+	}
+	return o;
+}
+
+bool NDArrayView::isBroadcastableTo(const ArrayList<int>& targetShape) const {
+	int ar = shape.size();
+	int tr = targetShape.size();
+	for (int i = 0; i < tr; ++i) {
+		int ti = targetShape.get(tr - 1 - i);
+		int si = (i < ar) ? shape.get(ar - 1 - i) : 1;
+		if (si != ti && si != 1)
+			return false;
+	}
+	return true;
+}
+
+NDArrayView NDArrayView::broadcastTo(const ArrayList<int>& targetShape) const {
+	if (!isBroadcastableTo(targetShape))
+		throw std::invalid_argument("NDArrayView::broadcastTo - shape not broadcastable");
+	int ar = shape.size();
+	int tr = targetShape.size();
+	ArrayList<size_t> newStrides;
+	for (int i = 0; i < tr; ++i)
+		newStrides.add((size_t)0);
+	for (int i = 0; i < tr; ++i) {
+		int ti = targetShape.get(tr - 1 - i);
+		int si = (i < ar) ? shape.get(ar - 1 - i) : 1;
+		size_t oldStride = (i < ar) ? strides.get(ar - 1 - i) : 0;
+		newStrides.set(tr - 1 - i, (si == ti) ? oldStride : (size_t)0);
+		(void)ti;
+	}
+	return NDArrayView(buffer, targetShape, std::move(newStrides), offset, type);
+}
+
+NDArrayView NDArrayView::reshape(const ArrayList<int>& newShape) const {
+	if (!isContiguous())
+		throw std::invalid_argument("NDArrayView::reshape - view is not contiguous");
+	size_t oldN = numElements();
+	size_t newN = 1;
+	if (newShape.size() == 0)
+		newN = 1;
+	else {
+		for (int i = 0; i < newShape.size(); ++i)
+			newN *= (size_t)(newShape.get(i) > 0 ? newShape.get(i) : 0);
+	}
+	if (oldN != newN)
+		throw std::invalid_argument("NDArrayView::reshape - element count mismatch");
+	return NDArrayView(buffer, newShape, NDArray::rowMajorStrides(newShape), offset, type);
+}
+
+NDArray NDArrayView::copy() const {
+	NDArray out(shape, type);
+	const size_t n = numElements();
+	for (size_t i = 0; i < n; ++i) {
+		ArrayList<int> coords;
+		for (int d = 0; d < shape.size(); ++d)
+			coords.add(0);
+		size_t r = i;
+		for (int d = shape.size() - 1; d >= 0; --d) {
+			int dim = shape.get(d);
+			int c = dim > 0 ? (int)(r % (size_t)dim) : 0;
+			coords.set(d, c);
+			if (dim > 0)
+				r /= (size_t)dim;
+		}
+		size_t srcOff = computeOffset(coords);
+		const void* data = sharedBuffer().get()->data;
+		switch (type) {
+			case F32:
+				out.setFlat(i, ((const float*)data)[srcOff]);
+				break;
+			case F64:
+				out.setFlat(i, ((const double*)data)[srcOff]);
+				break;
+			case UINT8:
+				out.setFlat(i, ((const uint8_t*)data)[srcOff]);
+				break;
+			case INT32:
+				out.setFlat(i, ((const int32_t*)data)[srcOff]);
+				break;
+			case INT64:
+				out.setFlat(i, ((const int64_t*)data)[srcOff]);
+				break;
+			case UINT256:
+				out.setFlat(i, ((const uint256_t*)data)[srcOff]);
+				break;
+			case BINARY: {
+				const uint64_t* words = (const uint64_t*)data;
+				uint8_t bit = (uint8_t)((words[srcOff >> 6] >> (srcOff & 63)) & 1ULL);
+				out.setFlat(i, bit);
+				break;
+			}
+		}
+	}
+	return out;
+}
+
+namespace ndarray_detail {
+	double viewLoadDouble(const NDArrayView& v, size_t elementOffset) {
+		const void* data = v.sharedBuffer().get()->data;
+		switch (v.type) {
+			case BINARY: {
+				const uint64_t* words = (const uint64_t*)data;
+				return (double)((words[elementOffset >> 6] >> (elementOffset & 63)) & 1ULL);
+			}
+			case UINT8: return (double)((const uint8_t*)data)[elementOffset];
+			case INT32: return (double)((const int32_t*)data)[elementOffset];
+			case INT64: return (double)((const int64_t*)data)[elementOffset];
+			case F32: return (double)((const float*)data)[elementOffset];
+			case F64: return ((const double*)data)[elementOffset];
+			case UINT256: return ((const uint256_t*)data)[elementOffset].toDouble();
+			default: return 0;
+		}
+	}
+	int64_t viewLoadI64(const NDArrayView& v, size_t elementOffset) {
+		return (int64_t)viewLoadDouble(v, elementOffset);
+	}
+	uint256_t viewLoadU256(const NDArrayView& v, size_t elementOffset) {
+		const void* data = v.sharedBuffer().get()->data;
+		if (v.type == UINT256)
+			return ((const uint256_t*)data)[elementOffset];
+		return uint256_t(viewLoadDouble(v, elementOffset));
+	}
 }
 
 NDArray NDArray::zeros(const ArrayList<int>& shape, NDArrayType type) {
@@ -523,6 +858,7 @@ uint256_t NDArray::loadAsU256(size_t i) const {
 void NDArray::storeFromFloat(size_t i, float v) { storeFromDouble(i, (double)v); }
 
 void NDArray::storeFromDouble(size_t i, double v) {
+	ensureWritable();
 	switch (type) {
 		case BINARY:  binarySet(uint64, i, v > 0.0 ? 1 : 0); break;
 		case UINT8:   uint8[i] = (uint8_t)v; break;
@@ -536,6 +872,7 @@ void NDArray::storeFromDouble(size_t i, double v) {
 }
 
 void NDArray::storeFromI64(size_t i, int64_t v) {
+	ensureWritable();
 	switch (type) {
 		case BINARY:  binarySet(uint64, i, v > 0 ? 1 : 0); break;
 		case UINT8:   uint8[i] = (uint8_t)v; break;
@@ -554,6 +891,7 @@ void NDArray::storeFromI64(size_t i, int64_t v) {
 }
 
 void NDArray::storeFromU256(size_t i, const uint256_t& v) {
+	ensureWritable();
 	switch (type) {
 		case BINARY:  binarySet(uint64, i, (uint64_t)v != 0 ? 1 : 0); break;
 		case UINT8:   uint8[i] = (uint8_t)(uint64_t)v; break;
@@ -602,7 +940,12 @@ void NDArray::promoteInPlace(NDArrayType newType) {
 // ---- in-place same-type kernels --------------------------------------------
 
 void NDArray::applyBinaryInPlace(const NDArray& src, ArithOp op) {
+	ensureWritable();
 	const size_t n = numElements();
+	// If src shares our buffer, rebind after ensureWritable; re-read src data pointer via const access.
+	// Self-aliasing (src is *this) is fine — same buffer after single detach.
+	const NDArray* srcPtr = &src;
+	(void)srcPtr;
 	switch (type) {
 		case F32:
 			switch (op) {
@@ -686,6 +1029,7 @@ void NDArray::applyFloatScalarInPlace(float scalar, ArithOp op) {
 }
 
 void NDArray::applyDoubleScalarInPlace(double scalar, ArithOp op) {
+	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
 		case F32: {
@@ -777,6 +1121,7 @@ void NDArray::applyDoubleScalarInPlace(double scalar, ArithOp op) {
 }
 
 void NDArray::applyIntScalarInPlace(int scalar, ArithOp op) {
+	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
 		case F32:
@@ -854,6 +1199,7 @@ void NDArray::applyIntScalarInPlace(int scalar, ArithOp op) {
 }
 
 void NDArray::applyInt64ScalarInPlace(int64_t scalar, ArithOp op) {
+	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
 		case F32:
@@ -983,6 +1329,7 @@ NDArray& NDArray::mul(const NDArray& other) { return binaryOpInPlace(other, Arit
 NDArray& NDArray::div(const NDArray& other) { return binaryOpInPlace(other, ArithOp::Div); }
 
 void NDArray::applyBroadcastInPlace(const NDArray& src, ArithOp op) {
+	ensureWritable();
 	const size_t thisN = numElements();
 	const size_t otherN = src.numElements();
 	const size_t block = (otherN == 0) ? thisN : (thisN / otherN);
@@ -1211,6 +1558,7 @@ NDArray& NDArray::operator%=(int64_t other) {
 
 NDArray& NDArray::mapRealUnary(double (*fn)(double)) {
 	promoteInPlace(typeForRealUnary(type));
+	ensureWritable();
 	const size_t n = numElements();
 	if (type == F64) {
 		for (size_t i = 0; i < n; ++i)
@@ -1225,6 +1573,7 @@ NDArray& NDArray::mapRealUnary(double (*fn)(double)) {
 
 NDArray& NDArray::neg() {
 	promoteInPlace(typeForNeg(type));
+	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
 		case F32:
@@ -1273,6 +1622,7 @@ NDArray NDArray::absolute() const {
 }
 
 NDArray& NDArray::abs() {
+	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
 		case F32:
@@ -1299,6 +1649,7 @@ NDArray& NDArray::abs() {
 }
 
 NDArray& NDArray::sign() {
+	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
 		case F32:

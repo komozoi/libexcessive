@@ -15,6 +15,7 @@
 #include "stdint.h"
 #include <type_traits>
 
+#include "alloc/pointer.h"
 #include "ds/ArrayList.h"
 
 
@@ -42,6 +43,103 @@ enum NDArrayType {
 
 	//BIGINT = 0x80
 	UINT256 = 0x88
+};
+
+
+/**
+ * Shared contiguous buffer for NDArray / NDArrayView (managed via sp<> CoW).
+ * Deep-copyable so COPY_ON_WRITE detach works.
+ */
+struct NDArrayBuffer {
+	void* data = nullptr;
+	size_t byteSize = 0;
+	NDArrayType elementType = F32;
+
+	NDArrayBuffer() = default;
+	NDArrayBuffer(size_t bytes, NDArrayType t);
+	NDArrayBuffer(const NDArrayBuffer& other);
+	NDArrayBuffer(NDArrayBuffer&& other) noexcept;
+	NDArrayBuffer& operator=(const NDArrayBuffer& other);
+	NDArrayBuffer& operator=(NDArrayBuffer&& other) noexcept;
+	~NDArrayBuffer();
+};
+
+
+class NDArray;
+class NDArrayView;
+
+
+/** Mutable chained index proxy: a[i][j] = v / T(a[i][j]). Full rank required for R/W. */
+class NDArrayRef {
+public:
+	NDArrayRef(NDArray* parent, ArrayList<int> indices);
+	NDArrayRef operator[](int i);
+
+	template <typename T>
+	operator T() const;
+
+	template <typename T>
+	NDArrayRef& operator=(const T& value);
+
+private:
+	NDArray* parent;
+	ArrayList<int> indices;
+};
+
+
+/** Const chained index proxy. */
+class NDArrayCRef {
+public:
+	NDArrayCRef(const NDArray* parent, ArrayList<int> indices);
+	NDArrayCRef operator[](int i) const;
+
+	template <typename T>
+	operator T() const;
+
+private:
+	const NDArray* parent;
+	ArrayList<int> indices;
+};
+
+
+/**
+ * Non-owning (shared-buffer) view with independent shape/strides.
+ * Survives destruction of the original NDArray via sp<> refcount.
+ * Primarily for read + broadcast + materialise; in-place math materialises first.
+ */
+class NDArrayView {
+public:
+	ArrayList<int> shape;
+	ArrayList<size_t> strides; // element strides; 0 = broadcast dimension
+	size_t offset = 0;         // element offset into shared buffer
+	NDArrayType type = F32;
+
+	NDArrayView() = default;
+
+	size_t numElements() const;
+	bool isContiguous() const;
+	bool isBroadcastableTo(const ArrayList<int>& targetShape) const;
+	NDArrayView broadcastTo(const ArrayList<int>& targetShape) const;
+	/** Contiguous reshape when product matches; otherwise throws. */
+	NDArrayView reshape(const ArrayList<int>& newShape) const;
+	NDArray copy() const;
+
+	template <typename T>
+	T get(const ArrayList<int>& indices) const;
+	template <typename T>
+	T getFlat(size_t flat) const;
+
+	size_t computeOffset(const ArrayList<int>& indices) const;
+
+	/** Shared storage (refcount); used by ndarray_detail load helpers. */
+	const sp<NDArrayBuffer>& sharedBuffer() const { return buffer; }
+
+private:
+	friend class NDArray;
+	sp<NDArrayBuffer> buffer;
+
+	NDArrayView(sp<NDArrayBuffer> buf, ArrayList<int> shape, ArrayList<size_t> strides,
+	            size_t offset, NDArrayType type);
 };
 
 
@@ -82,10 +180,9 @@ public:
 	NDArray(NDArray&& other) noexcept;
 	~NDArray();
 
-	// const shape: assignment would be ill-formed; copies use the copy ctor.
-	// (type is mutable so in-place arithmetic can promote.)
-	NDArray& operator=(const NDArray&) = delete;
-	NDArray& operator=(NDArray&&) = delete;
+	// CoW: share buffer on copy/assign; deep-copy on write via buffer.mut().
+	NDArray& operator=(const NDArray& other);
+	NDArray& operator=(NDArray&& other) noexcept;
 
 	bool operator==(const NDArray& nds) const;
 
@@ -104,83 +201,55 @@ public:
 	/** Number of logical elements (product of shape; 1 for a scalar). */
 	size_t numElements() const;
 
+	/** Row-major element strides for this dense array. */
+	ArrayList<size_t> strides() const;
+	bool isContiguous() const { return true; } // owners are dense
+	bool isBroadcastableTo(const ArrayList<int>& targetShape) const;
+	NDArrayView view() const;
+	NDArrayView broadcastTo(const ArrayList<int>& targetShape) const;
+	NDArrayView reshapeView(const ArrayList<int>& newShape) const;
+
+	NDArrayRef operator[](int i);
+	NDArrayCRef operator[](int i) const;
+
+	/** Runtime multi-index (rank = shape.size()). */
+	template <typename T>
+	T get(const ArrayList<int>& indices) const {
+		if (indices.size() != shape.size())
+			throw std::out_of_range("NDArray::get - rank mismatch");
+		return getAtOffset<T>(computeOffset(indices));
+	}
+
+	template <typename T>
+	void set(const ArrayList<int>& indices, const T& value) {
+		if (indices.size() != shape.size())
+			throw std::out_of_range("NDArray::set - rank mismatch");
+		setAtOffset(computeOffset(indices), value);
+	}
+
 	template <typename T>
 	T get(std::initializer_list<int> indices) const {
-		if ((int)indices.size() != shape.size())
-			throw std::out_of_range("NDArray::get - number of indices did not match number of axes");
-
-		size_t offset = computeOffset(indices);
-
-		switch (type) {
-			case BINARY:
-				return static_cast<T>((uint64[offset >> 6] >> (offset & 63)) & 1);
-
-			case UINT8:
-				return static_cast<T>(uint8[offset]);
-
-			case INT32:
-				if constexpr (std::is_same_v<T, uint256_t>)
-					return uint256_t((int)int32[offset]);
-				else
-					return static_cast<T>(int32[offset]);
-
-			case INT64:
-				// Avoid ambiguous uint256_t(int64_t) — prefer uint64_t / int ctors.
-				if constexpr (std::is_same_v<T, uint256_t>)
-					return int64[offset] < 0
-						? uint256_t((int)int64[offset])
-						: uint256_t((uint64_t)int64[offset]);
-				else
-					return static_cast<T>(int64[offset]);
-
-			case F32:
-				return static_cast<T>(float32[offset]);
-
-			case F64:
-				if constexpr (std::is_same_v<T, uint256_t>)
-					return uint256_t(float64[offset]);
-				else
-					return static_cast<T>(float64[offset]);
-
-			case UINT256:
-				return convert_from_uint256<T>(uint256[offset]);
-
-			default:
-				throw std::runtime_error("NDArray::get - invalid NDArray type");
-		}
+		return get<T>(ArrayList<int>(indices));
 	}
 
 	template <typename T>
 	void set(std::initializer_list<int> indices, const T& value) {
-		if ((int)indices.size() != shape.size())
-			throw std::out_of_range("NDArray::set - number of indices did not match number of axes");
-		size_t offset = computeOffset(indices);
-		switch (type) {
-			case BINARY:
-				if (value > 0)
-					uint64[offset >> 6] |= 1ULL << (offset & 63);
-				else
-					uint64[offset >> 6] &= ~(1ULL << (offset & 63));
-				break;
-			case UINT8:
-				uint8[offset] = (uint8_t)value;
-				break;
-			case INT32:
-				int32[offset] = (int32_t)value;
-				break;
-			case INT64:
-				int64[offset] = (int64_t)value;
-				break;
-			case F32:
-				float32[offset] = (float)value;
-				break;
-			case F64:
-				float64[offset] = (double)value;
-				break;
-			case UINT256:
-				uint256[offset] = (uint256_t)value;
-				break;
-		}
+		set(ArrayList<int>(indices), value);
+	}
+
+	/** Flat element index in dense row-major order. */
+	template <typename T>
+	T getFlat(size_t flat) const {
+		if (flat >= numElements())
+			throw std::out_of_range("NDArray::getFlat - index out of range");
+		return getAtOffset<T>(flat);
+	}
+
+	template <typename T>
+	void setFlat(size_t flat, const T& value) {
+		if (flat >= numElements())
+			throw std::out_of_range("NDArray::setFlat - index out of range");
+		setAtOffset(flat, value);
 	}
 
 	/*
@@ -568,8 +637,8 @@ public:
 	NDArray& operator/=(const NDArray& other);
 	NDArray& operator%=(const NDArray& other);
 
-	const ArrayList<int> shape;
-	// Mutable so in-place arithmetic can promote without reallocating a new NDArray object.
+	ArrayList<int> shape;
+	// Mutable so in-place arithmetic can promote; kept consistent with buffer dtype.
 	NDArrayType type;
 
 private:
@@ -578,9 +647,116 @@ private:
 	/** .cpp-only helpers that need access to storage pointers. */
 	struct Impl;
 	friend struct Impl;
+	friend class NDArrayRef;
+	friend class NDArrayCRef;
+	friend class NDArrayView;
 
 	size_t initialize();
 	size_t computeOffset(const ArrayList<int>& indices) const;
+	void rebindPointers();
+	void ensureWritable();
+	static ArrayList<size_t> rowMajorStrides(const ArrayList<int>& shape);
+	static size_t bufferBytesFor(NDArrayType t, size_t numElems);
+
+	template <typename T>
+	T getAtOffset(size_t offset) const {
+		switch (type) {
+			case BINARY:
+				return static_cast<T>((uint64[offset >> 6] >> (offset & 63)) & 1);
+			case UINT8:
+				return static_cast<T>(uint8[offset]);
+			case INT32:
+				if constexpr (std::is_same_v<T, uint256_t>)
+					return uint256_t((int)int32[offset]);
+				else
+					return static_cast<T>(int32[offset]);
+			case INT64:
+				if constexpr (std::is_same_v<T, uint256_t>)
+					return int64[offset] < 0
+						? uint256_t((int)int64[offset])
+						: uint256_t((uint64_t)int64[offset]);
+				else
+					return static_cast<T>(int64[offset]);
+			case F32:
+				return static_cast<T>(float32[offset]);
+			case F64:
+				if constexpr (std::is_same_v<T, uint256_t>)
+					return uint256_t(float64[offset]);
+				else
+					return static_cast<T>(float64[offset]);
+			case UINT256:
+				return convert_from_uint256<T>(uint256[offset]);
+			default:
+				throw std::runtime_error("NDArray::getAtOffset - invalid type");
+		}
+	}
+
+	template <typename T>
+	void setAtOffset(size_t offset, const T& value) {
+		ensureWritable();
+		if constexpr (std::is_same_v<T, uint256_t>) {
+			switch (type) {
+				case BINARY:
+					if ((uint64_t)value != 0)
+						uint64[offset >> 6] |= 1ULL << (offset & 63);
+					else
+						uint64[offset >> 6] &= ~(1ULL << (offset & 63));
+					break;
+				case UINT8:
+					uint8[offset] = (uint8_t)(uint64_t)value;
+					break;
+				case INT32:
+					int32[offset] = (int32_t)(uint64_t)value;
+					break;
+				case INT64:
+					int64[offset] = (int64_t)(uint64_t)value;
+					break;
+				case F32:
+					float32[offset] = (float)value.toDouble();
+					break;
+				case F64:
+					float64[offset] = value.toDouble();
+					break;
+				case UINT256:
+					uint256[offset] = value;
+					break;
+			}
+		} else {
+			switch (type) {
+				case BINARY:
+					if (value > 0)
+						uint64[offset >> 6] |= 1ULL << (offset & 63);
+					else
+						uint64[offset >> 6] &= ~(1ULL << (offset & 63));
+					break;
+				case UINT8:
+					uint8[offset] = (uint8_t)value;
+					break;
+				case INT32:
+					int32[offset] = (int32_t)value;
+					break;
+				case INT64:
+					int64[offset] = (int64_t)value;
+					break;
+				case F32:
+					float32[offset] = (float)value;
+					break;
+				case F64:
+					float64[offset] = (double)value;
+					break;
+				case UINT256:
+					if constexpr (std::is_integral_v<T>)
+						uint256[offset] = value < 0
+							? uint256_t((int)value)
+							: uint256_t((uint64_t)value);
+					else if constexpr (std::is_floating_point_v<T>)
+						uint256[offset] = uint256_t((double)value);
+					else
+						uint256[offset] = uint256_t((uint64_t)0);
+					break;
+			}
+		}
+	}
 
 	float loadAsFloat(size_t i) const;
 	double loadAsDouble(size_t i) const;
@@ -663,7 +839,8 @@ private:
 		}
 	}
 
-	size_t memorySize;
+	sp<NDArrayBuffer> buffer; // COPY_ON_WRITE shared storage
+	size_t memorySize = 0;
 	union {
 		void* memory;
 
@@ -680,6 +857,78 @@ private:
 		uint256_t* uint256;
 	};
 };
+
+
+// ---- proxy template methods (need NDArray complete) -------------------------
+
+template <typename T>
+NDArrayRef::operator T() const {
+	return parent->get<T>(indices);
+}
+
+template <typename T>
+NDArrayRef& NDArrayRef::operator=(const T& value) {
+	parent->set(indices, value);
+	return *this;
+}
+
+template <typename T>
+NDArrayCRef::operator T() const {
+	return parent->get<T>(indices);
+}
+
+// View element access: defined in NDArray.cpp (uses shared buffer load helpers)
+// Explicit instantiations provided for common T; generic path uses convert via double/i64.
+namespace ndarray_detail {
+	double viewLoadDouble(const NDArrayView& v, size_t elementOffset);
+	int64_t viewLoadI64(const NDArrayView& v, size_t elementOffset);
+	uint256_t viewLoadU256(const NDArrayView& v, size_t elementOffset);
+}
+
+template <typename T>
+T NDArrayView::getFlat(size_t flat) const {
+	if (flat >= numElements())
+		throw std::out_of_range("NDArrayView::getFlat - index out of range");
+	// Map dense flat index of *view shape* to buffer element offset via multi-index
+	ArrayList<int> idx;
+	size_t rem = flat;
+	// build multi-index row-major
+	size_t prod = 1;
+	for (int d = shape.size() - 1; d >= 0; --d)
+		prod *= (size_t)(shape.get(d) > 0 ? shape.get(d) : 1);
+	// simpler: iterative divide
+	ArrayList<int> coords;
+	for (int i = 0; i < shape.size(); ++i)
+		coords.add(0);
+	size_t r = flat;
+	for (int d = shape.size() - 1; d >= 0; --d) {
+		int dim = shape.get(d);
+		int c = dim > 0 ? (int)(r % (size_t)dim) : 0;
+		coords.set(d, c);
+		if (dim > 0)
+			r /= (size_t)dim;
+	}
+	size_t elemOff = computeOffset(coords);
+	if constexpr (std::is_same_v<T, uint256_t>)
+		return ndarray_detail::viewLoadU256(*this, elemOff);
+	else if constexpr (std::is_floating_point_v<T>)
+		return static_cast<T>(ndarray_detail::viewLoadDouble(*this, elemOff));
+	else
+		return static_cast<T>(ndarray_detail::viewLoadI64(*this, elemOff));
+}
+
+template <typename T>
+T NDArrayView::get(const ArrayList<int>& indices) const {
+	if (indices.size() != shape.size())
+		throw std::out_of_range("NDArrayView::get - rank mismatch");
+	size_t elemOff = computeOffset(indices);
+	if constexpr (std::is_same_v<T, uint256_t>)
+		return ndarray_detail::viewLoadU256(*this, elemOff);
+	else if constexpr (std::is_floating_point_v<T>)
+		return static_cast<T>(ndarray_detail::viewLoadDouble(*this, elemOff));
+	else
+		return static_cast<T>(ndarray_detail::viewLoadI64(*this, elemOff));
+}
 
 
 /*
