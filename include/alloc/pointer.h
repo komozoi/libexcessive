@@ -465,6 +465,24 @@ public:
 		return !(*this == other);
 	}
 
+	/**
+	 * @brief Compares this smart pointer to nullptr
+	 *
+	 * @return `true` if this is a null pointer, `false` otherwise.
+	 */
+	bool operator==(nullptr_t) const {
+		return details == nullptr;
+	}
+
+	/**
+	 * @brief Compares this smart pointer to nullptr
+	 *
+	 * @return `true` if this pointer is valid, `false` otherwise.
+	 */
+	bool operator!=(nullptr_t) const {
+		return details != nullptr;
+	}
+
 
 	// ---------- Modifiers ----------
 
