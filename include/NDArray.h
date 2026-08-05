@@ -23,6 +23,8 @@
 enum NDArrayType {
 	// Int types
 	BINARY = 0x00,
+	/** Signed 3-bit (-4..3), nibble-packed (16 values / uint64). */
+	INT3 = 0x05,
 	//INT4 = 0x06,
 	//UINT4 = 0x07,
 	//INT8 = 0x0E,
@@ -663,6 +665,14 @@ private:
 		switch (type) {
 			case BINARY:
 				return static_cast<T>((uint64[offset >> 6] >> (offset & 63)) & 1);
+			case INT3: {
+				// Signed decode -4..3 (nibble-packed)
+				const size_t w = offset / 16;
+				const unsigned sh = (unsigned)((offset % 16) * 4);
+				uint8_t p = (uint8_t)((uint64[w] >> sh) & 7u);
+				int v = (p >= 4) ? (int)p - 8 : (int)p;
+				return static_cast<T>(v);
+			}
 			case UINT8:
 				return static_cast<T>(uint8[offset]);
 			case INT32:
@@ -702,6 +712,13 @@ private:
 					else
 						uint64[offset >> 6] &= ~(1ULL << (offset & 63));
 					break;
+				case INT3: {
+					uint8_t p = (uint8_t)((uint64_t)value & 7u);
+					const size_t w = offset / 16;
+					const unsigned sh = (unsigned)((offset % 16) * 4);
+					uint64[w] = (uint64[w] & ~(0xFULL << sh)) | ((uint64_t)p << sh);
+					break;
+				}
 				case UINT8:
 					uint8[offset] = (uint8_t)(uint64_t)value;
 					break;
@@ -729,6 +746,18 @@ private:
 					else
 						uint64[offset >> 6] &= ~(1ULL << (offset & 63));
 					break;
+				case INT3: {
+					int iv;
+					if constexpr (std::is_floating_point_v<T>)
+						iv = (int)value;
+					else
+						iv = (int)value;
+					uint8_t p = (uint8_t)(iv & 7);
+					const size_t w = offset / 16;
+					const unsigned sh = (unsigned)((offset % 16) * 4);
+					uint64[w] = (uint64[w] & ~(0xFULL << sh)) | ((uint64_t)p << sh);
+					break;
+				}
 				case UINT8:
 					uint8[offset] = (uint8_t)value;
 					break;

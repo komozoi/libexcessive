@@ -44,6 +44,19 @@ target_include_directories(excessive
         $<INSTALL_INTERFACE:include>
 )
 
+# INT3 mul/div (inlined from src/ndarray_int3.h into NDArray.cpp): enable
+# AVX-512 VPERMB path when the toolchain supports it.
+include(CheckCXXCompilerFlag)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64|i.86")
+    check_cxx_compiler_flag("-mavx512f"             LIBEXCESSIVE_HAS_AVX512F)
+    check_cxx_compiler_flag("-mavx512bw"            LIBEXCESSIVE_HAS_AVX512BW)
+    check_cxx_compiler_flag("-mavx512vbmi"          LIBEXCESSIVE_HAS_AVX512VBMI)
+    if(LIBEXCESSIVE_HAS_AVX512F AND LIBEXCESSIVE_HAS_AVX512BW AND LIBEXCESSIVE_HAS_AVX512VBMI)
+        set_source_files_properties(src/NDArray.cpp PROPERTIES
+            COMPILE_FLAGS "-mavx512f -mavx512bw -mavx512vbmi")
+    endif()
+endif()
+
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     option(LIBEXCESSIVE_BUILD_TESTS "Build libexcessive tests" ON)
 else()

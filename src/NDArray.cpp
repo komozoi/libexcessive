@@ -9,6 +9,7 @@
 //
 
 #include "../include/NDArray.h"
+#include "ndarray_int3.h"
 
 #include <cmath>
 #include <cstring>
@@ -33,16 +34,17 @@ static bool isFloatingPoint(NDArrayType type) {
 }
 
 static bool isSigned(NDArrayType type) {
-	return type == F32 || type == F64 || type == INT32 || type == INT64;
+	return type == F32 || type == F64 || type == INT3 || type == INT32 || type == INT64;
 }
 
 static bool isSignedInteger(NDArrayType type) {
-	return type == INT32 || type == INT64;
+	return type == INT3 || type == INT32 || type == INT64;
 }
 
 static int maxPowerOfTypeIntPrecision(NDArrayType type) {
 	switch (type) {
 		case BINARY:  return 0;
+		case INT3:    return 2; // magnitude bits; range fits in INT32
 		case UINT8:   return 7;
 		case INT32:   return 31;
 		case INT64:   return 63;
@@ -57,6 +59,7 @@ static int maxPowerOfTypeIntPrecision(NDArrayType type) {
 static int maxPowerOfType(NDArrayType type) {
 	switch (type) {
 		case BINARY:  return 0;
+		case INT3:    return 2;
 		case UINT8:   return 7;
 		case INT32:   return 31;
 		case INT64:   return 63;
@@ -149,8 +152,8 @@ static NDArrayType typeForRealUnary(NDArrayType t) {
 }
 
 static NDArrayType typeForNeg(NDArrayType t) {
-	if (t == F32 || t == F64 || t == INT32 || t == INT64)
-		return t;
+	if (t == F32 || t == F64 || t == INT3 || t == INT32 || t == INT64)
+		return t; // INT3: wrap two's-complement (neg of -4 stays -4)
 	if (t == UINT256)
 		return UINT256; // two's complement
 	// BINARY / UINT8 → INT32 (exact for those ranges)
@@ -161,6 +164,7 @@ static NDArrayType sumProdAccumulateType(NDArrayType t) {
 	switch (t) {
 		case F32: return F32;
 		case F64: return F64;
+		case INT3: return INT32;
 		case INT32: return INT64;
 		case INT64: return INT64;
 		case BINARY:
@@ -328,6 +332,8 @@ size_t NDArray::bufferBytesFor(NDArrayType t, size_t numElems) {
 	switch (t) {
 		case BINARY:
 			return ((numElems + 63) / 64) * 8;
+		case INT3:
+			return int3_bufferBytes(numElems);
 		case UINT8:
 			return numElems;
 		case INT32:
@@ -718,6 +724,11 @@ NDArray NDArrayView::copy() const {
 				out.setFlat(i, bit);
 				break;
 			}
+			case INT3: {
+				const uint64_t* words = (const uint64_t*)data;
+				out.setFlat(i, int3_getSigned(words, srcOff));
+				break;
+			}
 		}
 	}
 	return out;
@@ -730,6 +741,10 @@ namespace ndarray_detail {
 			case BINARY: {
 				const uint64_t* words = (const uint64_t*)data;
 				return (double)((words[elementOffset >> 6] >> (elementOffset & 63)) & 1ULL);
+			}
+			case INT3: {
+				const uint64_t* words = (const uint64_t*)data;
+				return (double)int3_getSigned(words, elementOffset);
 			}
 			case UINT8: return (double)((const uint8_t*)data)[elementOffset];
 			case INT32: return (double)((const int32_t*)data)[elementOffset];
@@ -819,6 +834,7 @@ float NDArray::loadAsFloat(size_t i) const {
 double NDArray::loadAsDouble(size_t i) const {
 	switch (type) {
 		case BINARY:  return (double)binaryGet(uint64, i);
+		case INT3:    return (double)int3_getSigned(uint64, i);
 		case UINT8:   return (double)uint8[i];
 		case INT32:   return (double)int32[i];
 		case INT64:   return (double)int64[i];
@@ -832,6 +848,7 @@ double NDArray::loadAsDouble(size_t i) const {
 int64_t NDArray::loadAsI64(size_t i) const {
 	switch (type) {
 		case BINARY:  return (int64_t)binaryGet(uint64, i);
+		case INT3:    return (int64_t)int3_getSigned(uint64, i);
 		case UINT8:   return (int64_t)uint8[i];
 		case INT32:   return (int64_t)int32[i];
 		case INT64:   return int64[i];
@@ -845,6 +862,7 @@ int64_t NDArray::loadAsI64(size_t i) const {
 uint256_t NDArray::loadAsU256(size_t i) const {
 	switch (type) {
 		case BINARY:  return uint256_t((uint64_t)binaryGet(uint64, i));
+		case INT3:    return uint256_t(int3_getSigned(uint64, i));
 		case UINT8:   return uint256_t((uint64_t)uint8[i]);
 		case INT32:   return uint256_t((int)int32[i]);
 		case INT64:   return uint256_t((uint64_t)int64[i]); // truncates sign bit interpretation
@@ -861,6 +879,7 @@ void NDArray::storeFromDouble(size_t i, double v) {
 	ensureWritable();
 	switch (type) {
 		case BINARY:  binarySet(uint64, i, v > 0.0 ? 1 : 0); break;
+		case INT3:    int3_setSigned(uint64, i, (int)v); break;
 		case UINT8:   uint8[i] = (uint8_t)v; break;
 		case INT32:   int32[i] = (int32_t)v; break;
 		case INT64:   int64[i] = (int64_t)v; break;
@@ -875,6 +894,7 @@ void NDArray::storeFromI64(size_t i, int64_t v) {
 	ensureWritable();
 	switch (type) {
 		case BINARY:  binarySet(uint64, i, v > 0 ? 1 : 0); break;
+		case INT3:    int3_setSigned(uint64, i, (int)v); break;
 		case UINT8:   uint8[i] = (uint8_t)v; break;
 		case INT32:   int32[i] = (int32_t)v; break;
 		case INT64:   int64[i] = v; break;
@@ -894,6 +914,7 @@ void NDArray::storeFromU256(size_t i, const uint256_t& v) {
 	ensureWritable();
 	switch (type) {
 		case BINARY:  binarySet(uint64, i, (uint64_t)v != 0 ? 1 : 0); break;
+		case INT3:    int3_setSigned(uint64, i, (int)(int64_t)(uint64_t)v); break;
 		case UINT8:   uint8[i] = (uint8_t)(uint64_t)v; break;
 		case INT32:   int32[i] = (int32_t)(uint64_t)v; break;
 		case INT64:   int64[i] = (int64_t)(uint64_t)v; break;
@@ -1019,6 +1040,14 @@ void NDArray::applyBinaryInPlace(const NDArray& src, ArithOp op) {
 				binarySet(uint64, i, r);
 			}
 			break;
+		case INT3:
+			switch (op) {
+				case ArithOp::Add: int3_add(uint64, src.uint64, n); break;
+				case ArithOp::Sub: int3_sub(uint64, src.uint64, n); break;
+				case ArithOp::Mul: int3_mul(uint64, src.uint64, n); break;
+				case ArithOp::Div: int3_div(uint64, src.uint64, n); break;
+			}
+			break;
 		default:
 			throw std::runtime_error("NDArray: invalid type in arithmetic");
 	}
@@ -1115,6 +1144,16 @@ void NDArray::applyDoubleScalarInPlace(double scalar, ArithOp op) {
 			}
 			break;
 		}
+		case INT3: {
+			uint8_t p = int3_encode((int)scalar);
+			switch (op) {
+				case ArithOp::Add: int3_addScalar(uint64, p, n); break;
+				case ArithOp::Sub: int3_subScalar(uint64, p, n); break;
+				case ArithOp::Mul: int3_mulScalar(uint64, p, n); break;
+				case ArithOp::Div: int3_divScalar(uint64, p, n); break;
+			}
+			break;
+		}
 		default:
 			throw std::runtime_error("NDArray: invalid type in scalar arithmetic");
 	}
@@ -1190,6 +1229,16 @@ void NDArray::applyIntScalarInPlace(int scalar, ArithOp op) {
 						break;
 				}
 				binarySet(uint64, i, r);
+			}
+			break;
+		}
+		case INT3: {
+			uint8_t p = int3_encode(scalar);
+			switch (op) {
+				case ArithOp::Add: int3_addScalar(uint64, p, n); break;
+				case ArithOp::Sub: int3_subScalar(uint64, p, n); break;
+				case ArithOp::Mul: int3_mulScalar(uint64, p, n); break;
+				case ArithOp::Div: int3_divScalar(uint64, p, n); break;
 			}
 			break;
 		}
@@ -1269,6 +1318,16 @@ void NDArray::applyInt64ScalarInPlace(int64_t scalar, ArithOp op) {
 						break;
 				}
 				binarySet(uint64, i, r);
+			}
+			break;
+		}
+		case INT3: {
+			uint8_t p = int3_encode((int)scalar);
+			switch (op) {
+				case ArithOp::Add: int3_addScalar(uint64, p, n); break;
+				case ArithOp::Sub: int3_subScalar(uint64, p, n); break;
+				case ArithOp::Mul: int3_mulScalar(uint64, p, n); break;
+				case ArithOp::Div: int3_divScalar(uint64, p, n); break;
 			}
 			break;
 		}
@@ -1588,6 +1647,13 @@ NDArray& NDArray::neg() {
 		case INT64:
 			for (size_t i = 0; i < n; ++i) int64[i] = -int64[i];
 			break;
+		case INT3:
+			// Two's-complement wrap in 3 bits: pattern → (8 - p) & 7; 0 stays 0.
+			for (size_t i = 0; i < n; ++i) {
+				uint8_t p = int3_get(uint64, i);
+				int3_set(uint64, i, p ? (uint8_t)((8 - p) & 7) : 0);
+			}
+			break;
 		case UINT256:
 			for (size_t i = 0; i < n; ++i) uint256[i] = -uint256[i];
 			break;
@@ -1636,6 +1702,14 @@ NDArray& NDArray::abs() {
 			break;
 		case INT64:
 			for (size_t i = 0; i < n; ++i) int64[i] = int64[i] < 0 ? -int64[i] : int64[i];
+			break;
+		case INT3:
+			// abs(-4) wraps to -4 in INT3; abs of other negatives fits.
+			for (size_t i = 0; i < n; ++i) {
+				int v = int3_getSigned(uint64, i);
+				if (v < 0)
+					int3_setSigned(uint64, i, -v);
+			}
 			break;
 		case UINT8:
 		case UINT256:
@@ -2149,6 +2223,7 @@ struct NDArray::Impl {
 				case F32: r = cmpDouble(left.float32[i], right.float32[i], op); break;
 				case F64: r = cmpDouble(left.float64[i], right.float64[i], op); break;
 				case UINT8: r = cmpI64(left.uint8[i], right.uint8[i], op); break;
+				case INT3: r = cmpI64(int3_getSigned(left.uint64, i), int3_getSigned(right.uint64, i), op); break;
 				case INT32: r = cmpI64(left.int32[i], right.int32[i], op); break;
 				case INT64: r = cmpI64(left.int64[i], right.int64[i], op); break;
 				case UINT256: r = cmpU256(left.uint256[i], right.uint256[i], op); break;
@@ -2192,6 +2267,7 @@ struct NDArray::Impl {
 	static bool isZeroElement(const NDArray& a, size_t i) {
 		switch (a.type) {
 			case BINARY: return binaryGet(a.uint64, i) == 0;
+			case INT3: return int3_get(a.uint64, i) == 0;
 			case UINT8: return a.uint8[i] == 0;
 			case INT32: return a.int32[i] == 0;
 			case INT64: return a.int64[i] == 0;
@@ -2207,6 +2283,7 @@ struct NDArray::Impl {
 			case F32: out.float32[oi] = src.float32[si]; break;
 			case F64: out.float64[oi] = src.float64[si]; break;
 			case UINT8: out.uint8[oi] = src.uint8[si]; break;
+			case INT3: int3_set(out.uint64, oi, int3_get(src.uint64, si)); break;
 			case INT32: out.int32[oi] = src.int32[si]; break;
 			case INT64: out.int64[oi] = src.int64[si]; break;
 			case UINT256: out.uint256[oi] = src.uint256[si]; break;
@@ -2222,6 +2299,12 @@ struct NDArray::Impl {
 			case F32: out.float32[i] = num.float32[i] / den.float32[i]; break;
 			case F64: out.float64[i] = num.float64[i] / den.float64[i]; break;
 			case UINT8: out.uint8[i] = (uint8_t)(num.uint8[i] / den.uint8[i]); break;
+			case INT3: {
+				int a = int3_getSigned(num.uint64, i);
+				int b = int3_getSigned(den.uint64, i);
+				int3_setSigned(out.uint64, i, a / b);
+				break;
+			}
 			case INT32: out.int32[i] = num.int32[i] / den.int32[i]; break;
 			case INT64: out.int64[i] = num.int64[i] / den.int64[i]; break;
 			case UINT256: out.uint256[i] = num.uint256[i] / den.uint256[i]; break;
