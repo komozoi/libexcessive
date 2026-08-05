@@ -235,6 +235,32 @@ static void binarySet(uint64_t* words, size_t i, uint8_t bit) {
 		words[i >> 6] &= ~(1ULL << (i & 63));
 }
 
+/** Type for a bare integer constant: INT3 when value ∈ {-1,0,1}, else INT32. */
+static NDArrayType typeForIntConstant(int64_t value) {
+	if (value == -1 || value == 0 || value == 1)
+		return INT3;
+	return INT32;
+}
+
+/** True if every element is -1, 0, or 1 (fits INT3 ternary). */
+static bool allTernaryInts(const int32_t* data, size_t n) {
+	for (size_t i = 0; i < n; ++i) {
+		int32_t v = data[i];
+		if (v != -1 && v != 0 && v != 1)
+			return false;
+	}
+	return true;
+}
+
+static bool allTernaryInts(const int64_t* data, size_t n) {
+	for (size_t i = 0; i < n; ++i) {
+		int64_t v = data[i];
+		if (v != -1 && v != 0 && v != 1)
+			return false;
+	}
+	return true;
+}
+
 static void requireSameShape(const NDArray& a, const NDArray& b) {
 	if (a.shape.size() != b.shape.size())
 		throw std::invalid_argument("NDArray: shape rank mismatch");
@@ -378,13 +404,29 @@ NDArray::NDArray(ArrayList<uint8_t> vector) : shape({vector.size()}), type(UINT8
 	initialize();
 	memcpy(uint8, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(ArrayList<int32_t> vector) : shape({vector.size()}), type(INT32), memory(nullptr) {
+NDArray::NDArray(ArrayList<int32_t> vector)
+	: shape({vector.size()}),
+	  type(allTernaryInts(vector.getMemory(), (size_t)vector.size()) ? INT3 : INT32),
+	  memory(nullptr) {
 	initialize();
-	memcpy(int32, vector.getMemory(), memorySize);
+	if (type == INT3) {
+		for (int i = 0; i < vector.size(); ++i)
+			int3_setSigned(uint64, (size_t)i, vector.get(i));
+	} else {
+		memcpy(int32, vector.getMemory(), memorySize);
+	}
 }
-NDArray::NDArray(ArrayList<int64_t> vector) : shape({vector.size()}), type(INT64), memory(nullptr) {
+NDArray::NDArray(ArrayList<int64_t> vector)
+	: shape({vector.size()}),
+	  type(allTernaryInts(vector.getMemory(), (size_t)vector.size()) ? INT3 : INT64),
+	  memory(nullptr) {
 	initialize();
-	memcpy(int64, vector.getMemory(), memorySize);
+	if (type == INT3) {
+		for (int i = 0; i < vector.size(); ++i)
+			int3_setSigned(uint64, (size_t)i, (int)vector.get(i));
+	} else {
+		memcpy(int64, vector.getMemory(), memorySize);
+	}
 }
 
 NDArray::NDArray(const ArrayList<int>& shape, ArrayList<float> vector) : shape(shape), type(F32), memory(nullptr) {
@@ -405,17 +447,33 @@ NDArray::NDArray(const ArrayList<int>& shape, ArrayList<uint8_t> vector) : shape
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
 	memcpy(uint8, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector) : shape(shape), type(INT32), memory(nullptr) {
+NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector)
+	: shape(shape),
+	  type(allTernaryInts(vector.getMemory(), (size_t)vector.size()) ? INT3 : INT32),
+	  memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
-	memcpy(int32, vector.getMemory(), memorySize);
+	if (type == INT3) {
+		for (int i = 0; i < vector.size(); ++i)
+			int3_setSigned(uint64, (size_t)i, vector.get(i));
+	} else {
+		memcpy(int32, vector.getMemory(), memorySize);
+	}
 }
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int64_t> vector) : shape(shape), type(INT64), memory(nullptr) {
+NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int64_t> vector)
+	: shape(shape),
+	  type(allTernaryInts(vector.getMemory(), (size_t)vector.size()) ? INT3 : INT64),
+	  memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
-	memcpy(int64, vector.getMemory(), memorySize);
+	if (type == INT3) {
+		for (int i = 0; i < vector.size(); ++i)
+			int3_setSigned(uint64, (size_t)i, (int)vector.get(i));
+	} else {
+		memcpy(int64, vector.getMemory(), memorySize);
+	}
 }
 
 NDArray::NDArray(const NDArray& other)
@@ -766,14 +824,42 @@ namespace ndarray_detail {
 	}
 }
 
+NDArray::NDArray(int value)
+	: shape({}), type(typeForIntConstant(value)), memory(nullptr) {
+	initialize();
+	set({}, value);
+}
+
+NDArray::NDArray(int64_t value)
+	: shape({}), type(typeForIntConstant(value)), memory(nullptr) {
+	initialize();
+	set({}, value);
+}
+
+NDArray NDArray::zeros(const ArrayList<int>& shape) {
+	return zeros(shape, INT3);
+}
+
 NDArray NDArray::zeros(const ArrayList<int>& shape, NDArrayType type) {
 	return NDArray(shape, type);
+}
+
+NDArray NDArray::ones(const ArrayList<int>& shape) {
+	return ones(shape, INT3);
 }
 
 NDArray NDArray::ones(const ArrayList<int>& shape, NDArrayType type) {
 	NDArray out(shape, type);
 	out.fillFromDouble(1.0);
 	return out;
+}
+
+NDArray NDArray::full(const ArrayList<int>& shape, int value) {
+	return full(shape, typeForIntConstant(value), value);
+}
+
+NDArray NDArray::full(const ArrayList<int>& shape, int64_t value) {
+	return full(shape, typeForIntConstant(value), value);
 }
 
 NDArray NDArray::full(const ArrayList<int>& shape, NDArrayType type, float value) {
@@ -2264,6 +2350,125 @@ struct NDArray::Impl {
 		return out;
 	}
 
+	/** Three-way: -1 if a<b, 0 if a==b, +1 if a>b. */
+	static int8_t threeWayFromBools(bool lt, bool gt) {
+		if (lt)
+			return -1;
+		if (gt)
+			return 1;
+		return 0;
+	}
+
+	static int8_t threeWayDouble(double a, double b) {
+		return threeWayFromBools(a < b, a > b);
+	}
+
+	static int8_t threeWayI64(int64_t a, int64_t b) {
+		return threeWayFromBools(a < b, a > b);
+	}
+
+	static int8_t threeWayU256(const uint256_t& a, const uint256_t& b) {
+		return threeWayFromBools(a < b, b < a);
+	}
+
+	/**
+	 * Element-wise three-way compare → INT3 (-1 / 0 / +1).
+	 * Uses the same promotion rules as relational masks.
+	 */
+	static NDArray threeWayCompareArrays(const NDArray& a, const NDArray& b) {
+		requireSameShape(a, b);
+		NDArrayType ct = promoteTypes(a.type, b.type);
+		if (a.type == BINARY && b.type == BINARY)
+			ct = BINARY;
+		if (a.type == INT3 && b.type == INT3)
+			ct = INT3;
+
+		NDArray left = a.convert(ct);
+		NDArray right = b.convert(ct);
+		NDArray out(a.shape, INT3);
+		const size_t n = left.numElements();
+
+		for (size_t i = 0; i < n; ++i) {
+			int8_t r = 0;
+			switch (ct) {
+				case F32: r = threeWayDouble(left.float32[i], right.float32[i]); break;
+				case F64: r = threeWayDouble(left.float64[i], right.float64[i]); break;
+				case UINT8: r = threeWayI64(left.uint8[i], right.uint8[i]); break;
+				case INT3: r = threeWayI64(int3_getSigned(left.uint64, i), int3_getSigned(right.uint64, i)); break;
+				case INT32: r = threeWayI64(left.int32[i], right.int32[i]); break;
+				case INT64: r = threeWayI64(left.int64[i], right.int64[i]); break;
+				case UINT256: r = threeWayU256(left.uint256[i], right.uint256[i]); break;
+				case BINARY: r = threeWayI64(binaryGet(left.uint64, i), binaryGet(right.uint64, i)); break;
+				default: throw std::runtime_error("NDArray::compare: invalid type");
+			}
+			int3_setSigned(out.uint64, i, r);
+		}
+		return out;
+	}
+
+	static NDArray threeWayCompareDoubleScalar(const NDArray& a, double s) {
+		// Compare in a type that can hold both; prefer native float width when possible.
+		NDArray out(a.shape, INT3);
+		const size_t n = a.numElements();
+		if (a.type == F32) {
+			for (size_t i = 0; i < n; ++i)
+				int3_setSigned(out.uint64, i, threeWayDouble(a.float32[i], s));
+			return out;
+		}
+		if (a.type == F64 || isFloatingPoint(a.type) || isLosslessConversion(a.type, F64)
+		    || a.type == INT3 || a.type == UINT8 || a.type == INT32 || a.type == INT64
+		    || a.type == BINARY) {
+			for (size_t i = 0; i < n; ++i)
+				int3_setSigned(out.uint64, i, threeWayDouble(a.loadAsDouble(i), s));
+			return out;
+		}
+		// UINT256 vs float: via double (lossy for huge ints; document)
+		for (size_t i = 0; i < n; ++i)
+			int3_setSigned(out.uint64, i, threeWayDouble(a.loadAsDouble(i), s));
+		return out;
+	}
+
+	static NDArray threeWayCompareI64Scalar(const NDArray& a, int64_t s) {
+		NDArray out(a.shape, INT3);
+		const size_t n = a.numElements();
+		if (a.type == UINT256) {
+			uint256_t su = s < 0 ? uint256_t((int)s) : uint256_t((uint64_t)s);
+			for (size_t i = 0; i < n; ++i)
+				int3_setSigned(out.uint64, i, threeWayU256(a.uint256[i], su));
+			return out;
+		}
+		if (a.type == F32 || a.type == F64) {
+			for (size_t i = 0; i < n; ++i)
+				int3_setSigned(out.uint64, i, threeWayDouble(a.loadAsDouble(i), (double)s));
+			return out;
+		}
+		for (size_t i = 0; i < n; ++i)
+			int3_setSigned(out.uint64, i, threeWayI64(a.loadAsI64(i), s));
+		return out;
+	}
+
+	static NDArray threeWayCompareU256Scalar(const NDArray& a, const uint256_t& s) {
+		NDArray out(a.shape, INT3);
+		const size_t n = a.numElements();
+		if (a.type == UINT256) {
+			for (size_t i = 0; i < n; ++i)
+				int3_setSigned(out.uint64, i, threeWayU256(a.uint256[i], s));
+			return out;
+		}
+		// Promote left to UINT256 for integer-like types; floats via double.
+		if (a.type == F32 || a.type == F64) {
+			double sd = s.toDouble();
+			for (size_t i = 0; i < n; ++i)
+				int3_setSigned(out.uint64, i, threeWayDouble(a.loadAsDouble(i), sd));
+			return out;
+		}
+		for (size_t i = 0; i < n; ++i) {
+			uint256_t av = a.loadAsU256(i);
+			int3_setSigned(out.uint64, i, threeWayU256(av, s));
+		}
+		return out;
+	}
+
 	static bool isZeroElement(const NDArray& a, size_t i) {
 		switch (a.type) {
 			case BINARY: return binaryGet(a.uint64, i) == 0;
@@ -2879,6 +3084,22 @@ NDArray NDArray::mod(int64_t other) const {
 	for (size_t i = 0; i < n; ++i)
 		left.storeFromI64(i, left.loadAsI64(i) % other);
 	return left;
+}
+
+NDArray NDArray::compare(const NDArray& other) const {
+	return Impl::threeWayCompareArrays(*this, other);
+}
+NDArray NDArray::compare(int other) const {
+	return Impl::threeWayCompareI64Scalar(*this, (int64_t)other);
+}
+NDArray NDArray::compare(float other) const {
+	return Impl::threeWayCompareDoubleScalar(*this, (double)other);
+}
+NDArray NDArray::compare(double other) const {
+	return Impl::threeWayCompareDoubleScalar(*this, other);
+}
+NDArray NDArray::compare(const uint256_t& other) const {
+	return Impl::threeWayCompareU256Scalar(*this, other);
 }
 
 NDArray NDArray::equal(const NDArray& other) const { return Impl::compareArrays(*this, other, CmpOp::Eq); }

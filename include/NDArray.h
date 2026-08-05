@@ -178,6 +178,13 @@ public:
 		set({}, value);
 	}
 
+	/**
+	 * Scalar array from an integer. Values -1, 0, 1 use INT3; other ints use INT32.
+	 * Distinct from NDArray(NDArrayType, int) which always uses the given type.
+	 */
+	explicit NDArray(int value);
+	explicit NDArray(int64_t value);
+
 	NDArray(const NDArray& other);
 	NDArray(NDArray&& other) noexcept;
 	~NDArray();
@@ -329,14 +336,29 @@ public:
 
 	/*
 	** Factories (return new arrays)
+	**
+	** Defaults for constants -1 / 0 / 1 use INT3 (nibble-packed ternary).
+	** Overloads that take NDArrayType keep that type (including *Like).
 	*/
+	/** Zeros, type INT3. */
+	static NDArray zeros(const ArrayList<int>& shape);
 	static NDArray zeros(const ArrayList<int>& shape, NDArrayType type);
+	/** Ones, type INT3. */
+	static NDArray ones(const ArrayList<int>& shape);
 	static NDArray ones(const ArrayList<int>& shape, NDArrayType type);
+	/**
+	 * Fill with an int constant. Type is INT3 when value is -1, 0, or 1;
+	 * otherwise INT32.
+	 */
+	static NDArray full(const ArrayList<int>& shape, int value);
+	static NDArray full(const ArrayList<int>& shape, int64_t value);
 	static NDArray full(const ArrayList<int>& shape, NDArrayType type, float value);
 	static NDArray full(const ArrayList<int>& shape, NDArrayType type, double value);
 	static NDArray full(const ArrayList<int>& shape, NDArrayType type, int value);
 	static NDArray full(const ArrayList<int>& shape, NDArrayType type, int64_t value);
+	/** Same shape/type as ref, all zeros. */
 	static NDArray zerosLike(const NDArray& ref);
+	/** Same shape/type as ref, all ones. */
 	static NDArray onesLike(const NDArray& ref);
 	static NDArray fullLike(const NDArray& ref, float value);
 	static NDArray fullLike(const NDArray& ref, double value);
@@ -447,10 +469,22 @@ public:
 	** Element-wise vs scalar: operator==(float|double|int) → BINARY, e.g. vb == 0.0
 	** Element-wise relational: >, <, >=, <=, != → BINARY
 	**
+	** Three-way compare (spaceship-style): compare(...) → INT3 with -1 / 0 / 1
+	**
 	** Ternary-style selection (C++ cannot overload ?:):
 	**   select(a > b, vb, va);
 	**   (a > b).choose(vb, va);
 	*/
+	/**
+	 * Element-wise three-way comparison → INT3 array of -1, 0, or 1:
+	 *   -1 if *this < other, 0 if equal, +1 if *this > other.
+	 */
+	NDArray compare(const NDArray& other) const;
+	NDArray compare(int other) const;
+	NDArray compare(float other) const;
+	NDArray compare(double other) const;
+	NDArray compare(const uint256_t& other) const;
+
 	/** Element-wise array comparison (BINARY). Prefer operators for scalars. */
 	NDArray equal(const NDArray& other) const;
 	NDArray notEqual(const NDArray& other) const;

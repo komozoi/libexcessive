@@ -152,3 +152,87 @@ TEST(NDArray_int3, NegAbs) {
 	EXPECT_EQ(ab.get<int>({2}), 3);
 	EXPECT_EQ(ab.get<int>({3}), -4); // abs(-4) wraps
 }
+
+TEST(NDArray_int3, DefaultFactories_UseInt3) {
+	NDArray z = NDArray::zeros({4});
+	EXPECT_EQ(z.type, INT3);
+	EXPECT_EQ(z.get<int>({0}), 0);
+	EXPECT_EQ(z.get<int>({3}), 0);
+
+	NDArray o = NDArray::ones({3});
+	EXPECT_EQ(o.type, INT3);
+	EXPECT_EQ(o.get<int>({0}), 1);
+	EXPECT_EQ(o.get<int>({2}), 1);
+
+	NDArray m1 = NDArray::full({2}, -1);
+	EXPECT_EQ(m1.type, INT3);
+	EXPECT_EQ(m1.get<int>({0}), -1);
+
+	NDArray big = NDArray::full({2}, 42);
+	EXPECT_EQ(big.type, INT32);
+	EXPECT_EQ(big.get<int>({0}), 42);
+
+	// Explicit type still works
+	NDArray zf = NDArray::zeros({2}, F32);
+	EXPECT_EQ(zf.type, F32);
+}
+
+TEST(NDArray_int3, ScalarAndVectorCtors_Ternary) {
+	NDArray s0(0);
+	NDArray s1(1);
+	NDArray sm(-1);
+	EXPECT_EQ(s0.type, INT3);
+	EXPECT_EQ(s1.type, INT3);
+	EXPECT_EQ(sm.type, INT3);
+	EXPECT_EQ(s0.get<int>({}), 0);
+	EXPECT_EQ(s1.get<int>({}), 1);
+	EXPECT_EQ(sm.get<int>({}), -1);
+
+	NDArray other(7);
+	EXPECT_EQ(other.type, INT32);
+	EXPECT_EQ(other.get<int>({}), 7);
+
+	NDArray v(ArrayList<int32_t>({-1, 0, 1, 1, 0, -1}));
+	EXPECT_EQ(v.type, INT3);
+	EXPECT_EQ(v.get<int>({0}), -1);
+	EXPECT_EQ(v.get<int>({2}), 1);
+
+	NDArray w(ArrayList<int32_t>({0, 2, 1}));
+	EXPECT_EQ(w.type, INT32);
+}
+
+TEST(NDArray_int3, Compare_ArrayAndScalars) {
+	NDArray a(ArrayList<float>({1.0f, 5.0f, 3.0f}));
+	NDArray b(ArrayList<float>({2.0f, 5.0f, 1.0f}));
+	NDArray c = a.compare(b);
+	EXPECT_EQ(c.type, INT3);
+	EXPECT_EQ(c.get<int>({0}), -1); // 1 < 2
+	EXPECT_EQ(c.get<int>({1}), 0);  // equal
+	EXPECT_EQ(c.get<int>({2}), 1);  // 3 > 1
+
+	NDArray vs = a.compare(3.0f);
+	EXPECT_EQ(vs.type, INT3);
+	EXPECT_EQ(vs.get<int>({0}), -1);
+	EXPECT_EQ(vs.get<int>({1}), 1);
+	EXPECT_EQ(vs.get<int>({2}), 0);
+
+	NDArray vi = a.compare(5);
+	EXPECT_EQ(vi.get<int>({0}), -1);
+	EXPECT_EQ(vi.get<int>({1}), 0);
+	EXPECT_EQ(vi.get<int>({2}), -1);
+
+	NDArray i3a({3}, INT3);
+	i3a.set({0}, -1); i3a.set({1}, 0); i3a.set({2}, 1);
+	NDArray i3b = NDArray::ones({3}); // INT3 ones
+	NDArray ic = i3a.compare(i3b);
+	EXPECT_EQ(ic.get<int>({0}), -1);
+	EXPECT_EQ(ic.get<int>({1}), -1);
+	EXPECT_EQ(ic.get<int>({2}), 0);
+
+	NDArray u({2}, UINT256);
+	u.set({0}, uint256_t(10));
+	u.set({1}, uint256_t(3));
+	NDArray uc = u.compare(uint256_t(5));
+	EXPECT_EQ(uc.get<int>({0}), 1);
+	EXPECT_EQ(uc.get<int>({1}), -1);
+}
