@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 #include <cmath>
+#include <limits>
 
 #include "NDArray.h"
 
@@ -484,6 +485,70 @@ TEST(NDArray_elementwise, Any_All) {
 	b.set({1}, 0);
 	EXPECT_FALSE(b.all());
 	EXPECT_TRUE(b.any());
+}
+
+TEST(NDArray_elementwise, IsFinite_IsInfinite) {
+	NDArray a(ArrayList({1.0f, std::numeric_limits<float>::infinity(),
+	                     std::numeric_limits<float>::quiet_NaN(), -2.0f}));
+	NDArray fin = a.isFinite();
+	NDArray inf = a.isInfinite();
+	EXPECT_EQ(fin.type, BINARY);
+	EXPECT_EQ(inf.type, BINARY);
+	EXPECT_EQ(fin.get<int>({0}), 1);
+	EXPECT_EQ(fin.get<int>({1}), 0);
+	EXPECT_EQ(fin.get<int>({2}), 0); // NaN is not finite
+	EXPECT_EQ(fin.get<int>({3}), 1);
+	EXPECT_EQ(inf.get<int>({0}), 0);
+	EXPECT_EQ(inf.get<int>({1}), 1);
+	EXPECT_EQ(inf.get<int>({2}), 0); // NaN is not infinite
+	EXPECT_EQ(inf.get<int>({3}), 0);
+
+	NDArray nan = a.isNaN();
+	EXPECT_EQ(nan.type, BINARY);
+	EXPECT_EQ(nan.get<int>({0}), 0);
+	EXPECT_EQ(nan.get<int>({1}), 0);
+	EXPECT_EQ(nan.get<int>({2}), 1);
+	EXPECT_EQ(nan.get<int>({3}), 0);
+	EXPECT_TRUE(a.isNaN().any());
+	EXPECT_FALSE(a.isNaN().all());
+
+	EXPECT_FALSE(a.isFinite().all());
+	EXPECT_TRUE(a.isInfinite().any());
+	EXPECT_FALSE(a.isInfinite().all());
+
+	// Integers are always finite / never NaN
+	NDArray i(ArrayList<int32_t>({1, 2, 3}));
+	EXPECT_TRUE(i.isFinite().all());
+	EXPECT_FALSE(i.isInfinite().any());
+	EXPECT_FALSE(i.isNaN().any());
+
+	NDArray d(ArrayList<double>({0.0, -std::numeric_limits<double>::infinity()}));
+	EXPECT_EQ(d.isFinite().get<int>({0}), 1);
+	EXPECT_EQ(d.isFinite().get<int>({1}), 0);
+	EXPECT_EQ(d.isInfinite().get<int>({1}), 1);
+
+	// Long vector: exercise word-packed / AVX-512 path (≥ 64 lanes)
+	const int N = 130;
+	NDArray longv({N}, F32);
+	for (int i = 0; i < N; ++i) {
+		if (i == 10)
+			longv.set({i}, std::numeric_limits<float>::infinity());
+		else if (i == 70)
+			longv.set({i}, std::numeric_limits<float>::quiet_NaN());
+		else
+			longv.set({i}, (float)i);
+	}
+	NDArray lf = longv.isFinite();
+	NDArray li = longv.isInfinite();
+	NDArray ln = longv.isNaN();
+	for (int i = 0; i < N; ++i) {
+		EXPECT_EQ(lf.get<int>({i}), (i == 10 || i == 70) ? 0 : 1) << i;
+		EXPECT_EQ(li.get<int>({i}), i == 10 ? 1 : 0) << i;
+		EXPECT_EQ(ln.get<int>({i}), i == 70 ? 1 : 0) << i;
+	}
+	EXPECT_TRUE(NDArray::ones({5}).isFinite().all());
+	EXPECT_FALSE(NDArray::ones({5}).isInfinite().any());
+	EXPECT_FALSE(NDArray::ones({5}).isNaN().any());
 }
 
 

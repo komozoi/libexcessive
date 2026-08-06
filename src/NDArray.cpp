@@ -17,6 +17,13 @@
 #include <stdexcept>
 #include <utility>
 
+#if defined(__AVX512F__)
+#include <immintrin.h>
+#define LIBEXCESSIVE_NDARRAY_AVX512 1
+#else
+#define LIBEXCESSIVE_NDARRAY_AVX512 0
+#endif
+
 
 /*
 ** TYPE RULES
@@ -3175,6 +3182,173 @@ NDArray NDArray::piecewise(const NDArray& m0, ArrayOrScalar v0,
                            const NDArray& m1, ArrayOrScalar v1,
                            const NDArray& m2, ArrayOrScalar v2, ArrayOrScalar otherwise) {
 	return Impl::piecewise3(m0, v0, m1, v1, m2, v2, otherwise);
+}
+
+// ---- BINARY bulk fill + float→BINARY classification kernels -----------------
+
+namespace {
+
+/** Set the first nElems bits of a BINARY buffer to 1 (rest of last word 0). */
+void binaryFillOnes(uint64_t* words, size_t nElems) {
+	const size_t fullWords = nElems / 64;
+	for (size_t w = 0; w < fullWords; ++w)
+		words[w] = ~uint64_t(0);
+	const unsigned rem = (unsigned)(nElems % 64);
+	if (rem)
+		words[fullWords] = (rem == 64) ? ~uint64_t(0) : ((uint64_t(1) << rem) - 1);
+}
+
+// IEEE (abs bits): finite ⇔ abs < infBits; inf ⇔ abs == infBits; NaN ⇔ abs > infBits
+enum class FloatClass { Finite, Infinite, NaN };
+
+static inline bool f32_match(uint32_t u, FloatClass cls) {
+	const uint32_t absv = u & 0x7fffffffu;
+	switch (cls) {
+		case FloatClass::Finite: return absv < 0x7f800000u;
+		case FloatClass::Infinite: return absv == 0x7f800000u;
+		case FloatClass::NaN: return absv > 0x7f800000u;
+	}
+	return false;
+}
+
+static inline bool f64_match(uint64_t u, FloatClass cls) {
+	const uint64_t absv = u & 0x7fffffffffffffffull;
+	switch (cls) {
+		case FloatClass::Finite: return absv < 0x7ff0000000000000ull;
+		case FloatClass::Infinite: return absv == 0x7ff0000000000000ull;
+		case FloatClass::NaN: return absv > 0x7ff0000000000000ull;
+	}
+	return false;
+}
+
+/** Classify F32 → BINARY: one output word at a time (64 lanes). Portable path. */
+void classifyF32ToBinary(uint64_t* outWords, const float* src, size_t n, FloatClass cls) {
+	size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512
+	// 64 floats = 4× ZMM → one BINARY word
+	const __m512i expMask = _mm512_set1_epi32((int)0x7fffffff);
+	const __m512i infBits = _mm512_set1_epi32((int)0x7f800000);
+	for (; i + 64 <= n; i += 64) {
+		uint64_t word = 0;
+		for (int chunk = 0; chunk < 4; ++chunk) {
+			__m512 v = _mm512_loadu_ps(src + i + chunk * 16);
+			__m512i bits = _mm512_castps_si512(v);
+			__m512i absv = _mm512_and_si512(bits, expMask);
+			__mmask16 m;
+			switch (cls) {
+				case FloatClass::Finite:
+					m = _mm512_cmplt_epu32_mask(absv, infBits);
+					break;
+				case FloatClass::Infinite:
+					m = _mm512_cmpeq_epi32_mask(absv, infBits);
+					break;
+				case FloatClass::NaN:
+					m = _mm512_cmpgt_epu32_mask(absv, infBits);
+					break;
+			}
+			word |= (uint64_t)m << (chunk * 16);
+		}
+		outWords[i / 64] = word;
+	}
+#endif
+	// Remainder / portable: pack up to 64 bits per word without per-bit RMW
+	for (; i < n; ) {
+		const size_t wordIndex = i / 64;
+		const size_t base = wordIndex * 64;
+		const size_t count = n - base < 64 ? n - base : 64;
+		uint64_t word = 0;
+		for (size_t j = 0; j < count; ++j) {
+			uint32_t u;
+			std::memcpy(&u, src + base + j, sizeof(u));
+			if (f32_match(u, cls))
+				word |= uint64_t(1) << j;
+		}
+		outWords[wordIndex] = word;
+		i = base + count;
+	}
+}
+
+void classifyF64ToBinary(uint64_t* outWords, const double* src, size_t n, FloatClass cls) {
+	size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512
+	// 64 doubles = 8× ZMM → one BINARY word (8 lanes per ZMM)
+	const __m512i absMask = _mm512_set1_epi64((long long)0x7fffffffffffffffll);
+	const __m512i infBits = _mm512_set1_epi64((long long)0x7ff0000000000000ll);
+	for (; i + 64 <= n; i += 64) {
+		uint64_t word = 0;
+		for (int chunk = 0; chunk < 8; ++chunk) {
+			__m512d v = _mm512_loadu_pd(src + i + chunk * 8);
+			__m512i bits = _mm512_castpd_si512(v);
+			__m512i absv = _mm512_and_si512(bits, absMask);
+			__mmask8 m;
+			switch (cls) {
+				case FloatClass::Finite:
+					m = _mm512_cmplt_epu64_mask(absv, infBits);
+					break;
+				case FloatClass::Infinite:
+					m = _mm512_cmpeq_epi64_mask(absv, infBits);
+					break;
+				case FloatClass::NaN:
+					m = _mm512_cmpgt_epu64_mask(absv, infBits);
+					break;
+			}
+			word |= (uint64_t)m << (chunk * 8);
+		}
+		outWords[i / 64] = word;
+	}
+#endif
+	for (; i < n; ) {
+		const size_t wordIndex = i / 64;
+		const size_t base = wordIndex * 64;
+		const size_t count = n - base < 64 ? n - base : 64;
+		uint64_t word = 0;
+		for (size_t j = 0; j < count; ++j) {
+			uint64_t u;
+			std::memcpy(&u, src + base + j, sizeof(u));
+			if (f64_match(u, cls))
+				word |= uint64_t(1) << j;
+		}
+		outWords[wordIndex] = word;
+		i = base + count;
+	}
+}
+
+} // namespace
+
+NDArray NDArray::isFinite() const {
+	const size_t n = numElements();
+	NDArray out(shape, BINARY); // zero-filled
+	if (type == F32) {
+		classifyF32ToBinary(out.uint64, float32, n, FloatClass::Finite);
+	} else if (type == F64) {
+		classifyF64ToBinary(out.uint64, float64, n, FloatClass::Finite);
+	} else {
+		// Integers / BINARY / INT3 / UINT*: always finite — fill words, not bits
+		binaryFillOnes(out.uint64, n);
+	}
+	return out;
+}
+
+NDArray NDArray::isInfinite() const {
+	const size_t n = numElements();
+	NDArray out(shape, BINARY); // already all-zero from ctor
+	if (type == F32)
+		classifyF32ToBinary(out.uint64, float32, n, FloatClass::Infinite);
+	else if (type == F64)
+		classifyF64ToBinary(out.uint64, float64, n, FloatClass::Infinite);
+	// else: never infinite — leave zeros
+	return out;
+}
+
+NDArray NDArray::isNaN() const {
+	const size_t n = numElements();
+	NDArray out(shape, BINARY); // already all-zero from ctor
+	if (type == F32)
+		classifyF32ToBinary(out.uint64, float32, n, FloatClass::NaN);
+	else if (type == F64)
+		classifyF64ToBinary(out.uint64, float64, n, FloatClass::NaN);
+	// else: never NaN — leave zeros
+	return out;
 }
 
 bool NDArray::any() const {

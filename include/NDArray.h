@@ -584,6 +584,25 @@ public:
 	                         const NDArray& m1, ArrayOrScalar v1,
 	                         const NDArray& m2, ArrayOrScalar v2, ArrayOrScalar otherwise);
 
+	/**
+	 * Element-wise finiteness test → BINARY mask (same shape).
+	 * Floats: std::isfinite. Integers / BINARY / INT3: always true.
+	 * Use with any()/all(), e.g. a.isFinite().all().
+	 */
+	NDArray isFinite() const;
+	/**
+	 * Element-wise infinity test → BINARY mask (same shape).
+	 * Floats: std::isinf. Integers / BINARY / INT3: always false.
+	 * Use with any()/all(), e.g. a.isInfinite().any().
+	 */
+	NDArray isInfinite() const;
+	/**
+	 * Element-wise NaN test → BINARY mask (same shape).
+	 * Floats: std::isnan. Integers / BINARY / INT3: always false.
+	 * Use with any()/all(), e.g. a.isNan().any().
+	 */
+	NDArray isNaN() const;
+
 	/** True if any element is non-zero / true. */
 	bool any() const;
 	/** True if every element is non-zero / true. */
