@@ -603,6 +603,39 @@ public:
 	 */
 	NDArray isNaN() const;
 
+	/*
+	** BINARY / mask unary ops
+	**
+	** Word-wise on packed bits (not per-element RMW). Non-BINARY inputs are
+	** first converted by truthiness (non-zero → 1) where noted.
+	*/
+	/** Truthiness → BINARY (share buffer if already BINARY). */
+	NDArray asBinary() const;
+	/** Logical NOT → new BINARY mask. Equivalent to ~(*this) after asBinary(). */
+	NDArray logicalNot() const;
+	/** Same as logicalNot(). */
+	NDArray inverted() const;
+	/** Bitwise / logical NOT on a BINARY view of *this. */
+	NDArray operator~() const;
+	/**
+	 * In-place logical NOT. If not BINARY, replaces storage with asBinary() then
+	 * inverts bits. Returns *this.
+	 */
+	NDArray& invert();
+
+	/*
+	** BINARY / mask binary ops (logical AND / OR / XOR)
+	**
+	** Operands are converted with asBinary() first. Results are BINARY.
+	** Word-wise kernels; last word masked to numElements() bits.
+	*/
+	NDArray operator&(const NDArray& other) const;
+	NDArray operator|(const NDArray& other) const;
+	NDArray operator^(const NDArray& other) const;
+	NDArray& operator&=(const NDArray& other);
+	NDArray& operator|=(const NDArray& other);
+	NDArray& operator^=(const NDArray& other);
+
 	/** True if any element is non-zero / true. */
 	bool any() const;
 	/** True if every element is non-zero / true. */

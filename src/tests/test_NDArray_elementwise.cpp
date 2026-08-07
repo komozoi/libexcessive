@@ -551,6 +551,108 @@ TEST(NDArray_elementwise, IsFinite_IsInfinite) {
 	EXPECT_FALSE(NDArray::ones({5}).isNaN().any());
 }
 
+TEST(NDArray_elementwise, BinaryUniops_Invert) {
+	NDArray m({5}, BINARY);
+	m.set({0}, 1);
+	m.set({1}, 0);
+	m.set({2}, 1);
+	m.set({3}, 1);
+	m.set({4}, 0);
+
+	NDArray inv = ~m;
+	EXPECT_EQ(inv.type, BINARY);
+	EXPECT_EQ(inv.get<int>({0}), 0);
+	EXPECT_EQ(inv.get<int>({1}), 1);
+	EXPECT_EQ(inv.get<int>({2}), 0);
+	EXPECT_EQ(inv.get<int>({3}), 0);
+	EXPECT_EQ(inv.get<int>({4}), 1);
+	// original unchanged
+	EXPECT_EQ(m.get<int>({0}), 1);
+	EXPECT_EQ(m.get<int>({1}), 0);
+
+	NDArray inv2 = m.logicalNot();
+	EXPECT_TRUE((inv2 == inv)); // whole-array equality
+
+	m.invert();
+	EXPECT_EQ(m.get<int>({0}), 0);
+	EXPECT_EQ(m.get<int>({1}), 1);
+
+	// Truthiness then invert on floats
+	NDArray a(ArrayList({0.0f, 2.0f, 0.0f, -1.0f}));
+	NDArray b = a.asBinary();
+	EXPECT_EQ(b.type, BINARY);
+	EXPECT_EQ(b.get<int>({0}), 0);
+	EXPECT_EQ(b.get<int>({1}), 1);
+	EXPECT_EQ(b.get<int>({2}), 0);
+	EXPECT_EQ(b.get<int>({3}), 1);
+	NDArray c = ~a;
+	EXPECT_EQ(c.get<int>({0}), 1);
+	EXPECT_EQ(c.get<int>({1}), 0);
+	EXPECT_EQ(c.get<int>({2}), 1);
+	EXPECT_EQ(c.get<int>({3}), 0);
+
+	// Partial last word: n not multiple of 64
+	NDArray longb({70}, BINARY);
+	for (int i = 0; i < 70; ++i)
+		longb.set({i}, i % 2);
+	NDArray li = ~longb;
+	for (int i = 0; i < 70; ++i)
+		EXPECT_EQ(li.get<int>({i}), (i % 2) ? 0 : 1) << i;
+	// unused high bits of last word must not pollute any()/all()
+	EXPECT_TRUE(longb.any());
+	longb.invert();
+	for (int i = 0; i < 70; ++i)
+		EXPECT_EQ(longb.get<int>({i}), (i % 2) ? 0 : 1) << i;
+}
+
+TEST(NDArray_elementwise, BinaryOps_AndOrXor) {
+	// matches = b >= x style masks
+	NDArray bRaw(ArrayList({0.0f, 1.0f, 2.0f, 3.0f}));
+	NDArray x(ArrayList({1.0f, 1.0f, 1.0f, 1.0f}));
+	NDArray matches = bRaw >= x; // BINARY: 0,1,1,1
+	EXPECT_EQ(matches.type, BINARY);
+	EXPECT_EQ(matches.get<int>({0}), 0);
+	EXPECT_EQ(matches.get<int>({1}), 1);
+
+	NDArray unassigned({4}, BINARY);
+	for (int i = 0; i < 4; ++i)
+		unassigned.set({i}, 1);
+
+	NDArray both = matches & unassigned;
+	EXPECT_EQ(both.get<int>({0}), 0);
+	EXPECT_EQ(both.get<int>({1}), 1);
+	EXPECT_EQ(both.get<int>({2}), 1);
+
+	unassigned &= ~matches;
+	EXPECT_EQ(unassigned.get<int>({0}), 1);
+	EXPECT_EQ(unassigned.get<int>({1}), 0);
+	EXPECT_EQ(unassigned.get<int>({2}), 0);
+	EXPECT_EQ(unassigned.get<int>({3}), 0);
+
+	NDArray a({3}, BINARY);
+	NDArray c({3}, BINARY);
+	a.set({0}, 1); a.set({1}, 1); a.set({2}, 0);
+	c.set({0}, 1); c.set({1}, 0); c.set({2}, 0);
+	NDArray o = a | c;
+	EXPECT_EQ(o.get<int>({0}), 1);
+	EXPECT_EQ(o.get<int>({1}), 1);
+	EXPECT_EQ(o.get<int>({2}), 0);
+	NDArray xorr = a ^ c;
+	EXPECT_EQ(xorr.get<int>({0}), 0);
+	EXPECT_EQ(xorr.get<int>({1}), 1);
+	EXPECT_EQ(xorr.get<int>({2}), 0);
+
+	// where(mask, -1, INT3) stays INT3
+	NDArray out = NDArray::full({4}, INT3, 0);
+	out.set({0}, 0); out.set({1}, 1); out.set({2}, -1); out.set({3}, 1);
+	NDArray result = NDArray::where(matches & NDArray::ones({4}), -1, out);
+	EXPECT_EQ(result.type, INT3);
+	EXPECT_EQ(result.get<int>({0}), 0);  // matches false → out
+	EXPECT_EQ(result.get<int>({1}), -1);
+	EXPECT_EQ(result.get<int>({2}), -1);
+	EXPECT_EQ(result.get<int>({3}), -1);
+}
+
 
 // ============================================================
 // New dtypes: F64, INT32, INT64
