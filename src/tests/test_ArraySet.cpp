@@ -290,3 +290,54 @@ TEST(ArraySetTest, ConstReverseIteration) {
 	}
 	EXPECT_EQ(count, 3);
 }
+
+TEST(ArraySetTest, IsSubsetOfSameType) {
+	ArraySet<int> a;
+	a.add(1);
+	a.add(3);
+	ArraySet<int> b;
+	b.add(1);
+	b.add(2);
+	b.add(3);
+	b.add(4);
+
+	EXPECT_TRUE(a.isSubsetOf(b));
+	EXPECT_FALSE(b.isSubsetOf(a));
+	EXPECT_TRUE(a.isSubsetOf(a));
+	EXPECT_TRUE(ArraySet<int>().isSubsetOf(a));
+	EXPECT_FALSE(a.isSubsetOf(ArraySet<int>()));
+}
+
+TEST(ArraySetTest, IsSupersetOfSameType) {
+	ArraySet<int> a;
+	a.add(1);
+	a.add(2);
+	a.add(3);
+	ArraySet<int> b;
+	b.add(1);
+	b.add(3);
+
+	EXPECT_TRUE(a.isSupersetOf(b));
+	EXPECT_FALSE(b.isSupersetOf(a));
+	EXPECT_TRUE(a.isSupersetOf(a));
+	EXPECT_TRUE(a.isSupersetOf(ArraySet<int>()));
+}
+
+TEST(ArraySetTest, Equality) {
+	ArraySet<int> a;
+	a.add(1);
+	a.add(2);
+	ArraySet<int> b;
+	b.add(2);
+	b.add(1);
+	ArraySet<int> c;
+	c.add(1);
+	c.add(2);
+	c.add(3);
+
+	EXPECT_TRUE(a == b);
+	EXPECT_FALSE(a != b);
+	EXPECT_FALSE(a == c);
+	EXPECT_TRUE(a != c);
+	EXPECT_TRUE(ArraySet<int>() == ArraySet<int>());
+}

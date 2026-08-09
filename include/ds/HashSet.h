@@ -26,6 +26,8 @@
 #include "Set.h"
 #include "hash.h"
 
+#include <initializer_list>
+
 
 template <class K>
 class HashSet;
@@ -234,6 +236,35 @@ public:
 	}
 
 	/**
+	 * @brief Constructs a HashSet from any Container of the same element type.
+	 * @tparam R Element reference/return type of the source container.
+	 * @tparam I1 Iterator type of the source container.
+	 * @tparam I2 Const iterator type of the source container.
+	 * @param elements Source container to copy elements from.
+	 */
+	template<typename R, typename I1, typename I2>
+	HashSet(const Container<K, R, I1, I2>& elements)
+		: capacity((static_cast<unsigned int>(elements.size()) * 7) / 5 + 1), amountUsed(0) {
+		if (capacity == 0)
+			capacity = 1;
+		allocate(capacity);
+		addFrom(elements);
+	}
+
+	/**
+	 * @brief Constructs a HashSet from an initializer list.
+	 * @param initList The initializer list of elements.
+	 */
+	HashSet(std::initializer_list<K> initList)
+		: capacity((static_cast<unsigned int>(initList.size()) * 7) / 5 + 1), amountUsed(0) {
+		if (capacity == 0)
+			capacity = 1;
+		allocate(capacity);
+		for (const K& key : initList)
+			add(key);
+	}
+
+	/**
 	 * @brief Copy constructor.
 	 * @param other The HashSet to copy from.
 	 */
@@ -335,6 +366,38 @@ public:
 		if (idx == -1)
 			return false;
 		return isPresent(idx);
+	}
+
+	// Bring in general Set::isSubsetOf / isSupersetOf for other set types.
+	using Set<K, HashSetIterator<K>, HashSetConstIterator<K>>::isSubsetOf;
+	using Set<K, HashSetIterator<K>, HashSetConstIterator<K>>::isSupersetOf;
+
+	/**
+	 * @brief Efficient subset check against another HashSet.
+	 *
+	 * Uses this set's iteration and the other set's O(1) average contains,
+	 * avoiding cross-type virtual/template indirection.
+	 *
+	 * @param other The HashSet to compare against.
+	 * @return true if every element of this set is in other.
+	 */
+	bool isSubsetOf(const HashSet<K>& other) const {
+		if (amountUsed > other.amountUsed)
+			return false;
+		for (unsigned int i = 0; i < capacity; i++) {
+			if (isPresent(i) && !other.contains(keys[i]))
+				return false;
+		}
+		return true;
+	}
+
+	/**
+	 * @brief Efficient superset check against another HashSet.
+	 * @param other The HashSet to compare against.
+	 * @return true if every element of other is in this set.
+	 */
+	bool isSupersetOf(const HashSet<K>& other) const {
+		return other.isSubsetOf(*this);
 	}
 
 	bool remove(const K& key) override {

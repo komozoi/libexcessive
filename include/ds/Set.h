@@ -66,8 +66,80 @@ public:
 	 */
 	virtual bool remove(const T& key) = 0;
 
+	/**
+	 * @brief Checks whether this set is a subset of another set.
+	 *
+	 * Every element of this set must be present in `other`. Works across
+	 * different Set specializations (e.g. HashSet vs ArraySet).
+	 *
+	 * @tparam OtherIterator Iterator type of the other set.
+	 * @tparam OtherConstIterator Const iterator type of the other set.
+	 * @param other The set to compare against.
+	 * @return true if this set is a subset of other (including when equal).
+	 */
+	template<class OtherIterator, class OtherConstIterator>
+	bool isSubsetOf(const Set<T, OtherIterator, OtherConstIterator>& other) const {
+		if (this->size() > other.size())
+			return false;
+		for (ConstIterator it = this->begin(); it != this->end(); ++it) {
+			if (!other.contains(*it))
+				return false;
+		}
+		return true;
+	}
+
+	/**
+	 * @brief Checks whether this set is a superset of another set.
+	 *
+	 * Every element of `other` must be present in this set. Works across
+	 * different Set specializations (e.g. HashSet vs ArraySet).
+	 *
+	 * @tparam OtherIterator Iterator type of the other set.
+	 * @tparam OtherConstIterator Const iterator type of the other set.
+	 * @param other The set to compare against.
+	 * @return true if this set is a superset of other (including when equal).
+	 */
+	template<class OtherIterator, class OtherConstIterator>
+	bool isSupersetOf(const Set<T, OtherIterator, OtherConstIterator>& other) const {
+		if (this->size() < other.size())
+			return false;
+		for (OtherConstIterator it = other.begin(); it != other.end(); ++it) {
+			if (!this->contains(*it))
+				return false;
+		}
+		return true;
+	}
+
 	virtual ~Set() = default;
 };
+
+
+/**
+ * @brief Equality comparison for sets of the same element type.
+ *
+ * Free function (not a member) so it is only instantiated when used and so
+ * Set specializations with different iterators remain comparable without
+ * requiring a single shared Set base type. Two sets are equal when they
+ * contain exactly the same elements (order is irrelevant).
+ *
+ * Element equality is determined via each set's `contains` implementation
+ * rather than a direct `T::operator==` requirement on this function itself.
+ *
+ * @return true if both sets have the same size and the same elements.
+ */
+template<class T, class It1, class CIt1, class It2, class CIt2>
+bool operator==(const Set<T, It1, CIt1>& a, const Set<T, It2, CIt2>& b) {
+	return a.size() == b.size() && a.isSubsetOf(b);
+}
+
+/**
+ * @brief Inequality comparison for sets of the same element type.
+ * @return true if the sets do not contain exactly the same elements.
+ */
+template<class T, class It1, class CIt1, class It2, class CIt2>
+bool operator!=(const Set<T, It1, CIt1>& a, const Set<T, It2, CIt2>& b) {
+	return !(a == b);
+}
 
 
 #endif //LIBEXCESSIVE_SET_H

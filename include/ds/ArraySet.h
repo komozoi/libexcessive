@@ -159,6 +159,46 @@ public:
 		return search(query, false) != -1;
 	}
 
+	// Bring in general Set::isSubsetOf / isSupersetOf for other set types.
+	using Set<T>::isSubsetOf;
+	using Set<T>::isSupersetOf;
+
+	/**
+	 * @brief Efficient subset check against another ArraySet.
+	 *
+	 * Both sets are sorted, so a linear two-pointer scan is O(n + m)
+	 * instead of O(n log m) binary searches.
+	 *
+	 * @param other The ArraySet to compare against.
+	 * @return true if every element of this set is in other.
+	 */
+	bool isSubsetOf(const ArraySet<T>& other) const {
+		if (length > other.length)
+			return false;
+		int i = 0;
+		int j = 0;
+		while (i < length && j < other.length) {
+			if (elements[i] == other.elements[j]) {
+				i++;
+				j++;
+			} else if (elements[i] < other.elements[j]) {
+				return false;
+			} else {
+				j++;
+			}
+		}
+		return i == length;
+	}
+
+	/**
+	 * @brief Efficient superset check against another ArraySet.
+	 * @param other The ArraySet to compare against.
+	 * @return true if every element of other is in this set.
+	 */
+	bool isSupersetOf(const ArraySet<T>& other) const {
+		return other.isSubsetOf(*this);
+	}
+
 	/**
 	 * @brief Removes and returns the last element.
 	 * @return The removed element.

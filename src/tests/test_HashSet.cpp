@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 #include "ds/HashSet.h"
+#include "ds/ArraySet.h"
 #include "ds/ArrayList.h"
 #include <algorithm>
 #include <string>
@@ -35,6 +36,39 @@ TEST(HashSetTest, ConstructorFromArray) {
 	EXPECT_TRUE(s.contains(1));
 	EXPECT_TRUE(s.contains(2));
 	EXPECT_TRUE(s.contains(3));
+}
+
+TEST(HashSetTest, ConstructorFromContainer) {
+	ArrayList<int> list;
+	list.add(1);
+	list.add(2);
+	list.add(3);
+	list.add(2);
+
+	HashSet<int> s(list);
+	EXPECT_EQ(s.size(), 3);
+	EXPECT_TRUE(s.contains(1));
+	EXPECT_TRUE(s.contains(2));
+	EXPECT_TRUE(s.contains(3));
+
+	ArraySet<int> aset;
+	aset.add(10);
+	aset.add(20);
+	HashSet<int> s2(aset);
+	EXPECT_EQ(s2.size(), 2);
+	EXPECT_TRUE(s2.contains(10));
+	EXPECT_TRUE(s2.contains(20));
+}
+
+TEST(HashSetTest, ConstructorFromInitializerList) {
+	HashSet<int> s{1, 2, 3, 2};
+	EXPECT_EQ(s.size(), 3);
+	EXPECT_TRUE(s.contains(1));
+	EXPECT_TRUE(s.contains(2));
+	EXPECT_TRUE(s.contains(3));
+
+	HashSet<int> empty{};
+	EXPECT_EQ(empty.size(), 0);
 }
 
 TEST(HashSetTest, Add) {
@@ -315,4 +349,79 @@ TEST(HashSetTest, ConstCharKey) {
 	EXPECT_TRUE(set.contains(key2));
 
 	free(key2_buf);
+}
+
+TEST(HashSetTest, IsSubsetOfSameType) {
+	HashSet<int> a(8);
+	a.add(1);
+	a.add(3);
+	HashSet<int> b(8);
+	b.add(1);
+	b.add(2);
+	b.add(3);
+	b.add(4);
+
+	EXPECT_TRUE(a.isSubsetOf(b));
+	EXPECT_FALSE(b.isSubsetOf(a));
+	EXPECT_TRUE(a.isSubsetOf(a));
+	EXPECT_TRUE(HashSet<int>(4).isSubsetOf(a));
+	EXPECT_FALSE(a.isSubsetOf(HashSet<int>(4)));
+}
+
+TEST(HashSetTest, IsSupersetOfSameType) {
+	HashSet<int> a(8);
+	a.add(1);
+	a.add(2);
+	a.add(3);
+	HashSet<int> b(8);
+	b.add(1);
+	b.add(3);
+
+	EXPECT_TRUE(a.isSupersetOf(b));
+	EXPECT_FALSE(b.isSupersetOf(a));
+	EXPECT_TRUE(a.isSupersetOf(a));
+	EXPECT_TRUE(a.isSupersetOf(HashSet<int>(4)));
+}
+
+TEST(HashSetTest, Equality) {
+	HashSet<int> a(8);
+	a.add(1);
+	a.add(2);
+	HashSet<int> b(8);
+	b.add(2);
+	b.add(1);
+	HashSet<int> c(8);
+	c.add(1);
+	c.add(2);
+	c.add(3);
+
+	EXPECT_TRUE(a == b);
+	EXPECT_FALSE(a != b);
+	EXPECT_FALSE(a == c);
+	EXPECT_TRUE(a != c);
+	EXPECT_TRUE(HashSet<int>(4) == HashSet<int>(8));
+}
+
+TEST(HashSetTest, CrossTypeSubsetAndEquality) {
+	HashSet<int> h(8);
+	h.add(1);
+	h.add(2);
+	h.add(3);
+
+	ArraySet<int> a;
+	a.add(1);
+	a.add(3);
+
+	// General Set methods work across HashSet and ArraySet.
+	EXPECT_TRUE(a.isSubsetOf(h));
+	EXPECT_TRUE(h.isSupersetOf(a));
+	EXPECT_FALSE(h.isSubsetOf(a));
+
+	ArraySet<int> a2;
+	a2.add(1);
+	a2.add(2);
+	a2.add(3);
+	EXPECT_TRUE(h == a2);
+	EXPECT_TRUE(a2 == h);
+	EXPECT_FALSE(h == a);
 }
