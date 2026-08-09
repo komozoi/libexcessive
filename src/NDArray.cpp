@@ -3641,19 +3641,278 @@ NDArray& NDArray::operator^=(const NDArray& other) {
 
 bool NDArray::any() const {
 	const size_t n = numElements();
-	for (size_t i = 0; i < n; ++i)
-		if (loadAsDouble(i) != 0.0)
-			return true;
-	return false;
+	if (n == 0)
+		return false;
+
+	switch (type) {
+		case BINARY: {
+			const size_t full = n / 64;
+			for (size_t w = 0; w < full; ++w)
+				if (uint64[w] != 0)
+					return true;
+			const unsigned rem = (unsigned)(n % 64);
+			if (rem && (uint64[full] & ((1ULL << rem) - 1ULL)) != 0)
+				return true;
+			return false;
+		}
+		case INT3: {
+			// Non-zero if any value nibble (low 3 bits) is non-zero
+			const size_t fullWords = n / 16;
+			for (size_t w = 0; w < fullWords; ++w)
+				if ((uint64[w] & int3_kValueMask) != 0)
+					return true;
+			for (size_t i = fullWords * 16; i < n; ++i)
+				if (int3_get(uint64, i) != 0)
+					return true;
+			return false;
+		}
+		case UINT8: {
+			size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512
+			for (; i + 64 <= n; i += 64) {
+				__m512i v = _mm512_loadu_si512(uint8 + i);
+				if (_mm512_cmpneq_epi8_mask(v, _mm512_setzero_si512()) != 0)
+					return true;
+			}
+#endif
+			// 8-byte chunks
+			for (; i + 8 <= n; i += 8) {
+				uint64_t chunk;
+				std::memcpy(&chunk, uint8 + i, 8);
+				if (chunk != 0)
+					return true;
+			}
+			for (; i < n; ++i)
+				if (uint8[i] != 0)
+					return true;
+			return false;
+		}
+		case INT32: {
+			size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512
+			for (; i + 16 <= n; i += 16) {
+				__m512i v = _mm512_loadu_si512(int32 + i);
+				if (_mm512_cmpneq_epi32_mask(v, _mm512_setzero_si512()) != 0)
+					return true;
+			}
+#endif
+			for (; i < n; ++i)
+				if (int32[i] != 0)
+					return true;
+			return false;
+		}
+		case INT64: {
+			size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512
+			for (; i + 8 <= n; i += 8) {
+				__m512i v = _mm512_loadu_si512(int64 + i);
+				if (_mm512_cmpneq_epi64_mask(v, _mm512_setzero_si512()) != 0)
+					return true;
+			}
+#endif
+			for (; i < n; ++i)
+				if (int64[i] != 0)
+					return true;
+			return false;
+		}
+		case F32: {
+			size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512
+			const __m512 z = _mm512_setzero_ps();
+			for (; i + 16 <= n; i += 16) {
+				__m512 v = _mm512_loadu_ps(float32 + i);
+				// NEQ_UQ: NaN counts as non-zero (matches prior semantics)
+				if (_mm512_cmp_ps_mask(v, z, _CMP_NEQ_UQ) != 0)
+					return true;
+			}
+#endif
+			for (; i < n; ++i)
+				if (float32[i] != 0.0f)
+					return true;
+			return false;
+		}
+		case F64: {
+			size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512
+			const __m512d z = _mm512_setzero_pd();
+			for (; i + 8 <= n; i += 8) {
+				__m512d v = _mm512_loadu_pd(float64 + i);
+				if (_mm512_cmp_pd_mask(v, z, _CMP_NEQ_UQ) != 0)
+					return true;
+			}
+#endif
+			for (; i < n; ++i)
+				if (float64[i] != 0.0)
+					return true;
+			return false;
+		}
+		case UINT256: {
+			const uint256_t z(0);
+			for (size_t i = 0; i < n; ++i)
+				if (!(uint256[i] == z))
+					return true;
+			return false;
+		}
+		default:
+			throw std::runtime_error("NDArray::any: invalid type");
+	}
 }
 
 bool NDArray::all() const {
 	const size_t n = numElements();
-	if (n == 0) return true;
-	for (size_t i = 0; i < n; ++i)
-		if (loadAsDouble(i) == 0.0)
-			return false;
-	return true;
+	if (n == 0)
+		return true;
+
+	switch (type) {
+		case BINARY: {
+			const size_t full = n / 64;
+			for (size_t w = 0; w < full; ++w)
+				if (uint64[w] != ~uint64_t(0))
+					return false;
+			const unsigned rem = (unsigned)(n % 64);
+			if (rem) {
+				const uint64_t mask = (1ULL << rem) - 1ULL;
+				if ((uint64[full] & mask) != mask)
+					return false;
+			}
+			return true;
+		}
+		case INT3: {
+			// Every used nibble must have non-zero value bits
+			for (size_t i = 0; i < n; ++i)
+				if (int3_get(uint64, i) == 0)
+					return false;
+			return true;
+		}
+		case UINT8: {
+			size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512
+			for (; i + 64 <= n; i += 64) {
+				__m512i v = _mm512_loadu_si512(uint8 + i);
+				// any zero byte → fail
+				if (_mm512_cmpeq_epi8_mask(v, _mm512_setzero_si512()) != 0)
+					return false;
+			}
+#endif
+			for (; i + 8 <= n; i += 8) {
+				uint64_t chunk;
+				std::memcpy(&chunk, uint8 + i, 8);
+				// has zero byte: (chunk - ones) & ~chunk & 0x8080...
+				const uint64_t ones = 0x0101010101010101ULL;
+				const uint64_t high = 0x8080808080808080ULL;
+				if (((chunk - ones) & ~chunk & high) != 0)
+					return false;
+			}
+			for (; i < n; ++i)
+				if (uint8[i] == 0)
+					return false;
+			return true;
+		}
+		case INT32: {
+			size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512
+			for (; i + 16 <= n; i += 16) {
+				__m512i v = _mm512_loadu_si512(int32 + i);
+				if (_mm512_cmpeq_epi32_mask(v, _mm512_setzero_si512()) != 0)
+					return false;
+			}
+#endif
+			for (; i < n; ++i)
+				if (int32[i] == 0)
+					return false;
+			return true;
+		}
+		case INT64: {
+			size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512
+			for (; i + 8 <= n; i += 8) {
+				__m512i v = _mm512_loadu_si512(int64 + i);
+				if (_mm512_cmpeq_epi64_mask(v, _mm512_setzero_si512()) != 0)
+					return false;
+			}
+#endif
+			for (; i < n; ++i)
+				if (int64[i] == 0)
+					return false;
+			return true;
+		}
+		case F32: {
+			size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512
+			const __m512 z = _mm512_setzero_ps();
+			for (; i + 16 <= n; i += 16) {
+				__m512 v = _mm512_loadu_ps(float32 + i);
+				// EQ_OQ: only true zeros (NaN is not zero → counts as true)
+				if (_mm512_cmp_ps_mask(v, z, _CMP_EQ_OQ) != 0)
+					return false;
+			}
+#endif
+			for (; i < n; ++i)
+				if (float32[i] == 0.0f)
+					return false;
+			return true;
+		}
+		case F64: {
+			size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512
+			const __m512d z = _mm512_setzero_pd();
+			for (; i + 8 <= n; i += 8) {
+				__m512d v = _mm512_loadu_pd(float64 + i);
+				if (_mm512_cmp_pd_mask(v, z, _CMP_EQ_OQ) != 0)
+					return false;
+			}
+#endif
+			for (; i < n; ++i)
+				if (float64[i] == 0.0)
+					return false;
+			return true;
+		}
+		case UINT256: {
+			const uint256_t z(0);
+			for (size_t i = 0; i < n; ++i)
+				if (uint256[i] == z)
+					return false;
+			return true;
+		}
+		default:
+			throw std::runtime_error("NDArray::all: invalid type");
+	}
+}
+
+int NDArray::countNonzero() const {
+	int total = 0;
+
+	if (type == BINARY) {
+		for (size_t i = 0; i < memorySize / 8; i++)
+			total += _popcnt64(uint64[i]);
+		return total;
+	} else if (type == INT3 /* || type == INT4 || type == UINT3 || type == UINT4*/) {
+		for (size_t i = 0; i < memorySize / 8; i++) {
+			uint64_t tmp = uint64[i];
+			tmp = (tmp & 0x3333333333333333) | ((tmp >> 2) & 0x3333333333333333);
+			tmp = (tmp & 0x1111111111111111) | ((tmp >> 1) & 0x1111111111111111);
+			total += _popcnt64(tmp);
+		}
+	} else if (type == UINT8)
+		for (size_t i = 0; i < memorySize; i++)
+			total += uint8[i] != 0 ? 1 : 0;
+	else if (type == INT32)
+		for (size_t i = 0; i < memorySize / 4; i++)
+			total += int32[i] != 0 ? 1 : 0;
+	else if (type == INT64)
+		for (size_t i = 0; i < memorySize / 8; i++)
+			total += int64[i] != 0 ? 1 : 0;
+	else if (type == F32)
+		for (size_t i = 0; i < memorySize / 4; i++)
+			total += float32[i] != 0 ? 1 : 0;
+	else if (type == F64)
+		for (size_t i = 0; i < memorySize / 8; i++)
+			total += float64[i] != 0 ? 1 : 0;
+	else if (type == UINT256)
+		for (size_t i = 0; i < memorySize / sizeof(uint256_t); i++)
+			total += uint256[i].isZero() ? 0 : 1;
+
+	return total;
 }
 
 NDArray NDArray::sum() const { return Impl::reduceAll(*this, ReduceOp::Sum); }

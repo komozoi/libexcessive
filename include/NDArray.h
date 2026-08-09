@@ -640,6 +640,8 @@ public:
 	bool any() const;
 	/** True if every element is non-zero / true. */
 	bool all() const;
+	/** counts the number of nonzero elements */
+	int countNonzero() const;
 
 	/*
 	** Reductions

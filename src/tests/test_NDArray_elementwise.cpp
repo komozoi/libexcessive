@@ -485,6 +485,37 @@ TEST(NDArray_elementwise, Any_All) {
 	b.set({1}, 0);
 	EXPECT_FALSE(b.all());
 	EXPECT_TRUE(b.any());
+
+	// Wide BINARY (partial last word)
+	NDArray bw = NDArray::ones({70}); // INT3 ones
+	EXPECT_TRUE(bw.any());
+	EXPECT_TRUE(bw.all());
+	NDArray bb({70}, BINARY);
+	for (int i = 0; i < 70; ++i)
+		bb.set({i}, 1);
+	EXPECT_TRUE(bb.all());
+	EXPECT_TRUE(bb.any());
+	bb.set({65}, 0);
+	EXPECT_FALSE(bb.all());
+	EXPECT_TRUE(bb.any());
+
+	// Large F32: only last non-zero
+	NDArray big({128}, F32);
+	EXPECT_FALSE(big.any());
+	EXPECT_FALSE(big.all());
+	big.set({127}, 1.0f);
+	EXPECT_TRUE(big.any());
+	EXPECT_FALSE(big.all());
+	for (int i = 0; i < 128; ++i)
+		big.set({i}, 1.0f);
+	EXPECT_TRUE(big.all());
+	big.set({50}, 0.0f);
+	EXPECT_FALSE(big.all());
+
+	// NaN is truthy for any/all
+	NDArray nan1(ArrayList({std::numeric_limits<float>::quiet_NaN()}));
+	EXPECT_TRUE(nan1.any());
+	EXPECT_TRUE(nan1.all());
 }
 
 TEST(NDArray_elementwise, IsFinite_IsInfinite) {
