@@ -829,17 +829,15 @@ private:
 		} else {
 			switch (type) {
 				case BINARY:
-					if (value > 0)
+					// Use contextual conversion to bool (works for bool/int/float without
+					// -Wbool-compare on `value > 0` when T is bool).
+					if (static_cast<bool>(value))
 						uint64[offset >> 6] |= 1ULL << (offset & 63);
 					else
 						uint64[offset >> 6] &= ~(1ULL << (offset & 63));
 					break;
 				case INT3: {
-					int iv;
-					if constexpr (std::is_floating_point_v<T>)
-						iv = (int)value;
-					else
-						iv = (int)value;
+					int iv = static_cast<int>(value);
 					uint8_t p = (uint8_t)(iv & 7);
 					const size_t w = offset / 16;
 					const unsigned sh = (unsigned)((offset % 16) * 4);
@@ -847,25 +845,30 @@ private:
 					break;
 				}
 				case UINT8:
-					uint8[offset] = (uint8_t)value;
+					uint8[offset] = static_cast<uint8_t>(value);
 					break;
 				case INT32:
-					int32[offset] = (int32_t)value;
+					int32[offset] = static_cast<int32_t>(value);
 					break;
 				case INT64:
-					int64[offset] = (int64_t)value;
+					int64[offset] = static_cast<int64_t>(value);
 					break;
 				case F32:
-					float32[offset] = (float)value;
+					float32[offset] = static_cast<float>(value);
 					break;
 				case F64:
-					float64[offset] = (double)value;
+					float64[offset] = static_cast<double>(value);
 					break;
 				case UINT256:
-					if constexpr (std::is_integral_v<T>)
+					// bool is integral but must not use `value < 0` (-Werror=bool-compare).
+					if constexpr (std::is_same_v<T, bool>)
+						uint256[offset] = value ? uint256_t(1) : uint256_t(0);
+					else if constexpr (std::is_integral_v<T> && std::is_signed_v<T>)
 						uint256[offset] = value < 0
 							? uint256_t((int)value)
 							: uint256_t((uint64_t)value);
+					else if constexpr (std::is_integral_v<T>)
+						uint256[offset] = uint256_t((uint64_t)value);
 					else if constexpr (std::is_floating_point_v<T>)
 						uint256[offset] = uint256_t((double)value);
 					else
@@ -1007,13 +1010,6 @@ T NDArrayView::getFlat(size_t flat) const {
 	if (flat >= numElements())
 		throw std::out_of_range("NDArrayView::getFlat - index out of range");
 	// Map dense flat index of *view shape* to buffer element offset via multi-index
-	ArrayList<int> idx;
-	size_t rem = flat;
-	// build multi-index row-major
-	size_t prod = 1;
-	for (int d = shape.size() - 1; d >= 0; --d)
-		prod *= (size_t)(shape.get(d) > 0 ? shape.get(d) : 1);
-	// simpler: iterative divide
 	ArrayList<int> coords;
 	for (int i = 0; i < shape.size(); ++i)
 		coords.add(0);

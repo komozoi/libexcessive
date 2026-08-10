@@ -73,5 +73,16 @@ if(LIBEXCESSIVE_BUILD_TESTS)
 
         add_executable(libexcessive_tests src/tests/testmain.cpp ${TEST_SOURCES})
         target_link_libraries(libexcessive_tests PRIVATE LibExcessive::excessive ${GTEST_LIBRARIES})
+        # Same diagnostics as the library so consumer -Werror issues (e.g. bool set) fail here.
+        target_compile_options(libexcessive_tests PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang>:
+                -Wall
+                -Wextra
+                -Werror
+                -Wno-format
+                -Wno-unused-parameter
+                -Wno-unused-result
+                >
+        )
     endif()
 endif()

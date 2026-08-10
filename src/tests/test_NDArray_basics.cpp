@@ -390,3 +390,34 @@ TEST(NDArray_basics, DifferentData) {
     b.set({0}, 2.0f);
     EXPECT_FALSE(a == b);
 }
+
+
+// ============================================================
+// bool set (instantiates setAtOffset<bool> — must compile under -Werror)
+// ============================================================
+
+TEST(NDArray_basics, SetBool_OnBinaryAndIntTypes) {
+	// Beta report: setAtOffset<bool> hit `value < 0` under UINT256 branch
+	// (-Werror=bool-compare) even when the runtime type is BINARY.
+	NDArray b({4}, BINARY);
+	b.set({0}, true);
+	b.set({1}, false);
+	b.set({2}, true);
+	b.set({3}, false);
+	EXPECT_EQ(b.get<int>({0}), 1);
+	EXPECT_EQ(b.get<int>({1}), 0);
+	EXPECT_EQ(b.get<int>({2}), 1);
+	EXPECT_EQ(b.get<int>({3}), 0);
+
+	NDArray i({2}, INT32);
+	i.set({0}, true);
+	i.set({1}, false);
+	EXPECT_EQ(i.get<int>({0}), 1);
+	EXPECT_EQ(i.get<int>({1}), 0);
+
+	NDArray u({2}, UINT256);
+	u.set({0}, true);
+	u.set({1}, false);
+	EXPECT_EQ(u.get<uint256_t>({0}), uint256_t(1));
+	EXPECT_EQ(u.get<uint256_t>({1}), uint256_t(0));
+}
