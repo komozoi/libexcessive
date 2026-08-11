@@ -777,6 +777,164 @@ TEST(NDArray_elementwise, LogicalAndOr_InPlace_Boolean) {
 	EXPECT_EQ(z.get<int>({1}), 0);
 }
 
+TEST(NDArray_elementwise, LogicalAndOr_ResultTypeAlwaysBinary) {
+	// BINARY ⊙ non-BINARY → stays BINARY; other unchanged
+	NDArray mask({3}, BINARY);
+	mask.set({0}, 1);
+	mask.set({1}, 0);
+	mask.set({2}, 1);
+
+	NDArray i3({3}, INT3);
+	i3.set({0}, 2);
+	i3.set({1}, 1);
+	i3.set({2}, 0);
+	NDArray u8({3}, UINT8);
+	u8.set({0}, 0);
+	u8.set({1}, 9);
+	u8.set({2}, 1);
+	NDArray f32(ArrayList({0.0f, 1.5f, 0.0f}));
+
+	mask.logicalAnd(i3);
+	EXPECT_EQ(mask.type, BINARY);
+	EXPECT_EQ(i3.type, INT3); // rhs not mutated
+	EXPECT_EQ(mask.get<int>({0}), 1); // 1 && truthy(2)
+	EXPECT_EQ(mask.get<int>({1}), 0); // 0 && 1
+	EXPECT_EQ(mask.get<int>({2}), 0); // 1 && 0
+
+	NDArray mask2({3}, BINARY);
+	mask2.set({0}, 1);
+	mask2.set({1}, 1);
+	mask2.set({2}, 0);
+	mask2.logicalOr(u8);
+	EXPECT_EQ(mask2.type, BINARY);
+	EXPECT_EQ(u8.type, UINT8);
+	EXPECT_EQ(mask2.get<int>({0}), 1);
+	EXPECT_EQ(mask2.get<int>({1}), 1);
+	EXPECT_EQ(mask2.get<int>({2}), 1); // 0 || truthy(1)
+
+	NDArray mask3({3}, BINARY);
+	mask3.set({0}, 1);
+	mask3.set({1}, 0);
+	mask3.set({2}, 1);
+	mask3.logicalAnd(f32);
+	EXPECT_EQ(mask3.type, BINARY);
+	EXPECT_EQ(f32.type, F32);
+	EXPECT_EQ(mask3.get<int>({0}), 0); // 1 && 0.0
+	EXPECT_EQ(mask3.get<int>({1}), 0); // 0 && 1.5
+	EXPECT_EQ(mask3.get<int>({2}), 0); // 1 && 0.0
+
+	// non-BINARY ⊙ BINARY → *this converts to BINARY; BINARY rhs unchanged
+	NDArray a3({3}, INT3);
+	a3.set({0}, 2);
+	a3.set({1}, 0);
+	a3.set({2}, -1);
+	NDArray bMask({3}, BINARY);
+	bMask.set({0}, 1);
+	bMask.set({1}, 1);
+	bMask.set({2}, 0);
+	a3.logicalAnd(bMask);
+	EXPECT_EQ(a3.type, BINARY);
+	EXPECT_EQ(bMask.type, BINARY);
+	EXPECT_EQ(a3.get<int>({0}), 1);
+	EXPECT_EQ(a3.get<int>({1}), 0);
+	EXPECT_EQ(a3.get<int>({2}), 0);
+	// bMask still original
+	EXPECT_EQ(bMask.get<int>({0}), 1);
+	EXPECT_EQ(bMask.get<int>({1}), 1);
+	EXPECT_EQ(bMask.get<int>({2}), 0);
+
+	NDArray af(ArrayList({0.0f, 2.0f, -3.0f}));
+	NDArray bm({3}, BINARY);
+	bm.set({0}, 0);
+	bm.set({1}, 1);
+	bm.set({2}, 1);
+	af.logicalOr(bm);
+	EXPECT_EQ(af.type, BINARY);
+	EXPECT_EQ(bm.type, BINARY);
+	EXPECT_EQ(af.get<int>({0}), 0); // false || false
+	EXPECT_EQ(af.get<int>({1}), 1); // true || true
+	EXPECT_EQ(af.get<int>({2}), 1); // true || true
+
+	NDArray au({3}, UINT8);
+	au.set({0}, 5);
+	au.set({1}, 0);
+	au.set({2}, 1);
+	NDArray bm2({3}, BINARY);
+	bm2.set({0}, 0);
+	bm2.set({1}, 1);
+	bm2.set({2}, 1);
+	au.logicalAnd(bm2);
+	EXPECT_EQ(au.type, BINARY);
+	EXPECT_EQ(au.get<int>({0}), 0);
+	EXPECT_EQ(au.get<int>({1}), 0);
+	EXPECT_EQ(au.get<int>({2}), 1);
+}
+
+TEST(NDArray_elementwise, LogicalXor_InPlace_Boolean) {
+	// Multi-bit truthy XOR
+	NDArray a({4}, INT3);
+	a.set({0}, 2);  // true
+	a.set({1}, 0);  // false
+	a.set({2}, 1);  // true
+	a.set({3}, -1); // true
+	NDArray b({4}, INT3);
+	b.set({0}, 1);  // true  → true^true = false
+	b.set({1}, 1);  // true  → false^true = true
+	b.set({2}, 0);  // false → true^false = true
+	b.set({3}, 0);  // false → true^false = true
+	a.logicalXor(b);
+	EXPECT_EQ(a.type, BINARY);
+	EXPECT_EQ(a.get<int>({0}), 0);
+	EXPECT_EQ(a.get<int>({1}), 1);
+	EXPECT_EQ(a.get<int>({2}), 1);
+	EXPECT_EQ(a.get<int>({3}), 1);
+
+	// BINARY ⊙ INT3 stays BINARY; INT3 ⊙ BINARY becomes BINARY
+	NDArray m({3}, BINARY);
+	m.set({0}, 1);
+	m.set({1}, 0);
+	m.set({2}, 1);
+	NDArray i3({3}, INT3);
+	i3.set({0}, 2);
+	i3.set({1}, 0);
+	i3.set({2}, 0);
+	m.logicalXor(i3);
+	EXPECT_EQ(m.type, BINARY);
+	EXPECT_EQ(i3.type, INT3);
+	EXPECT_EQ(m.get<int>({0}), 0); // 1 ^ 1
+	EXPECT_EQ(m.get<int>({1}), 0); // 0 ^ 0
+	EXPECT_EQ(m.get<int>({2}), 1); // 1 ^ 0
+
+	NDArray u({3}, UINT8);
+	u.set({0}, 5);
+	u.set({1}, 0);
+	u.set({2}, 1);
+	NDArray bm({3}, BINARY);
+	bm.set({0}, 1);
+	bm.set({1}, 1);
+	bm.set({2}, 0);
+	u.logicalXor(bm);
+	EXPECT_EQ(u.type, BINARY);
+	EXPECT_EQ(u.get<int>({0}), 0); // 1 ^ 1
+	EXPECT_EQ(u.get<int>({1}), 1); // 0 ^ 1
+	EXPECT_EQ(u.get<int>({2}), 1); // 1 ^ 0
+
+	// Scalar: XOR true ≡ invert; XOR false ≡ normalize only
+	NDArray e({3}, INT3);
+	e.set({0}, 2);
+	e.set({1}, 0);
+	e.set({2}, 1);
+	e.logicalXor(true);
+	EXPECT_EQ(e.type, BINARY);
+	EXPECT_EQ(e.get<int>({0}), 0);
+	EXPECT_EQ(e.get<int>({1}), 1);
+	EXPECT_EQ(e.get<int>({2}), 0);
+	e.logicalXor(false);
+	EXPECT_EQ(e.get<int>({0}), 0);
+	EXPECT_EQ(e.get<int>({1}), 1);
+	EXPECT_EQ(e.get<int>({2}), 0);
+}
+
 
 // ============================================================
 // New dtypes: F64, INT32, INT64

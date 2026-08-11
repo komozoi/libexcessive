@@ -636,19 +636,27 @@ public:
 	** && || ~ ! are out-of-place; &&/|| go through truthiness like logicalAnd/Or.
 	*/
 	/**
-	 * In-place boolean AND. *this becomes BINARY; each element is
+	 * In-place boolean AND. Always leaves *this as BINARY (even if it started as
+	 * INT3/UINT8/F32/…); other is only read (truthiness). Element =
 	 * truthy(*this) && truthy(other). Returns *this.
 	 */
 	NDArray& logicalAnd(const NDArray& other);
-	/** In-place boolean AND with a scalar (false clears all; true normalizes to mask). */
+	/** In-place boolean AND with a scalar (false clears all; true normalizes to BINARY). */
 	NDArray& logicalAnd(bool other);
 	/**
-	 * In-place boolean OR. *this becomes BINARY; each element is
-	 * truthy(*this) || truthy(other). Returns *this.
+	 * In-place boolean OR. Always leaves *this as BINARY; other is only read.
+	 * Element = truthy(*this) || truthy(other). Returns *this.
 	 */
 	NDArray& logicalOr(const NDArray& other);
-	/** In-place boolean OR with a scalar (true fills ones; false normalizes to mask). */
+	/** In-place boolean OR with a scalar (true fills ones; false normalizes to BINARY). */
 	NDArray& logicalOr(bool other);
+	/**
+	 * In-place boolean XOR. Always leaves *this as BINARY; other is only read.
+	 * Element = truthy(*this) != truthy(other). Returns *this.
+	 */
+	NDArray& logicalXor(const NDArray& other);
+	/** In-place boolean XOR with a scalar (true inverts mask; false normalizes to BINARY). */
+	NDArray& logicalXor(bool other);
 
 	NDArray operator&(const NDArray& other) const;
 	NDArray operator|(const NDArray& other) const;

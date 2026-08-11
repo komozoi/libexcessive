@@ -3687,6 +3687,36 @@ NDArray& NDArray::logicalOr(bool other) {
 	return *this;
 }
 
+NDArray& NDArray::logicalXor(const NDArray& other) {
+	requireSameShape(*this, other);
+	{
+		NDArray self = asBinary();
+		stealFrom(self);
+	}
+	if (other.type == BINARY)
+		ndBinaryBitOpInPlace(uint64, other.uint64, numElements(), NdBinXor);
+	else {
+		NDArray rhs = other.asBinary();
+		ndBinaryBitOpInPlace(uint64, rhs.uint64, numElements(), NdBinXor);
+	}
+	return *this;
+}
+
+NDArray& NDArray::logicalXor(bool other) {
+	if (other) {
+		// x XOR true ≡ NOT x (after truthiness)
+		NDArray self = asBinary();
+		stealFrom(self);
+		ensureWritable();
+		binaryInvertInPlace(uint64, numElements());
+		return *this;
+	}
+	// x XOR false ≡ x (normalized)
+	NDArray self = asBinary();
+	stealFrom(self);
+	return *this;
+}
+
 // Out-of-place boolean &&/||: always truthiness-normalize both sides (not raw bits).
 NDArray NDArray::operator&&(const NDArray& other) const {
 	requireSameShape(*this, other);
