@@ -3199,12 +3199,10 @@ NDArray NDArray::piecewise(const NDArray& m0, ArrayOrScalar v0,
 	return Impl::piecewise3(m0, v0, m1, v1, m2, v2, otherwise);
 }
 
-// ---- BINARY bulk fill + float→BINARY classification kernels -----------------
-
-namespace {
+// ---- BINARY bulk fill + float→BINARY classification kernels (file-static) -----
 
 /** Set the first nElems bits of a BINARY buffer to 1 (rest of last word 0). */
-void binaryFillOnes(uint64_t* words, size_t nElems) {
+static void binaryFillOnes(uint64_t* words, size_t nElems) {
 	const size_t fullWords = nElems / 64;
 	for (size_t w = 0; w < fullWords; ++w)
 		words[w] = ~uint64_t(0);
@@ -3214,7 +3212,7 @@ void binaryFillOnes(uint64_t* words, size_t nElems) {
 }
 
 /** Invert first nElems bits in place; clear unused high bits of last word. */
-void binaryInvertInPlace(uint64_t* words, size_t nElems) {
+static void binaryInvertInPlace(uint64_t* words, size_t nElems) {
 	const size_t fullWords = nElems / 64;
 	for (size_t w = 0; w < fullWords; ++w)
 		words[w] = ~words[w];
@@ -3224,7 +3222,7 @@ void binaryInvertInPlace(uint64_t* words, size_t nElems) {
 }
 
 /** Non-zero test → BINARY, word-packed (F32). */
-void nonzeroF32ToBinary(uint64_t* outWords, const float* src, size_t n) {
+static void nonzeroF32ToBinary(uint64_t* outWords, const float* src, size_t n) {
 	size_t i = 0;
 #if LIBEXCESSIVE_NDARRAY_AVX512
 	const __m512 z = _mm512_setzero_ps();
@@ -3254,7 +3252,7 @@ void nonzeroF32ToBinary(uint64_t* outWords, const float* src, size_t n) {
 	}
 }
 
-void nonzeroF64ToBinary(uint64_t* outWords, const double* src, size_t n) {
+static void nonzeroF64ToBinary(uint64_t* outWords, const double* src, size_t n) {
 	size_t i = 0;
 #if LIBEXCESSIVE_NDARRAY_AVX512
 	const __m512d z = _mm512_setzero_pd();
@@ -3283,7 +3281,7 @@ void nonzeroF64ToBinary(uint64_t* outWords, const double* src, size_t n) {
 }
 
 template <typename T>
-void nonzeroIntegralToBinary(uint64_t* outWords, const T* src, size_t n) {
+static void nonzeroIntegralToBinary(uint64_t* outWords, const T* src, size_t n) {
 	size_t i = 0;
 	for (; i < n; ) {
 		const size_t wordIndex = i / 64;
@@ -3299,7 +3297,7 @@ void nonzeroIntegralToBinary(uint64_t* outWords, const T* src, size_t n) {
 	}
 }
 
-void nonzeroInt3ToBinary(uint64_t* outWords, const uint64_t* srcWords, size_t n) {
+static void nonzeroInt3ToBinary(uint64_t* outWords, const uint64_t* srcWords, size_t n) {
 	for (size_t i = 0; i < n; ) {
 		const size_t wordIndex = i / 64;
 		const size_t base = wordIndex * 64;
@@ -3314,7 +3312,7 @@ void nonzeroInt3ToBinary(uint64_t* outWords, const uint64_t* srcWords, size_t n)
 	}
 }
 
-void nonzeroU256ToBinary(uint64_t* outWords, const uint256_t* src, size_t n) {
+static void nonzeroU256ToBinary(uint64_t* outWords, const uint256_t* src, size_t n) {
 	const uint256_t z(0);
 	for (size_t i = 0; i < n; ) {
 		const size_t wordIndex = i / 64;
@@ -3354,7 +3352,7 @@ static inline bool f64_match(uint64_t u, FloatClass cls) {
 }
 
 /** Classify F32 → BINARY: one output word at a time (64 lanes). Portable path. */
-void classifyF32ToBinary(uint64_t* outWords, const float* src, size_t n, FloatClass cls) {
+static void classifyF32ToBinary(uint64_t* outWords, const float* src, size_t n, FloatClass cls) {
 	size_t i = 0;
 #if LIBEXCESSIVE_NDARRAY_AVX512
 	// 64 floats = 4× ZMM → one BINARY word
@@ -3400,7 +3398,7 @@ void classifyF32ToBinary(uint64_t* outWords, const float* src, size_t n, FloatCl
 	}
 }
 
-void classifyF64ToBinary(uint64_t* outWords, const double* src, size_t n, FloatClass cls) {
+static void classifyF64ToBinary(uint64_t* outWords, const double* src, size_t n, FloatClass cls) {
 	size_t i = 0;
 #if LIBEXCESSIVE_NDARRAY_AVX512
 	// 64 doubles = 8× ZMM → one BINARY word (8 lanes per ZMM)
@@ -3445,7 +3443,6 @@ void classifyF64ToBinary(uint64_t* outWords, const double* src, size_t n, FloatC
 	}
 }
 
-} // namespace
 
 NDArray NDArray::isFinite() const {
 	const size_t n = numElements();
@@ -3547,60 +3544,172 @@ NDArray& NDArray::invert() {
 	return *this;
 }
 
-namespace {
 
-enum class BinaryBitOp { And, Or, Xor };
+// BINARY mask word ops (file-static; no namespaces)
+enum NdBinOp { NdBinAnd = 0, NdBinOr = 1, NdBinXor = 2 };
 
-void binaryBitOpInPlace(uint64_t* dst, const uint64_t* src, size_t nElems, BinaryBitOp op) {
+static void ndBinaryBitOpInPlace(uint64_t* dst, const uint64_t* src, size_t nElems, NdBinOp op) {
 	const size_t fullWords = nElems / 64;
 	for (size_t w = 0; w < fullWords; ++w) {
-		switch (op) {
-			case BinaryBitOp::And: dst[w] &= src[w]; break;
-			case BinaryBitOp::Or:  dst[w] |= src[w]; break;
-			case BinaryBitOp::Xor: dst[w] ^= src[w]; break;
-		}
+		if (op == NdBinAnd) dst[w] &= src[w];
+		else if (op == NdBinOr) dst[w] |= src[w];
+		else dst[w] ^= src[w];
 	}
 	const unsigned rem = (unsigned)(nElems % 64);
 	if (rem) {
 		const uint64_t mask = (1ULL << rem) - 1ULL;
 		uint64_t a = dst[fullWords] & mask;
 		uint64_t b = src[fullWords] & mask;
-		switch (op) {
-			case BinaryBitOp::And: a &= b; break;
-			case BinaryBitOp::Or:  a |= b; break;
-			case BinaryBitOp::Xor: a ^= b; break;
-		}
+		if (op == NdBinAnd) a &= b;
+		else if (op == NdBinOr) a |= b;
+		else a ^= b;
 		dst[fullWords] = a & mask;
 	}
 }
 
-} // namespace
+/** dst[w] = a[w] OP b[w] for first nElems bits (both already BINARY). */
+static void ndBinaryBitOpWords(uint64_t* dst, const uint64_t* a, const uint64_t* b, size_t nElems, NdBinOp op) {
+	const size_t fullWords = nElems / 64;
+	for (size_t w = 0; w < fullWords; ++w) {
+		if (op == NdBinAnd) dst[w] = a[w] & b[w];
+		else if (op == NdBinOr) dst[w] = a[w] | b[w];
+		else dst[w] = a[w] ^ b[w];
+	}
+	const unsigned rem = (unsigned)(nElems % 64);
+	if (rem) {
+		const uint64_t mask = (1ULL << rem) - 1ULL;
+		uint64_t r;
+		if (op == NdBinAnd) r = a[fullWords] & b[fullWords];
+		else if (op == NdBinOr) r = a[fullWords] | b[fullWords];
+		else r = a[fullWords] ^ b[fullWords];
+		dst[fullWords] = r & mask;
+	}
+}
 
 NDArray NDArray::operator&(const NDArray& other) const {
 	requireSameShape(*this, other);
+	const size_t n = numElements();
+	if (type == BINARY && other.type == BINARY) {
+		NDArray out(shape, BINARY);
+		ndBinaryBitOpWords(out.uint64, uint64, other.uint64, n, NdBinAnd);
+		return out;
+	}
 	NDArray left = asBinary();
 	NDArray right = other.asBinary();
 	left.ensureWritable();
-	binaryBitOpInPlace(left.uint64, right.uint64, left.numElements(), BinaryBitOp::And);
+	ndBinaryBitOpInPlace(left.uint64, right.uint64, n, NdBinAnd);
 	return left;
 }
 
 NDArray NDArray::operator|(const NDArray& other) const {
 	requireSameShape(*this, other);
+	const size_t n = numElements();
+	if (type == BINARY && other.type == BINARY) {
+		NDArray out(shape, BINARY);
+		ndBinaryBitOpWords(out.uint64, uint64, other.uint64, n, NdBinOr);
+		return out;
+	}
 	NDArray left = asBinary();
 	NDArray right = other.asBinary();
 	left.ensureWritable();
-	binaryBitOpInPlace(left.uint64, right.uint64, left.numElements(), BinaryBitOp::Or);
+	ndBinaryBitOpInPlace(left.uint64, right.uint64, n, NdBinOr);
 	return left;
 }
 
 NDArray NDArray::operator^(const NDArray& other) const {
 	requireSameShape(*this, other);
+	const size_t n = numElements();
+	if (type == BINARY && other.type == BINARY) {
+		NDArray out(shape, BINARY);
+		ndBinaryBitOpWords(out.uint64, uint64, other.uint64, n, NdBinXor);
+		return out;
+	}
 	NDArray left = asBinary();
 	NDArray right = other.asBinary();
 	left.ensureWritable();
-	binaryBitOpInPlace(left.uint64, right.uint64, left.numElements(), BinaryBitOp::Xor);
+	ndBinaryBitOpInPlace(left.uint64, right.uint64, n, NdBinXor);
 	return left;
+}
+
+NDArray& NDArray::logicalAnd(const NDArray& other) {
+	requireSameShape(*this, other);
+	// Always re-normalize *this by truthiness (INT3 value 2 → bit 1, not multi-bit).
+	{
+		NDArray self = asBinary();
+		stealFrom(self);
+	}
+	if (other.type == BINARY)
+		ndBinaryBitOpInPlace(uint64, other.uint64, numElements(), NdBinAnd);
+	else {
+		NDArray rhs = other.asBinary();
+		ndBinaryBitOpInPlace(uint64, rhs.uint64, numElements(), NdBinAnd);
+	}
+	return *this;
+}
+
+NDArray& NDArray::logicalAnd(bool other) {
+	if (!other) {
+		// false && x → all false; allocate clean BINARY zeros
+		NDArray z(shape, BINARY);
+		stealFrom(z);
+		return *this;
+	}
+	// true && x → truthiness of *this
+	NDArray self = asBinary();
+	stealFrom(self);
+	return *this;
+}
+
+NDArray& NDArray::logicalOr(const NDArray& other) {
+	requireSameShape(*this, other);
+	{
+		NDArray self = asBinary();
+		stealFrom(self);
+	}
+	if (other.type == BINARY)
+		ndBinaryBitOpInPlace(uint64, other.uint64, numElements(), NdBinOr);
+	else {
+		NDArray rhs = other.asBinary();
+		ndBinaryBitOpInPlace(uint64, rhs.uint64, numElements(), NdBinOr);
+	}
+	return *this;
+}
+
+NDArray& NDArray::logicalOr(bool other) {
+	if (other) {
+		NDArray ones(shape, BINARY);
+		binaryFillOnes(ones.uint64, ones.numElements());
+		stealFrom(ones);
+		return *this;
+	}
+	NDArray self = asBinary();
+	stealFrom(self);
+	return *this;
+}
+
+// Out-of-place boolean &&/||: always truthiness-normalize both sides (not raw bits).
+NDArray NDArray::operator&&(const NDArray& other) const {
+	requireSameShape(*this, other);
+	const size_t n = numElements();
+	NDArray left = asBinary();
+	NDArray right = other.asBinary();
+	left.ensureWritable();
+	ndBinaryBitOpInPlace(left.uint64, right.uint64, n, NdBinAnd);
+	return left;
+}
+
+NDArray NDArray::operator||(const NDArray& other) const {
+	requireSameShape(*this, other);
+	const size_t n = numElements();
+	NDArray left = asBinary();
+	NDArray right = other.asBinary();
+	left.ensureWritable();
+	ndBinaryBitOpInPlace(left.uint64, right.uint64, n, NdBinOr);
+	return left;
+}
+
+NDArray NDArray::operator!() const {
+	return logicalNot();
 }
 
 NDArray& NDArray::operator&=(const NDArray& other) {
@@ -3608,10 +3717,15 @@ NDArray& NDArray::operator&=(const NDArray& other) {
 	if (type != BINARY) {
 		NDArray self = asBinary();
 		stealFrom(self);
+	} else {
+		ensureWritable();
 	}
-	ensureWritable();
-	NDArray rhs = other.asBinary();
-	binaryBitOpInPlace(uint64, rhs.uint64, numElements(), BinaryBitOp::And);
+	if (other.type == BINARY)
+		ndBinaryBitOpInPlace(uint64, other.uint64, numElements(), NdBinAnd);
+	else {
+		NDArray rhs = other.asBinary();
+		ndBinaryBitOpInPlace(uint64, rhs.uint64, numElements(), NdBinAnd);
+	}
 	return *this;
 }
 
@@ -3620,10 +3734,15 @@ NDArray& NDArray::operator|=(const NDArray& other) {
 	if (type != BINARY) {
 		NDArray self = asBinary();
 		stealFrom(self);
+	} else {
+		ensureWritable();
 	}
-	ensureWritable();
-	NDArray rhs = other.asBinary();
-	binaryBitOpInPlace(uint64, rhs.uint64, numElements(), BinaryBitOp::Or);
+	if (other.type == BINARY)
+		ndBinaryBitOpInPlace(uint64, other.uint64, numElements(), NdBinOr);
+	else {
+		NDArray rhs = other.asBinary();
+		ndBinaryBitOpInPlace(uint64, rhs.uint64, numElements(), NdBinOr);
+	}
 	return *this;
 }
 
@@ -3632,10 +3751,15 @@ NDArray& NDArray::operator^=(const NDArray& other) {
 	if (type != BINARY) {
 		NDArray self = asBinary();
 		stealFrom(self);
+	} else {
+		ensureWritable();
 	}
-	ensureWritable();
-	NDArray rhs = other.asBinary();
-	binaryBitOpInPlace(uint64, rhs.uint64, numElements(), BinaryBitOp::Xor);
+	if (other.type == BINARY)
+		ndBinaryBitOpInPlace(uint64, other.uint64, numElements(), NdBinXor);
+	else {
+		NDArray rhs = other.asBinary();
+		ndBinaryBitOpInPlace(uint64, rhs.uint64, numElements(), NdBinXor);
+	}
 	return *this;
 }
 

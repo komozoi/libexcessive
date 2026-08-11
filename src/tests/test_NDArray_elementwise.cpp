@@ -682,6 +682,99 @@ TEST(NDArray_elementwise, BinaryOps_AndOrXor) {
 	EXPECT_EQ(result.get<int>({1}), -1);
 	EXPECT_EQ(result.get<int>({2}), -1);
 	EXPECT_EQ(result.get<int>({3}), -1);
+
+	// && / || / ! — same bulk kernels as & / | / ~
+	NDArray land = a && c;
+	NDArray lor = a || c;
+	EXPECT_EQ(land.get<int>({0}), 1);
+	EXPECT_EQ(land.get<int>({1}), 0);
+	EXPECT_EQ(lor.get<int>({0}), 1);
+	EXPECT_EQ(lor.get<int>({1}), 1);
+	NDArray lnot = !a;
+	EXPECT_EQ(lnot.get<int>({0}), 0);
+	EXPECT_EQ(lnot.get<int>({1}), 0);
+	EXPECT_EQ(lnot.get<int>({2}), 1);
+
+	// Wide word-wise path (n > 64)
+	const int N = 100;
+	NDArray m1({N}, BINARY);
+	NDArray m2({N}, BINARY);
+	for (int i = 0; i < N; ++i) {
+		m1.set({i}, i % 2);
+		m2.set({i}, i % 3 == 0 ? 1 : 0);
+	}
+	NDArray mand = m1 && m2;
+	NDArray mor = m1 || m2;
+	for (int i = 0; i < N; ++i) {
+		int e1 = i % 2;
+		int e2 = i % 3 == 0 ? 1 : 0;
+		EXPECT_EQ(mand.get<int>({i}), e1 & e2) << i;
+		EXPECT_EQ(mor.get<int>({i}), e1 | e2) << i;
+	}
+	m1 &= m2;
+	for (int i = 0; i < N; ++i)
+		EXPECT_EQ(m1.get<int>({i}), ((i % 2) & (i % 3 == 0 ? 1 : 0))) << i;
+}
+
+TEST(NDArray_elementwise, LogicalAndOr_InPlace_Boolean) {
+	// Multi-bit "true" (2) must not become 3 under boolean OR with 1
+	NDArray a({4}, INT3);
+	a.set({0}, 2);
+	a.set({1}, 0);
+	a.set({2}, 1);
+	a.set({3}, -1); // truthy
+
+	NDArray b({4}, INT3);
+	b.set({0}, 1);
+	b.set({1}, 1);
+	b.set({2}, 0);
+	b.set({3}, 0);
+
+	a.logicalOr(b);
+	EXPECT_EQ(a.type, BINARY);
+	EXPECT_EQ(a.get<int>({0}), 1); // 2 || 1 → 1, not 3
+	EXPECT_EQ(a.get<int>({1}), 1); // 0 || 1
+	EXPECT_EQ(a.get<int>({2}), 1); // 1 || 0
+	EXPECT_EQ(a.get<int>({3}), 1); // -1 || 0
+
+	NDArray c({4}, INT3);
+	c.set({0}, 2);
+	c.set({1}, 2);
+	c.set({2}, 0);
+	c.set({3}, 1);
+	NDArray d({4}, BINARY);
+	d.set({0}, 1);
+	d.set({1}, 0);
+	d.set({2}, 1);
+	d.set({3}, 1);
+	c.logicalAnd(d);
+	EXPECT_EQ(c.type, BINARY);
+	EXPECT_EQ(c.get<int>({0}), 1); // truthy(2) && 1
+	EXPECT_EQ(c.get<int>({1}), 0); // truthy(2) && 0
+	EXPECT_EQ(c.get<int>({2}), 0);
+	EXPECT_EQ(c.get<int>({3}), 1);
+
+	// Scalar bool
+	NDArray e({3}, INT3);
+	e.set({0}, 2);
+	e.set({1}, 0);
+	e.set({2}, 1);
+	e.logicalOr(true);
+	EXPECT_TRUE(e.all());
+	e.logicalAnd(false);
+	EXPECT_FALSE(e.any());
+
+	// Out-of-place && also truthiness-normalizes
+	NDArray x({2}, INT3);
+	x.set({0}, 2);
+	x.set({1}, 0);
+	NDArray y({2}, INT3);
+	y.set({0}, 1);
+	y.set({1}, 1);
+	NDArray z = x && y;
+	EXPECT_EQ(z.type, BINARY);
+	EXPECT_EQ(z.get<int>({0}), 1);
+	EXPECT_EQ(z.get<int>({1}), 0);
 }
 
 

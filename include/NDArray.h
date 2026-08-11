@@ -624,14 +624,42 @@ public:
 	NDArray& invert();
 
 	/*
-	** BINARY / mask binary ops (logical AND / OR / XOR)
+	** Mask / boolean ops
 	**
-	** Operands are converted with asBinary() first. Results are BINARY.
-	** Word-wise kernels; last word masked to numElements() bits.
+	** logicalAnd / logicalOr are in-place boolean ops: both sides are reduced by
+	** truthiness (non-zero → true), result is BINARY with only 0/1 bits. Safe when
+	** values are multi-bit (e.g. INT3 holding 2): 2 | 1 → 1, not 3.
+	** C++ has no &&= / ||=; use logicalAnd / logicalOr for that.
+	**
+	** & | ^ &= |= ^= operate on already-packed BINARY words (bit ops). Prefer
+	** logicalAnd/logicalOr when operands may not be clean 0/1 masks.
+	** && || ~ ! are out-of-place; &&/|| go through truthiness like logicalAnd/Or.
 	*/
+	/**
+	 * In-place boolean AND. *this becomes BINARY; each element is
+	 * truthy(*this) && truthy(other). Returns *this.
+	 */
+	NDArray& logicalAnd(const NDArray& other);
+	/** In-place boolean AND with a scalar (false clears all; true normalizes to mask). */
+	NDArray& logicalAnd(bool other);
+	/**
+	 * In-place boolean OR. *this becomes BINARY; each element is
+	 * truthy(*this) || truthy(other). Returns *this.
+	 */
+	NDArray& logicalOr(const NDArray& other);
+	/** In-place boolean OR with a scalar (true fills ones; false normalizes to mask). */
+	NDArray& logicalOr(bool other);
+
 	NDArray operator&(const NDArray& other) const;
 	NDArray operator|(const NDArray& other) const;
 	NDArray operator^(const NDArray& other) const;
+	/** Out-of-place boolean AND (truthiness → BINARY, then word AND). */
+	NDArray operator&&(const NDArray& other) const;
+	/** Out-of-place boolean OR (truthiness → BINARY, then word OR). */
+	NDArray operator||(const NDArray& other) const;
+	/** Out-of-place boolean NOT. */
+	NDArray operator!() const;
+
 	NDArray& operator&=(const NDArray& other);
 	NDArray& operator|=(const NDArray& other);
 	NDArray& operator^=(const NDArray& other);
