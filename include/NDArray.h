@@ -1,15 +1,22 @@
+/*
+ * Copyright 2021-2026 komozoi
+ * Original Creation Date: 2026-7-15
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
-// Copyright 2021-2026 Komozoi
-// Original Creation Date: 2026-7-15
-//
-// All rights reserved.  Do not copy, distribute, or execute, in compiled or source form,
-// any portion of this software, where governed by this license.
-// If you find this software, please let me know: komozoi@protonmail.com
-//
-//
-
-#ifndef LIBSOLVE_NDARRAY_H
-#define LIBSOLVE_NDARRAY_H
+#ifndef EXCESSIVE_NDARRAY_H
+#define EXCESSIVE_NDARRAY_H
 
 #include "bigint.h"
 #include "stdint.h"
@@ -193,6 +200,12 @@ public:
 	NDArray& operator=(const NDArray& other);
 	NDArray& operator=(NDArray&& other) noexcept;
 
+	/**
+	 * Whole-array equality (not element-wise).
+	 * True only if both arrays have the same type, shape, and identical packed
+	 * storage. This is a single bool for unit tests and structural checks.
+	 * For an element-wise equality mask, use equal() or operator==(float/double/int).
+	 */
 	bool operator==(const NDArray& nds) const;
 
 	/**
@@ -463,63 +476,160 @@ public:
 	NDArray mod(int64_t other) const;
 
 	/*
-	** Element-wise comparisons → BINARY mask (same shape).
+	** Element-wise comparisons
 	**
-	** Whole-array equality: operator==(const NDArray&) → bool.
-	** Element-wise vs scalar: operator==(float|double|int) → BINARY, e.g. vb == 0.0
-	** Element-wise relational: >, <, >=, <=, != → BINARY
+	** These produce a new array with the same shape as *this (and other, when
+	** both are arrays). They do not change *this.
 	**
-	** Three-way compare (spaceship-style): compare(...) → INT3 with -1 / 0 / 1
+	** Two result types appear here:
+	**   - NDArrayType::BINARY — packed 0/1 mask (false/true per element).
+	**   - NDArrayType::INT3   — only from compare(): each element is -1, 0, or +1.
 	**
-	** Ternary-style selection (C++ cannot overload ?:):
-	**   select(a > b, vb, va);
-	**   (a > b).choose(vb, va);
+	** Distinct from bool operator==(const NDArray&), which is whole-array
+	** structural equality and returns a single C++ bool.
+	**
+	** Named methods (equal, less, …) and the matching operators (a == x with a
+	** built-in number, a > b, …) are equivalent for the same operands. There is
+	** no operator==(const NDArray&) that returns a mask, because that signature
+	** is already used for whole-array bool equality.
+	**
+	** Masks feed select/where/choose, e.g. select(a > b, vb, va).
 	*/
+
 	/**
-	 * Element-wise three-way comparison → INT3 array of -1, 0, or 1:
-	 *   -1 if *this < other, 0 if equal, +1 if *this > other.
+	 * Element-wise three-way comparison against another array of the same shape.
+	 * @return NDArray of type INT3; each element is -1 if *this < other, 0 if
+	 *         equal, +1 if *this > other (after the usual type promotion rules).
 	 */
 	NDArray compare(const NDArray& other) const;
+	/**
+	 * Element-wise three-way comparison against a C++ int broadcast to every element.
+	 * @return INT3 array: -1 / 0 / +1 as in compare(const NDArray&).
+	 */
 	NDArray compare(int other) const;
+	/**
+	 * Element-wise three-way comparison against a float broadcast to every element.
+	 * @return INT3 array: -1 / 0 / +1 as in compare(const NDArray&).
+	 */
 	NDArray compare(float other) const;
+	/**
+	 * Element-wise three-way comparison against a double broadcast to every element.
+	 * @return INT3 array: -1 / 0 / +1 as in compare(const NDArray&).
+	 */
 	NDArray compare(double other) const;
+	/**
+	 * Element-wise three-way comparison against a uint256_t broadcast to every element.
+	 * @return INT3 array: -1 / 0 / +1 as in compare(const NDArray&).
+	 */
 	NDArray compare(const uint256_t& other) const;
 
-	/** Element-wise array comparison (BINARY). Prefer operators for scalars. */
+	/**
+	 * Element-wise equality with another array of the same shape.
+	 * @return BINARY mask: 1 where elements are equal, 0 elsewhere.
+	 * @note For a single C++ bool of whole-array identity, use operator==(const NDArray&).
+	 *       For equality against a number, use operator==(float|double|int).
+	 */
 	NDArray equal(const NDArray& other) const;
+	/**
+	 * Element-wise inequality with another array of the same shape.
+	 * @return BINARY mask: 1 where elements differ, 0 where equal.
+	 * Equivalent to operator!=(const NDArray&).
+	 */
 	NDArray notEqual(const NDArray& other) const;
+	/**
+	 * Element-wise less-than with another array of the same shape.
+	 * @return BINARY mask: 1 where *this < other, else 0.
+	 * Equivalent to operator<(const NDArray&).
+	 */
 	NDArray less(const NDArray& other) const;
+	/**
+	 * Element-wise less-or-equal with another array of the same shape.
+	 * @return BINARY mask: 1 where *this <= other, else 0.
+	 * Equivalent to operator<=(const NDArray&).
+	 */
 	NDArray lessEqual(const NDArray& other) const;
+	/**
+	 * Element-wise greater-than with another array of the same shape.
+	 * @return BINARY mask: 1 where *this > other, else 0.
+	 * Equivalent to operator>(const NDArray&).
+	 */
 	NDArray greater(const NDArray& other) const;
+	/**
+	 * Element-wise greater-or-equal with another array of the same shape.
+	 * @return BINARY mask: 1 where *this >= other, else 0.
+	 * Equivalent to operator>=(const NDArray&).
+	 */
 	NDArray greaterEqual(const NDArray& other) const;
 
-	/** Element-wise relational operators → BINARY (not whole-array). */
+	/**
+	 * Element-wise greater-than vs another array (same shape).
+	 * @return BINARY mask. Equivalent to greater(other).
+	 */
 	NDArray operator>(const NDArray& other) const;
+	/**
+	 * Element-wise less-than vs another array (same shape).
+	 * @return BINARY mask. Equivalent to less(other).
+	 */
 	NDArray operator<(const NDArray& other) const;
+	/**
+	 * Element-wise greater-or-equal vs another array (same shape).
+	 * @return BINARY mask. Equivalent to greaterEqual(other).
+	 */
 	NDArray operator>=(const NDArray& other) const;
+	/**
+	 * Element-wise less-or-equal vs another array (same shape).
+	 * @return BINARY mask. Equivalent to lessEqual(other).
+	 */
 	NDArray operator<=(const NDArray& other) const;
+	/**
+	 * Element-wise inequality vs another array (same shape).
+	 * @return BINARY mask. Equivalent to notEqual(other).
+	 * @note This is not whole-array inequality; there is no bool operator!=(const NDArray&).
+	 */
 	NDArray operator!=(const NDArray& other) const;
 
-	/** Element-wise equality / inequality vs scalar → BINARY. */
+	/**
+	 * Element-wise equality of each entry of *this with a float value (broadcast).
+	 * @return BINARY mask of the same shape as *this.
+	 * Example: (vb == 0.0f) yields a mask true where vb is zero.
+	 * @note operator==(const NDArray&) is a different overload and returns bool.
+	 */
 	NDArray operator==(float other) const;
+	/** Element-wise inequality vs a float (broadcast). @return BINARY mask. */
 	NDArray operator!=(float other) const;
+	/** Element-wise greater-than vs a float (broadcast). @return BINARY mask. */
 	NDArray operator>(float other) const;
+	/** Element-wise less-than vs a float (broadcast). @return BINARY mask. */
 	NDArray operator<(float other) const;
+	/** Element-wise greater-or-equal vs a float (broadcast). @return BINARY mask. */
 	NDArray operator>=(float other) const;
+	/** Element-wise less-or-equal vs a float (broadcast). @return BINARY mask. */
 	NDArray operator<=(float other) const;
 
+	/** Element-wise equality vs a double (broadcast). @return BINARY mask. */
 	NDArray operator==(double other) const;
+	/** Element-wise inequality vs a double (broadcast). @return BINARY mask. */
 	NDArray operator!=(double other) const;
+	/** Element-wise greater-than vs a double (broadcast). @return BINARY mask. */
 	NDArray operator>(double other) const;
+	/** Element-wise less-than vs a double (broadcast). @return BINARY mask. */
 	NDArray operator<(double other) const;
+	/** Element-wise greater-or-equal vs a double (broadcast). @return BINARY mask. */
 	NDArray operator>=(double other) const;
+	/** Element-wise less-or-equal vs a double (broadcast). @return BINARY mask. */
 	NDArray operator<=(double other) const;
 
+	/** Element-wise equality vs an int (broadcast). @return BINARY mask. */
 	NDArray operator==(int other) const;
+	/** Element-wise inequality vs an int (broadcast). @return BINARY mask. */
 	NDArray operator!=(int other) const;
+	/** Element-wise greater-than vs an int (broadcast). @return BINARY mask. */
 	NDArray operator>(int other) const;
+	/** Element-wise less-than vs an int (broadcast). @return BINARY mask. */
 	NDArray operator<(int other) const;
+	/** Element-wise greater-or-equal vs an int (broadcast). @return BINARY mask. */
 	NDArray operator>=(int other) const;
+	/** Element-wise less-or-equal vs an int (broadcast). @return BINARY mask. */
 	NDArray operator<=(int other) const;
 
 	/**
@@ -1108,14 +1218,25 @@ NDArray operator*(int64_t lhs, const NDArray& rhs);
 NDArray operator/(int64_t lhs, const NDArray& rhs);
 NDArray operator%(int64_t lhs, const NDArray& rhs);
 
-/** Left-hand scalar comparisons → BINARY mask (element-wise). */
+/**
+ * Left-hand number vs NDArray comparisons (element-wise).
+ * Each returns a BINARY mask with the same shape as rhs.
+ * Defined so expressions like (0.0 == vb) or (3 > a) work; implemented by
+ * reversing the operands onto the corresponding member operator.
+ */
 NDArray operator==(float lhs, const NDArray& rhs);
+/** Element-wise: float != each element of rhs. @return BINARY mask. */
 NDArray operator!=(float lhs, const NDArray& rhs);
+/** Element-wise: float > each element of rhs. @return BINARY mask. */
 NDArray operator>(float lhs, const NDArray& rhs);
+/** Element-wise: float < each element of rhs. @return BINARY mask. */
 NDArray operator<(float lhs, const NDArray& rhs);
+/** Element-wise: float >= each element of rhs. @return BINARY mask. */
 NDArray operator>=(float lhs, const NDArray& rhs);
+/** Element-wise: float <= each element of rhs. @return BINARY mask. */
 NDArray operator<=(float lhs, const NDArray& rhs);
 
+/** Element-wise: double == each element of rhs. @return BINARY mask. */
 NDArray operator==(double lhs, const NDArray& rhs);
 NDArray operator!=(double lhs, const NDArray& rhs);
 NDArray operator>(double lhs, const NDArray& rhs);
@@ -1123,6 +1244,7 @@ NDArray operator<(double lhs, const NDArray& rhs);
 NDArray operator>=(double lhs, const NDArray& rhs);
 NDArray operator<=(double lhs, const NDArray& rhs);
 
+/** Element-wise: int == each element of rhs. @return BINARY mask. */
 NDArray operator==(int lhs, const NDArray& rhs);
 NDArray operator!=(int lhs, const NDArray& rhs);
 NDArray operator>(int lhs, const NDArray& rhs);
@@ -1131,4 +1253,4 @@ NDArray operator>=(int lhs, const NDArray& rhs);
 NDArray operator<=(int lhs, const NDArray& rhs);
 
 
-#endif //AGENT_CLUSTER_NDARRAY_H
+#endif // EXCESSIVE_NDARRAY_H
