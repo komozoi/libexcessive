@@ -364,4 +364,61 @@ public:
 	virtual ~Map() = default;
 };
 
+
+/**
+ * @brief Equality comparison for map elements (key and value).
+ *
+ * Only available when both K and T support `operator==`, so types that are not
+ * equality-comparable remain usable in maps (e.g. Container::find SFINAE).
+ */
+template<class K, class T>
+auto operator==(const MapElement<K, T>& a, const MapElement<K, T>& b)
+	-> decltype(a.key == b.key, a.value == b.value, bool()) {
+	return a.key == b.key && a.value == b.value;
+}
+
+/**
+ * @brief Inequality comparison for map elements.
+ */
+template<class K, class T>
+auto operator!=(const MapElement<K, T>& a, const MapElement<K, T>& b)
+	-> decltype(!(a == b)) {
+	return !(a == b);
+}
+
+/**
+ * @brief Equality comparison for maps of the same key and value types.
+ *
+ * Free function (not a member) so it is only instantiated when used.
+ * Two maps are equal when they contain the same keys mapped to equal values;
+ * iteration order is irrelevant.
+ *
+ * Keys are matched via the map's own lookup (`getPtr`), so key identity follows
+ * each map implementation's comparison rules rather than requiring a direct
+ * `K::operator==` on this function itself.
+ *
+ * @return true if both maps have the same size and the same key-value pairs.
+ */
+template<class K, class T>
+bool operator==(const Map<K, T>& a, const Map<K, T>& b) {
+	if (a.size() != b.size())
+		return false;
+	for (typename MapElement<K, T>::ConstIterator it = a.begin(); it != a.end(); ++it) {
+		MapElement<K, T> el = *it;
+		const T* other = b.getPtr(el.key);
+		if (other == nullptr || !(*other == el.value))
+			return false;
+	}
+	return true;
+}
+
+/**
+ * @brief Inequality comparison for maps of the same key and value types.
+ * @return true if the maps do not contain exactly the same key-value pairs.
+ */
+template<class K, class T>
+bool operator!=(const Map<K, T>& a, const Map<K, T>& b) {
+	return !(a == b);
+}
+
 #endif //LIBEXCESSIVE_MAP_H
