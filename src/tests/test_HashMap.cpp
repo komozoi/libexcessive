@@ -541,3 +541,30 @@ TEST(HashMapTest, Equality) {
 	HashMap<int, std::string> emptyB(8);
 	EXPECT_TRUE(emptyA == emptyB);
 }
+
+// Regression: const HashMap members compared via != (as in NetMultipleSolutions).
+TEST(HashMapTest, ConstMemberInequality) {
+	struct Holder {
+		const HashMap<int, int> axes;
+		explicit Holder(HashMap<int, int> m) : axes(std::move(m)) {}
+		bool equalAxes(const Holder& other) const {
+			return !(other.axes != axes);
+		}
+	};
+
+	HashMap<int, int> m1(4);
+	m1.put(0, 0);
+	m1.put(1, 1);
+	HashMap<int, int> m2(8);
+	m2.put(1, 1);
+	m2.put(0, 0);
+	HashMap<int, int> m3(4);
+	m3.put(0, 0);
+	m3.put(1, 2);
+
+	Holder a(m1), b(m2), c(m3);
+	EXPECT_TRUE(a.equalAxes(b));
+	EXPECT_FALSE(a.equalAxes(c));
+	EXPECT_TRUE(a.axes == b.axes);
+	EXPECT_TRUE(a.axes != c.axes);
+}
