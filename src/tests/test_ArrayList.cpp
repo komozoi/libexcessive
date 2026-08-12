@@ -341,3 +341,34 @@ TEST(ArrayListTest, OutOfBoundsException) {
 	EXPECT_THROW(list.get(-1), std::out_of_range);
 	EXPECT_THROW(list.get(2), std::out_of_range);
 }
+
+TEST(ArrayListTest, Equality) {
+	ArrayList<int> a{1, 2, 3};
+	ArrayList<int> b{1, 2, 3};
+	ArrayList<int> c{1, 2, 4};
+	ArrayList<int> d{1, 2};
+
+	EXPECT_TRUE(a == b);
+	EXPECT_FALSE(a != b);
+	EXPECT_FALSE(a == c);
+	EXPECT_TRUE(a != c);
+	EXPECT_FALSE(a == d);
+	EXPECT_TRUE(ArrayList<int>() == ArrayList<int>());
+
+	// Order matters for sequence containers.
+	ArrayList<int> e{3, 2, 1};
+	EXPECT_FALSE(a == e);
+}
+
+TEST(ArrayListTest, CrossTypeEqualityWithLinkedList) {
+	ArrayList<int> a{1, 2, 3};
+	LinkedList<int> b;
+	b.add(1);
+	b.add(2);
+	b.add(3);
+	EXPECT_TRUE(a == b);
+	EXPECT_TRUE(b == a);
+
+	b.add(4);
+	EXPECT_FALSE(a == b);
+}

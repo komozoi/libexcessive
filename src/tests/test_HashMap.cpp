@@ -509,3 +509,35 @@ TEST(HashMapLeakTest, DetectLeakInMoveAssignment) {
 	EXPECT_EQ(tracker.current_allocated_bytes, 0);
 	EXPECT_EQ(tracker.allocations, tracker.frees);
 }
+
+TEST(HashMapTest, Equality) {
+	HashMap<int, std::string> a(8);
+	a.put(1, "one");
+	a.put(2, "two");
+	a.put(3, "three");
+
+	// Different capacity / insertion order should still compare equal by content.
+	HashMap<int, std::string> b(32);
+	b.put(3, "three");
+	b.put(1, "one");
+	b.put(2, "two");
+
+	EXPECT_TRUE(a == b);
+	EXPECT_FALSE(a != b);
+
+	HashMap<int, std::string> c(8);
+	c.put(1, "one");
+	c.put(2, "two");
+	c.put(3, "trois");
+	EXPECT_FALSE(a == c);
+	EXPECT_TRUE(a != c);
+
+	HashMap<int, std::string> d(8);
+	d.put(1, "one");
+	d.put(2, "two");
+	EXPECT_FALSE(a == d);
+
+	HashMap<int, std::string> emptyA(4);
+	HashMap<int, std::string> emptyB(8);
+	EXPECT_TRUE(emptyA == emptyB);
+}

@@ -195,3 +195,24 @@ TEST_F(stringQueueTest, CopyQueue) {
 	EXPECT_EQ(popped, "World");
 }
 
+TEST(QueueEqualityTest, Equality) {
+	Queue<int> a;
+	a.add(1);
+	a.add(2);
+	a.add(3);
+	Queue<int> b;
+	b.add(1);
+	b.add(2);
+	b.add(3);
+	Queue<int> c;
+	c.add(1);
+	c.add(2);
+	c.add(4);
+
+	EXPECT_TRUE(a == b);
+	EXPECT_FALSE(a != b);
+	EXPECT_FALSE(a == c);
+	EXPECT_TRUE(a != c);
+	EXPECT_TRUE(Queue<int>() == Queue<int>());
+}
+

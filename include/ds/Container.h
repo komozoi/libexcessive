@@ -202,4 +202,42 @@ private:
 	}
 };
 
+
+/**
+ * @brief Ordered equality comparison for containers of the same element type.
+ *
+ * Free function (not a member) so it is only instantiated when used and so
+ * Container specializations with different iterators remain comparable.
+ * Two containers are equal when they have the same size and the same elements
+ * in the same iteration order.
+ *
+ * More specialized free operators (e.g. on Set or Map) take precedence for
+ * those types when a closer base-class conversion is available.
+ *
+ * @return true if both containers have the same ordered element sequence.
+ */
+template<typename T, typename R1, typename I1, typename CI1, typename R2, typename I2, typename CI2>
+bool operator==(const Container<T, R1, I1, CI1>& a, const Container<T, R2, I2, CI2>& b) {
+	if (a.size() != b.size())
+		return false;
+	CI1 it1 = a.begin();
+	CI2 it2 = b.begin();
+	const CI1 end1 = a.end();
+	const CI2 end2 = b.end();
+	for (; it1 != end1 && it2 != end2; ++it1, ++it2) {
+		if (!(*it1 == *it2))
+			return false;
+	}
+	return true;
+}
+
+/**
+ * @brief Ordered inequality comparison for containers of the same element type.
+ * @return true if the containers do not have the same ordered element sequence.
+ */
+template<typename T, typename R1, typename I1, typename CI1, typename R2, typename I2, typename CI2>
+bool operator!=(const Container<T, R1, I1, CI1>& a, const Container<T, R2, I2, CI2>& b) {
+	return !(a == b);
+}
+
 #endif //LIBEXCESSIVE_CONTAINER_H

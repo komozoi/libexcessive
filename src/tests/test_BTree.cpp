@@ -31,6 +31,14 @@ public:
 		nodes.add({{0, 0, 0, -1, 0, {}}, {}});
 	}
 
+	BTreeIterator<T, N> begin() {
+		return BTreeIterator<T, N>(this);
+	}
+
+	BTreeIterator<T, N> end() {
+		return BTreeIterator<T, N>(this, true);
+	}
+
 protected:
 
 	btree_node_t<T, N> getNode(uint64_t offset) const override {
@@ -383,3 +391,54 @@ TEST(BTreeFindNext, FindsOutlierAcrossSubtrees) {
 	val = 100001;
 	EXPECT_FALSE(tree.findNext(val));
 }
+/*
+class BTreeIteratorTest : public ::testing::Test {
+public:
+	BTreeIteratorTest() : tree(compareInts) {}
+protected:
+	RAMBTree<int, 63> tree;
+};
+
+TEST_F(BTreeIteratorTest, EmptyTree) {
+	auto it = tree.begin();
+	auto end = tree.end();
+	EXPECT_EQ(it, end);
+	EXPECT_TRUE(it == tree.end());
+}
+
+TEST_F(BTreeIteratorTest, SingleElement) {
+	tree.insert(42);
+	auto it = tree.begin();
+	EXPECT_EQ(*it, 42);
+	++it;
+	EXPECT_EQ(it, tree.end());
+}
+
+TEST_F(BTreeIteratorTest, MultipleElements) {
+	tree.insert(10);
+	tree.insert(5);
+	tree.insert(20);
+	tree.insert(15);
+
+	std::vector<int> expected = {5, 10, 15, 20};
+	auto it = tree.begin();
+	for (int val : expected) {
+		EXPECT_EQ(*it, val);
+		++it;
+	}
+	EXPECT_EQ(it, tree.end());
+}
+
+TEST_F(BTreeIteratorTest, LargeTreeTraversal) {
+	const int num_elements = 100;
+	for (int i = 0; i < num_elements; ++i) {
+		tree.insert(i);
+	}
+
+	auto it = tree.begin();
+	for (int i = 0; i < num_elements; ++i) {
+		EXPECT_EQ(*it, i);
+		++it;
+	}
+	EXPECT_EQ(it, tree.end());
+}*/
