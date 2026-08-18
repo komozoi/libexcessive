@@ -26,7 +26,7 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -34,8 +34,12 @@ jobs:
 
     - name: Install dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y cmake build-essential libgtest-dev
+        if [[ ${{ matrix.os }} == 'ubuntu-latest' || ${{ matrix.os }} == 'ubuntu-24.04-arm' ]]; then
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libgtest-dev
+        elif [[ ${{ matrix.os }} == 'macos-latest' || ${{ matrix.os }} == 'macos-15-intel' ]]; then
+          brew install cmake googletest
+        fi
 
     - name: Configure CMake
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Release -DLIBEXCESSIVE_BUILD_TESTS=ON

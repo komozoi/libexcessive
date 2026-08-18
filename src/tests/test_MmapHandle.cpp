@@ -20,10 +20,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstring>
-#include <cstdint>
 #include <thread>
 #include <functional>
 #include <atomic>
+#include <algorithm>
 #include "ds/ArrayList.h"
 #include "fs/FdHandle.h"
 #include "universaltime.h"
@@ -467,22 +467,24 @@ TEST(MmapHandleTest, ResizeViaMmap) {
 
 TEST(MmapHandleTest, MmapWithOffset) {
 	const char* test_file = "fd_mmap_test.tmp";
+	long pagesize = sysconf(_SC_PAGESIZE);
+
 	unlink(test_file);
 	FdHandle handle = FdHandle::open(test_file, O_RDWR | O_CREAT, 0660);
 	ASSERT_TRUE(handle);
-	MmapHandle full_map = handle.getMmapHandle(0, 8192);
+	MmapHandle full_map = handle.getMmapHandle(0, pagesize * 2);
 	ASSERT_TRUE(full_map);
 
 	const char str1[] = "Start";
 	full_map.write(str1, 5);
 
-	MmapHandle offset_map = handle.getMmapHandle(4096, 4096);
+	MmapHandle offset_map = handle.getMmapHandle(pagesize, pagesize);
 	ASSERT_TRUE(offset_map);
 
 	const char str2[] = "Offset";
 	offset_map.write(str2, 6);
 
-	full_map.seek(4096, SEEK_SET);
+	full_map.seek(pagesize, SEEK_SET);
 	char buffer[6];
 	full_map.read(buffer, 6);
 	EXPECT_EQ(memcmp(buffer, str2, 6), 0);
@@ -514,15 +516,17 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 	const char* test_file = "fd_mmap_test.tmp";
 	unlink(test_file);
 
-	const size_t blockSize = 16 * 1024 * 1024;
-	const int threadCount = 4;
+	const size_t blockSize = 64 * 1024 * 1024;
+	unsigned nproc = std::thread::hardware_concurrency();
+	if (nproc == 0)
+		nproc = 1;
+	const int threadCount = std::max(2, (int)((1 + nproc) / 2));
 
 	FdHandle handle = FdHandle::open(test_file, O_RDWR | O_CREAT, 0660);
 
-	ArrayList<MmapHandle> mmaps((int)threadCount);
-	for (int i = 0; i < (int)threadCount; i++) {
+	ArrayList<MmapHandle> mmaps(threadCount);
+	for (int i = 0; i < threadCount; i++)
 		mmaps.add(handle.getMmapHandle(i * blockSize, blockSize));
-	}
 
 	std::atomic<int> ready{0};
 	std::atomic<bool> start{false};
@@ -540,10 +544,9 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 			ptr[i] = (uint8_t)(91 * i);
 	};
 
-	std::thread threads[threadCount];
-	for (int i = 0; i < threadCount; i++) {
-		threads[i] = std::thread(worker, i);
-	}
+	ArrayList<std::thread> threads(threadCount);
+	for (int i = 0; i < threadCount; i++)
+		threads.add(std::thread(worker, i));
 
 	while (ready.load(std::memory_order_acquire) != threadCount) {
 		std::this_thread::yield();
@@ -553,7 +556,7 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 	start.store(true, std::memory_order_release);
 
 	for (int i = 0; i < threadCount; i++)
-		threads[i].join();
+		threads.get(i).join();
 
 	uint64_t t1 = millis_since_epoch();
 	uint64_t multiMs = t1 - t0;

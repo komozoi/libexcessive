@@ -102,6 +102,7 @@ void Logger::log(int level, const char* process, const char* fmt, va_list arg) {
 		vdprintf(oFd, fmt, tmp);
 		va_end(tmp);
 		write(oFd, "\n", 1);
+		fsync(oFd);
 	}
 
 	if (level >= fileLevel && fd >= 0) {
@@ -120,7 +121,7 @@ Logger::~Logger() {
 		char buffer[TIMESTAMP_LEN + 4];
 		strftime(buffer, 32, TIMESTAMP_FMT, localTime);
 		write(fd, buffer, strlen(buffer));
-		dprintf(fd, LOG_CLOSE_FMT, levelNames[fileLevel]);
+		dprintf(fd, LOG_CLOSE_FMT);
 
 		close(fd);
 	}
