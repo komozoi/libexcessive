@@ -209,4 +209,14 @@ TEST(DiskBytestringSearchTreeTest, FindReturnsZeroWhenKeyMissing) {
 	ASSERT_EQ(tree.find("ghost-key"), 0);
 }
 
+TEST(DiskBytestringSearchTreeTest, InsertEmptyKeyIsRejected) {
+	FdHandle handle = createTestFile(TEST_FILE_PATH "InsertEmptyKeyIsRejected.bin");
+	FreeSpaceFile fss(std::move(handle));
+	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
+
+	ASSERT_FALSE(tree.insert(Bytestring(), 1));
+	ASSERT_FALSE(tree.insert("", 2));
+	ASSERT_EQ(tree.find(""), 0);
+}
+
 

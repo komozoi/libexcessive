@@ -171,7 +171,7 @@ bool DiskBytestringSearchTree::insert(const Bytestring& key, uint64_t value, boo
 	uint64_t nodeOffset;
 	uint8_t nodeIndex;
 	uint32_t keyIndex;
-	disk_bytestring_node_t* node;
+	disk_bytestring_node_t* node = nullptr;
 
 	MatchType matchType = findNearestNode(key, nodeOffset, nodeIndex, keyIndex, node);
 
@@ -346,6 +346,7 @@ void DiskBytestringSearchTree::flush() {
 
 DiskBytestringSearchTree::MatchType DiskBytestringSearchTree::findNearestNode(const Bytestring& key, uint64_t& offset, uint8_t& nodeIndex, uint32_t& keyIndex, disk_bytestring_node_t*& node) {
 	keyIndex = 0;
+	node = nullptr;
 
 	if (key.size() == 0) {
 		offset = 0;
