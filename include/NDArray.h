@@ -20,6 +20,7 @@
 
 #include "bigint.h"
 #include "stdint.h"
+#include <stdexcept>
 #include <type_traits>
 
 #include "alloc/pointer.h"
@@ -192,6 +193,15 @@ public:
 	/** Shared storage (refcount); used by ndarray_detail load helpers. */
 	const sp<NDArrayBuffer>& sharedBuffer() const { return buffer; }
 
+	/** Packed word base of the shared buffer, or nullptr if empty. */
+	const void* data() const {
+		return buffer && buffer.get() ? buffer.get()->data : nullptr;
+	}
+	/** Size of the shared buffer in bytes (0 if empty). */
+	size_t byteSize() const {
+		return buffer && buffer.get() ? buffer.get()->byteSize : 0;
+	}
+
 private:
 	ArrayList<int> shape;
 	ArrayList<size_t> strides; // element strides; 0 = broadcast dimension
@@ -304,6 +314,28 @@ public:
 
 	/** True if this array allocated (or CoW-copied) its storage. False for wrap(). */
 	bool ownsStorage() const;
+
+	/**
+	 * Packed storage base, or nullptr if empty.
+	 * Invalid after destroy, CoW detach, or any buffer replacement.
+	 */
+	const void* data() const {
+		return buffer && buffer.get() ? buffer.get()->data : nullptr;
+	}
+	/** Mutable base. Calls ensureWritable() so CoW aliases are not mutated. */
+	void* data() {
+		ensureWritable();
+		return buffer && buffer.get() ? buffer.get()->data : nullptr;
+	}
+	/** Size of the packed buffer in bytes (0 if empty). */
+	size_t byteSize() const {
+		return buffer && buffer.get() ? buffer.get()->byteSize : 0;
+	}
+
+	template <typename T>
+	const T* data() const;
+	template <typename T>
+	T* data();
 
 	template <typename Acc>
 	Acc dot(const NDArray& other) const { return view().dot<Acc>(other.view()); }
@@ -1238,6 +1270,40 @@ private:
 	};
 };
 
+
+template <typename T>
+static bool ndarrayDataTypeMatches(NDArrayType t) {
+	if constexpr (std::is_same_v<T, float>)
+		return t == F32;
+	else if constexpr (std::is_same_v<T, double>)
+		return t == F64;
+	else if constexpr (std::is_same_v<T, uint8_t>)
+		return t == UINT8;
+	else if constexpr (std::is_same_v<T, int32_t>)
+		return t == INT32;
+	else if constexpr (std::is_same_v<T, int64_t>)
+		return t == INT64;
+	else if constexpr (std::is_same_v<T, uint256_t>)
+		return t == UINT256;
+	else if constexpr (std::is_same_v<T, uint64_t>)
+		return t == BINARY || t == INT3;
+	else
+		return false;
+}
+
+template <typename T>
+const T* NDArray::data() const {
+	if (!ndarrayDataTypeMatches<T>(type))
+		throw std::invalid_argument("NDArray::data<T>: type mismatch");
+	return static_cast<const T*>(data());
+}
+
+template <typename T>
+T* NDArray::data() {
+	if (!ndarrayDataTypeMatches<T>(type))
+		throw std::invalid_argument("NDArray::data<T>: type mismatch");
+	return static_cast<T*>(data());
+}
 
 // ---- proxy template methods (need NDArray complete) -------------------------
 

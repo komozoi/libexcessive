@@ -9,6 +9,7 @@
 //
 
 #include <gtest/gtest.h>
+#include <cstring>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -545,4 +546,95 @@ TEST(NDArray_basics, SetBool_OnBinaryAndIntTypes) {
 	u.set({1}, false);
 	EXPECT_EQ(u.get<uint256_t>({0}), uint256_t(1));
 	EXPECT_EQ(u.get<uint256_t>({1}), uint256_t(0));
+}
+
+
+TEST(NDArray_basics, DataMemcpyF32MatchesGetFlat) {
+	NDArray a({3, 4}, F32);
+	for (int i = 0; i < 12; ++i)
+		a.setFlat((size_t)i, (float)i * 0.5f);
+
+	ASSERT_NE(a.data(), nullptr);
+	EXPECT_EQ(a.byteSize(), (size_t)12 * sizeof(float));
+
+	float copy[12];
+	memcpy(copy, a.data(), a.byteSize());
+	for (int i = 0; i < 12; ++i)
+		EXPECT_FLOAT_EQ(copy[i], a.getFlat<float>((size_t)i));
+}
+
+TEST(NDArray_basics, DataMemcpyUINT8MatchesGetFlat) {
+	NDArray a({5, 3}, UINT8);
+	for (int i = 0; i < 15; ++i)
+		a.setFlat((size_t)i, (uint8_t)(i * 3));
+
+	ASSERT_NE(a.data(), nullptr);
+	EXPECT_EQ(a.byteSize(), (size_t)15);
+
+	uint8_t copy[15];
+	memcpy(copy, a.data(), a.byteSize());
+	for (int i = 0; i < 15; ++i)
+		EXPECT_EQ(copy[i], a.getFlat<uint8_t>((size_t)i));
+}
+
+TEST(NDArray_basics, DataINT3IsPackedWordBase) {
+	NDArray a({8}, INT3);
+	for (int i = 0; i < 8; ++i)
+		a.setFlat((size_t)i, i - 4);
+
+	ASSERT_NE(a.data(), nullptr);
+	EXPECT_EQ(a.byteSize(), (size_t)8);
+	const uint64_t* words = static_cast<const uint64_t*>(a.data());
+	for (int i = 0; i < 8; ++i) {
+		int nibble = (int)((words[0] >> (unsigned)(i * 4)) & 7u);
+		int v = nibble >= 4 ? nibble - 8 : nibble;
+		EXPECT_EQ(v, a.getFlat<int>((size_t)i));
+		EXPECT_EQ(v, i - 4);
+	}
+	EXPECT_NE(a.data<uint64_t>(), nullptr);
+}
+
+TEST(NDArray_basics, DataBINARYIsPackedWordBase) {
+	NDArray a({16}, BINARY);
+	a.setFlat(0, 1);
+	a.setFlat(3, 1);
+	a.setFlat(15, 1);
+
+	ASSERT_NE(a.data(), nullptr);
+	EXPECT_EQ(a.byteSize(), (size_t)8);
+	const uint64_t* words = static_cast<const uint64_t*>(a.data());
+	EXPECT_EQ(words[0] & 1u, 1u);
+	EXPECT_EQ((words[0] >> 3) & 1u, 1u);
+	EXPECT_EQ((words[0] >> 15) & 1u, 1u);
+	EXPECT_EQ(a.getFlat<int>(0), 1);
+	EXPECT_EQ(a.getFlat<int>(1), 0);
+	EXPECT_EQ(a.getFlat<int>(3), 1);
+}
+
+TEST(NDArray_basics, DataEmptyIsNull) {
+	NDArray a = NDArray::empty(F32);
+	EXPECT_EQ(a.data(), nullptr);
+	EXPECT_EQ(a.byteSize(), (size_t)0);
+	EXPECT_EQ(a.view().data(), nullptr);
+	EXPECT_EQ(a.view().byteSize(), (size_t)0);
+}
+
+TEST(NDArray_basics, DataMutableDetachesCow) {
+	NDArray a({4}, F32);
+	a.setFlat(0, 1.0f);
+	a.setFlat(1, 2.0f);
+	NDArray b = a;
+	float* p = static_cast<float*>(b.data());
+	ASSERT_NE(p, nullptr);
+	p[0] = 9.0f;
+	EXPECT_FLOAT_EQ(a.getFlat<float>(0), 1.0f);
+	EXPECT_FLOAT_EQ(b.getFlat<float>(0), 9.0f);
+}
+
+TEST(NDArray_basics, DataTypedMismatchThrows) {
+	NDArray a({2}, F32);
+	EXPECT_THROW(a.data<uint8_t>(), std::invalid_argument);
+	EXPECT_THROW(static_cast<const NDArray&>(a).data<int32_t>(), std::invalid_argument);
+	ASSERT_NE(a.data<float>(), nullptr);
+	EXPECT_FLOAT_EQ(a.data<float>()[0], a.getFlat<float>(0));
 }

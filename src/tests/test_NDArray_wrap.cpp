@@ -43,6 +43,19 @@ static void expectEqualPacked(const NDArrayView& v, const NDArray& owned) {
 }
 
 
+TEST(NDArray_wrap, DataReturnsCallerPointer) {
+	float buf[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+	NDArray w = NDArray::wrap(buf, sizeof(buf), {4}, F32);
+	ASSERT_EQ(w.data(), (void*)buf);
+	EXPECT_EQ(w.byteSize(), sizeof(buf));
+	EXPECT_EQ(w.view().data(), (const void*)buf);
+	EXPECT_EQ(w.view().byteSize(), sizeof(buf));
+
+	static_cast<float*>(w.data())[1] = 8.0f;
+	EXPECT_FLOAT_EQ(buf[1], 8.0f);
+	EXPECT_FLOAT_EQ(w.getFlat<float>(1), 8.0f);
+}
+
 TEST(NDArray_wrap, View_F32_StackMatchesOwned) {
 	float buf[4] = {1.5f, -2.0f, 3.25f, 0.0f};
 	NDArrayView v = NDArrayView::wrap(buf, sizeof(buf), {4}, F32);
