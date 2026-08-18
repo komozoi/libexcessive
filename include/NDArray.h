@@ -196,7 +196,7 @@ class NDArrayView {
 public:
 
 	/** Empty view: shape {0}, F32, null buffer. */
-	NDArrayView() = default;
+	NDArrayView();
 
 	/** View over `buf` with independent shape, element strides, and offset. */
 	NDArrayView(sp<NDArrayBuffer> buf, ArrayList<int> shape, ArrayList<size_t> strides, size_t offset, NDArrayType type);

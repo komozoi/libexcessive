@@ -1090,6 +1090,8 @@ NDArray::CRef NDArray::CRef::operator[](int i) const {
 
 // ---- NDArrayView -----------------------------------------------------------
 
+NDArrayView::NDArrayView() : shape({0}), type(F32) {}
+
 NDArrayView::NDArrayView(sp<NDArrayBuffer> buf, ArrayList<int> shape_, ArrayList<size_t> strides_,
                          size_t offset_, NDArrayType type_)
 	: shape(std::move(shape_)), strides(std::move(strides_)), offset(offset_), type(type_),
@@ -1953,8 +1955,14 @@ LIBEXCESSIVE_INSTANTIATE_REDUCE(uint256_t)
 #undef LIBEXCESSIVE_INSTANTIATE_REDUCE
 
 namespace ndarray_detail {
+	static const void* viewPackedData(const NDArrayView& v) {
+		if (!v.sharedBuffer() || !v.sharedBuffer().get() || !v.sharedBuffer().get()->data)
+			throw std::out_of_range("NDArrayView: no buffer");
+		return v.sharedBuffer().get()->data;
+	}
+
 	double viewLoadDouble(const NDArrayView& v, size_t elementOffset) {
-		const void* data = v.sharedBuffer()->data;
+		const void* data = viewPackedData(v);
 		switch (v.getType()) {
 			case BINARY: {
 				const uint64_t* words = (const uint64_t*)data;
@@ -1978,7 +1986,7 @@ namespace ndarray_detail {
 		}
 	}
 	int64_t viewLoadI64(const NDArrayView& v, size_t elementOffset) {
-		const void* data = v.sharedBuffer()->data;
+		const void* data = viewPackedData(v);
 		switch (v.getType()) {
 			case BINARY: {
 				const uint64_t* words = (const uint64_t*)data;
@@ -2005,7 +2013,7 @@ namespace ndarray_detail {
 		}
 	}
 	uint256_t viewLoadU256(const NDArrayView& v, size_t elementOffset) {
-		const void* data = v.sharedBuffer()->data;
+		const void* data = viewPackedData(v);
 		if (v.getType() == UINT256)
 			return ((const uint256_t*)data)[elementOffset];
 		return uint256_t(viewLoadDouble(v, elementOffset));
