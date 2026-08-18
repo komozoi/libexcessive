@@ -178,6 +178,13 @@ public:
 	template <typename Acc>
 	Acc hamming(const NDArrayView& other) const;
 
+	/** A[...,M,K] @ B[...,K,N] → C[...,M,N]. Same dtype; see docs/ndarray_matmul.md. */
+	NDArray matmul(const NDArrayView& b) const;
+	NDArray matmul(const NDArray& b) const;
+	/** A[M,K] @ x[K] → y[M]. */
+	NDArray gemv(const NDArrayView& x) const;
+	NDArray gemv(const NDArray& x) const;
+
 	template <typename T>
 	T get(const ArrayList<int>& indices) const;
 	template <typename T>
@@ -359,6 +366,11 @@ public:
 	Acc hamming(const NDArray& other) const { return view().hamming<Acc>(other.view()); }
 	template <typename Acc>
 	Acc hamming(const NDArrayView& other) const { return view().hamming<Acc>(other); }
+
+	NDArray matmul(const NDArray& b) const;
+	NDArray matmul(const NDArrayView& b) const;
+	NDArray gemv(const NDArray& x) const;
+	NDArray gemv(const NDArrayView& x) const;
 
 	NDArrayRef operator[](int i);
 	NDArrayCRef operator[](int i) const;
@@ -922,9 +934,9 @@ public:
 	** Reductions
 	**
 	** No-axis forms reduce to a scalar (empty shape).  Axis forms remove that
-	** axis from the shape.  Unsigned integer sum/prod accumulate in UINT256;
-	** INT32 sum/prod use INT64; floats keep their float type.  mean uses F64
-	** except pure F32 inputs (stay F32).
+	** axis from the shape.  BINARY / INT3 / UINT8 / INT8 sum/prod use INT32;
+	** INT32 uses INT64; INT64 and UINT256 stay; floats keep their type.
+	** mean uses F64 except pure F32 inputs (stay F32).
 	*/
 	NDArray sum() const;
 	NDArray sum(int axis) const;

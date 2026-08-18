@@ -140,6 +140,10 @@ public:
 	 */
 	off_t seek(off_t where, int whence = SEEK_SET);
 
+	void adviseWillNeed() const;
+	void adviseSequential() const;
+	void adviseHugePage() const;
+
 	/**
 	 * @brief Destructor for MmapHandle.
 	 */
@@ -151,6 +155,10 @@ private:
 	char* cursor;             /**< Current position in the mapping. */
 	char* end;                /**< End of the mapping. */
 };
+
+void memoryAdviseWillNeed(void* p, size_t bytes);
+void memoryAdviseSequential(void* p, size_t bytes);
+void memoryAdviseHugePage(void* p, size_t bytes);
 
 
 /**

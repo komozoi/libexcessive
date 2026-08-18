@@ -11,6 +11,7 @@
 #include "../include/NDArray.h"
 #include "ndarray_int3.h"
 #include "ndarray_score.h"
+#include "ndarray_matmul.h"
 
 #include <cmath>
 #include <cstddef>
@@ -774,6 +775,38 @@ bool NDArray::isBroadcastableTo(const ArrayList<int>& targetShape) const {
 
 NDArrayView NDArray::view() const {
 	return NDArrayView(buffer, shape, rowMajorStrides(shape), 0, type);
+}
+
+NDArray NDArray::matmul(const NDArray& b) const {
+	return view().matmul(b.view());
+}
+
+NDArray NDArray::matmul(const NDArrayView& b) const {
+	return view().matmul(b);
+}
+
+NDArray NDArray::gemv(const NDArray& x) const {
+	return view().gemv(x.view());
+}
+
+NDArray NDArray::gemv(const NDArrayView& x) const {
+	return view().gemv(x);
+}
+
+NDArray NDArrayView::matmul(const NDArray& b) const {
+	return matmul(b.view());
+}
+
+NDArray NDArrayView::gemv(const NDArray& x) const {
+	return gemv(x.view());
+}
+
+NDArray NDArrayView::matmul(const NDArrayView& b) const {
+	return ndmatmul(*this, b);
+}
+
+NDArray NDArrayView::gemv(const NDArrayView& x) const {
+	return matmul(x);
 }
 
 NDArrayView NDArray::broadcastTo(const ArrayList<int>& targetShape) const {
@@ -3394,6 +3427,13 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 			acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
 		}
 		out.float64[0] = acc;
+	} else if (rt == INT32) {
+		int32_t acc = (op == ReduceOp::Sum) ? 0 : 1;
+		for (size_t i = 0; i < n; ++i) {
+			int32_t v = (int32_t)a.loadAsI64(i);
+			acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
+		}
+		out.int32[0] = acc;
 	} else if (rt == INT64) {
 		int64_t acc = (op == ReduceOp::Sum) ? 0 : 1;
 		for (size_t i = 0; i < n; ++i) {
@@ -3548,6 +3588,13 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 				acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
 			}
 			out.float64[oi] = acc;
+		} else if (rt == INT32) {
+			int32_t acc = (op == ReduceOp::Sum) ? 0 : 1;
+			for (size_t r = 0; r < reduced; ++r) {
+				int32_t v = (int32_t)a.loadAsI64(flatIndexWithAxis(a.shape, axis, oi, r));
+				acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
+			}
+			out.int32[oi] = acc;
 		} else if (rt == INT64) {
 			int64_t acc = (op == ReduceOp::Sum) ? 0 : 1;
 			for (size_t r = 0; r < reduced; ++r) {

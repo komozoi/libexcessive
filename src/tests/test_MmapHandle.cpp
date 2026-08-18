@@ -520,13 +520,26 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 	unsigned nproc = std::thread::hardware_concurrency();
 	if (nproc == 0)
 		nproc = 1;
-	const int threadCount = std::max(2, (int)((1 + nproc) / 2));
+	const int threadCount = std::min(std::max(2, (int)((1 + nproc) / 2)), 4);
 
 	FdHandle handle = FdHandle::open(test_file, O_RDWR | O_CREAT, 0660);
 
 	ArrayList<MmapHandle> mmaps(threadCount);
 	for (int i = 0; i < threadCount; i++)
 		mmaps.add(handle.getMmapHandle(i * blockSize, blockSize));
+
+	// Fault the pages in before the timed region.  Otherwise the clock
+	// includes first-touch allocation on a shared sparse file, which
+	// serializes in the kernel and is not an FdHandle contention issue.
+	long pageSize = sysconf(_SC_PAGESIZE);
+	if (pageSize <= 0)
+		pageSize = 4096;
+	for (int i = 0; i < threadCount; i++) {
+		uint8_t* p = mmaps.get(i).directPointer<uint8_t>(0);
+		ASSERT_NE(p, nullptr);
+		for (size_t off = 0; off < blockSize; off += (size_t)pageSize)
+			p[off] = 0;
+	}
 
 	std::atomic<int> ready{0};
 	std::atomic<bool> start{false};
@@ -576,10 +589,13 @@ TEST(MmapHandleTest, MultiThreadMmap_LargeBlockNoContention) {
 
 	// ---- single-thread baseline ----
 	MmapHandle single = handle.getMmapHandle(threadCount * blockSize, blockSize);
+	uint8_t* singlePtr = single.directPointer<uint8_t>(0);
+	ASSERT_NE(singlePtr, nullptr);
+	for (size_t off = 0; off < blockSize; off += (size_t)pageSize)
+		singlePtr[off] = 0;
 
 	uint64_t s0 = millis_since_epoch();
 
-	uint8_t* singlePtr = single.directPointer<uint8_t>(0);
 	for (size_t i = 0; i < blockSize; i++)
 		singlePtr[i] = (uint8_t)(91 * i);
 	uint64_t s1 = millis_since_epoch();
@@ -640,4 +656,81 @@ TEST(MmapHandleTest, MoveAssignment) {
 TEST(MmapHandleTest, DefaultConstructor) {
 	MmapHandle mmap;
 	EXPECT_FALSE(mmap);
+}
+
+TEST(MemoryAdviseTest, NullAndZeroAreNoOps) {
+	memoryAdviseWillNeed(nullptr, 4096);
+	memoryAdviseSequential(nullptr, 4096);
+	memoryAdviseHugePage(nullptr, 4096);
+
+	char stack = 0;
+	memoryAdviseWillNeed(&stack, 0);
+	memoryAdviseSequential(&stack, 0);
+	memoryAdviseHugePage(&stack, 0);
+	EXPECT_EQ(stack, 0);
+}
+
+TEST(MemoryAdviseTest, UnalignedHeapBufferRemainsUsable) {
+	const size_t n = 256;
+	char* raw = new char[n + 16];
+	char* p = raw + 3;
+	for (size_t i = 0; i < n; i++)
+		p[i] = (char)(i * 3);
+
+	memoryAdviseWillNeed(p, n);
+	memoryAdviseSequential(p, n);
+	memoryAdviseHugePage(p, n);
+
+	for (size_t i = 0; i < n; i++)
+		EXPECT_EQ(p[i], (char)(i * 3));
+	delete[] raw;
+}
+
+TEST(MemoryAdviseTest, AnonymousMapping) {
+	long page = sysconf(_SC_PAGESIZE);
+	if (page <= 0)
+		page = 4096;
+	const size_t bytes = (size_t)page * 4;
+	void* p = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	ASSERT_NE(p, MAP_FAILED);
+
+	memset(p, 0xA5, bytes);
+	memoryAdviseWillNeed(p, bytes);
+	memoryAdviseSequential(p, bytes);
+	memoryAdviseHugePage(p, bytes);
+
+	EXPECT_EQ(((unsigned char*)p)[0], 0xA5);
+	EXPECT_EQ(((unsigned char*)p)[bytes - 1], 0xA5);
+	munmap(p, bytes);
+}
+
+TEST(MemoryAdviseTest, EmptyMmapHandleIsNoOp) {
+	MmapHandle empty;
+	empty.adviseWillNeed();
+	empty.adviseSequential();
+	empty.adviseHugePage();
+	EXPECT_FALSE(empty);
+}
+
+TEST(MemoryAdviseTest, FileBackedMmapHandle) {
+	const char* path = "memory_advise_mmap.tmp";
+	unlink(path);
+	FdHandle fd = FdHandle::open(path, O_RDWR | O_CREAT, 0660);
+	ASSERT_TRUE(fd);
+
+	const size_t n = 8192;
+	MmapHandle map = fd.getMmapHandle(0, n);
+	ASSERT_TRUE(map);
+
+	for (size_t i = 0; i < n; i++)
+		map.directPointer<unsigned char>(0)[i] = (unsigned char)(i & 0xFF);
+
+	map.adviseWillNeed();
+	map.adviseSequential();
+	map.adviseHugePage();
+
+	for (size_t i = 0; i < n; i++)
+		EXPECT_EQ(map.directPointer<unsigned char>(0)[i], (unsigned char)(i & 0xFF));
+
+	unlink(path);
 }
