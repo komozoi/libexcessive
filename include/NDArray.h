@@ -763,6 +763,7 @@ public:
 	** add/sub/mul/div and += mutate *this (CoW-detach if the buffer is shared).
 	** Operators and binaryOp allocate one result and do not convert() a side
 	** that already has the promoted type. binaryOpInto writes a caller-owned dest.
+	** A scalar stays in the array type when it is exactly representable there.
 	*/
 
 	enum class ArithOp { Add, Sub, Mul, Div };

@@ -142,12 +142,12 @@ TEST(NDArray_int3, DivByZero_Throws) {
 TEST(NDArray_int3, ScalarOps) {
 	NDArray a({3}, INT3);
 	a.set({0}, 1); a.set({1}, -2); a.set({2}, 3);
-	// Int scalar promotes INT3 → INT32 (lossless policy).
+	// 1 is representable as INT3; stay and wrap.
 	NDArray r = a + 1;
-	EXPECT_EQ(r.type, INT32);
+	EXPECT_EQ(r.type, INT3);
 	EXPECT_EQ(r.get<int>({0}), 2);
 	EXPECT_EQ(r.get<int>({1}), -1);
-	EXPECT_EQ(r.get<int>({2}), 4);
+	EXPECT_EQ(r.get<int>({2}), wrap3(3 + 1));
 
 	// Same-type wrap stays INT3.
 	NDArray w({3}, INT3);
@@ -163,6 +163,28 @@ TEST(NDArray_int3, ScalarOps) {
 	EXPECT_EQ(m.get<int>({0}), 2);
 	EXPECT_EQ(m.get<int>({1}), -4);
 	EXPECT_EQ(m.get<int>({2}), wrap3(3 * 2));
+}
+
+TEST(NDArray_int3, ScalarUnrepresentable_PromotesToINT32) {
+	NDArray a({2}, INT3);
+	a.set({0}, 1);
+	a.set({1}, 3);
+	NDArray r = a + 5;
+	EXPECT_EQ(r.type, INT32);
+	EXPECT_EQ(r.get<int32_t>({0}), 6);
+	EXPECT_EQ(r.get<int32_t>({1}), 8);
+}
+
+TEST(NDArray_int3, ScalarExactFloat_StaysINT3) {
+	NDArray a({3}, INT3);
+	a.set({0}, 1);
+	a.set({1}, -2);
+	a.set({2}, 3);
+	NDArray r = a + 1.0f;
+	EXPECT_EQ(r.type, INT3);
+	EXPECT_EQ(r.get<int>({0}), 2);
+	EXPECT_EQ(r.get<int>({1}), -1);
+	EXPECT_EQ(r.get<int>({2}), wrap3(3 + 1));
 }
 
 TEST(NDArray_int3, PromoteWithFloat) {

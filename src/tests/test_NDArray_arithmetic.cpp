@@ -325,13 +325,12 @@ TEST(NDArray_arithmetic, UINT8_plus_FloatScalar_PromotesToF32) {
 	EXPECT_FLOAT_EQ(c.get<float>({2}), 3.5f);
 }
 
-TEST(NDArray_arithmetic, UINT8_plus_IntScalar_PromotesToINT32) {
-	// int is signed; promotes to INT32
+TEST(NDArray_arithmetic, UINT8_plus_IntScalar_StaysUINT8) {
 	NDArray a(ArrayList<uint8_t>({1, 2, 3}));
 	NDArray c = a + 10;
-	EXPECT_EQ(c.type, INT32);
-	EXPECT_EQ(c.get<int32_t>({0}), 11);
-	EXPECT_EQ(c.get<int32_t>({2}), 13);
+	EXPECT_EQ(c.type, UINT8);
+	EXPECT_EQ(c.get<uint8_t>({0}), 11);
+	EXPECT_EQ(c.get<uint8_t>({2}), 13);
 }
 
 TEST(NDArray_arithmetic, UINT256_plus_IntScalar_StaysUINT256) {
@@ -342,6 +341,114 @@ TEST(NDArray_arithmetic, UINT256_plus_IntScalar_StaysUINT256) {
 	EXPECT_EQ(c.type, UINT256);
 	EXPECT_EQ(c.get<uint256_t>({0}), uint256_t(15));
 	EXPECT_EQ(c.get<uint256_t>({1}), uint256_t(16));
+}
+
+TEST(NDArray_arithmetic, F32_plus_IntScalar_StaysF32) {
+	NDArray a(ArrayList({1.0f, 2.0f, 3.0f}));
+	NDArray c = a + 1;
+	EXPECT_EQ(c.type, F32);
+	EXPECT_FLOAT_EQ(c.get<float>({0}), 2.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({2}), 4.0f);
+	NDArray d = a + 1.0f;
+	EXPECT_EQ(d.type, F32);
+	EXPECT_FLOAT_EQ(d.get<float>({0}), c.get<float>({0}));
+	EXPECT_FLOAT_EQ(d.get<float>({2}), c.get<float>({2}));
+}
+
+TEST(NDArray_arithmetic, F32_plus_DoubleOne_StaysF32) {
+	NDArray a(ArrayList({1.0f, 2.0f}));
+	NDArray c = a + 1.0;
+	EXPECT_EQ(c.type, F32);
+	EXPECT_FLOAT_EQ(c.get<float>({0}), 2.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({1}), 3.0f);
+}
+
+TEST(NDArray_arithmetic, UINT8_plus_256_PromotesToINT32) {
+	NDArray a(ArrayList<uint8_t>({1, 2, 255}));
+	NDArray c = a + 256;
+	EXPECT_EQ(c.type, INT32);
+	EXPECT_EQ(c.get<int32_t>({0}), 257);
+	EXPECT_EQ(c.get<int32_t>({2}), 511);
+}
+
+TEST(NDArray_arithmetic, UINT8_plus_Neg1_PromotesToINT32) {
+	NDArray a(ArrayList<uint8_t>({1, 2}));
+	NDArray c = a + (-1);
+	EXPECT_EQ(c.type, INT32);
+	EXPECT_EQ(c.get<int32_t>({0}), 0);
+	EXPECT_EQ(c.get<int32_t>({1}), 1);
+}
+
+TEST(NDArray_arithmetic, UINT8_255_plus_1_Wraps) {
+	NDArray a(ArrayList<uint8_t>({255, 1}));
+	NDArray c = a + 1;
+	EXPECT_EQ(c.type, UINT8);
+	EXPECT_EQ(c.get<uint8_t>({0}), 0);
+	EXPECT_EQ(c.get<uint8_t>({1}), 2);
+}
+
+TEST(NDArray_arithmetic, UINT8_plus_ExactFloat_StaysUINT8) {
+	NDArray a(ArrayList<uint8_t>({1, 2, 3}));
+	NDArray c = a + 1.0f;
+	EXPECT_EQ(c.type, UINT8);
+	EXPECT_EQ(c.get<uint8_t>({0}), 2);
+	EXPECT_EQ(c.get<uint8_t>({2}), 4);
+}
+
+TEST(NDArray_arithmetic, INT8_plus_IntScalar_StaysINT8) {
+	NDArray a({3}, INT8);
+	a.set({0}, -2);
+	a.set({1}, 10);
+	a.set({2}, 126);
+	NDArray c = a + 1;
+	EXPECT_EQ(c.type, INT8);
+	EXPECT_EQ(c.get<int>({0}), -1);
+	EXPECT_EQ(c.get<int>({1}), 11);
+	EXPECT_EQ(c.get<int8_t>({2}), (int8_t)127);
+}
+
+TEST(NDArray_arithmetic, INT8_plus_128_PromotesToINT32) {
+	NDArray a({2}, INT8);
+	a.set({0}, 1);
+	a.set({1}, -2);
+	NDArray c = a + 128;
+	EXPECT_EQ(c.type, INT32);
+	EXPECT_EQ(c.get<int32_t>({0}), 129);
+	EXPECT_EQ(c.get<int32_t>({1}), 126);
+}
+
+TEST(NDArray_arithmetic, BINARY_plus_1_StaysBINARY) {
+	NDArray a({3}, BINARY);
+	a.set({0}, 0);
+	a.set({1}, 1);
+	a.set({2}, 1);
+	NDArray c = a + 1;
+	EXPECT_EQ(c.type, BINARY);
+	EXPECT_EQ(c.get<int>({0}), 1);
+	EXPECT_EQ(c.get<int>({1}), 0);
+	EXPECT_EQ(c.get<int>({2}), 0);
+}
+
+TEST(NDArray_arithmetic, BINARY_plus_2_PromotesToINT32) {
+	NDArray a({2}, BINARY);
+	a.set({0}, 1);
+	a.set({1}, 0);
+	NDArray c = a + 2;
+	EXPECT_EQ(c.type, INT32);
+	EXPECT_EQ(c.get<int32_t>({0}), 3);
+	EXPECT_EQ(c.get<int32_t>({1}), 2);
+}
+
+TEST(NDArray_arithmetic, UINT8_NamedScalar_StaysUINT8) {
+	NDArray a(ArrayList<uint8_t>({2, 3, 4}));
+	NDArray p = a.pow(2);
+	EXPECT_EQ(p.type, UINT8);
+	EXPECT_EQ(p.get<uint8_t>({0}), 4);
+	EXPECT_EQ(p.get<uint8_t>({2}), 16);
+	NDArray m = a.minimum(3);
+	EXPECT_EQ(m.type, UINT8);
+	EXPECT_EQ(m.get<uint8_t>({0}), 2);
+	EXPECT_EQ(m.get<uint8_t>({2}), 3);
 }
 
 TEST(NDArray_arithmetic, Scalar_MulDivSub) {
@@ -385,14 +492,13 @@ TEST(NDArray_arithmetic, CompoundAdd_F32) {
 	EXPECT_FLOAT_EQ(a.get<float>({1}), 8.0f);
 }
 
-TEST(NDArray_arithmetic, CompoundMul_UINT8_IntPromotesToINT32) {
-	// int is signed → promote destination to INT32
+TEST(NDArray_arithmetic, CompoundMul_UINT8_IntStaysUINT8) {
 	NDArray a(ArrayList<uint8_t>({2, 3, 4}));
 	a *= 2;
-	EXPECT_EQ(a.type, INT32);
-	EXPECT_EQ(a.get<int32_t>({0}), 4);
-	EXPECT_EQ(a.get<int32_t>({1}), 6);
-	EXPECT_EQ(a.get<int32_t>({2}), 8);
+	EXPECT_EQ(a.type, UINT8);
+	EXPECT_EQ(a.get<uint8_t>({0}), 4);
+	EXPECT_EQ(a.get<uint8_t>({1}), 6);
+	EXPECT_EQ(a.get<uint8_t>({2}), 8);
 }
 
 TEST(NDArray_arithmetic, Compound_PromotesDestination_UINT8_plus_F32) {

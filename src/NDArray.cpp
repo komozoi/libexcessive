@@ -15,6 +15,7 @@
 #include "ndarray_half_kernels.h"
 
 #include <atomic>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -36,8 +37,9 @@
 **
 ** Arithmetic never silently loses information.  When two values meet, the
 ** result type is one that can represent both operands losslessly
-** (see promoteTypes).  Explicit convert() is the only place the programmer
-** may request a potentially lossy cast.
+** (see promoteTypes).  A scalar stays in the array type when it is
+** exactly representable there.  Explicit convert() is the only place the
+** programmer may request a potentially lossy cast.
 **
 ** Unary *methods* mutate in place.  Operators return new arrays (copy).
 ** Same-type a+b allocates one result and writes into it (no convert() of
@@ -151,25 +153,84 @@ static NDArrayType promoteTypes(NDArrayType a, NDArrayType b) {
 	throw std::invalid_argument("NDArray: no lossless common type for operands");
 }
 
-static NDArrayType promoteWithFloatScalar(NDArrayType arrayType) {
+/** True when v is exactly a value of storage type t. */
+static bool int64ExactlyRepresentable(NDArrayType t, int64_t v) {
+	switch (t) {
+		case BINARY:  return v == 0 || v == 1;
+		case INT3:    return v >= -4 && v <= 3;
+		case UINT8:   return v >= 0 && v <= 255;
+		case INT8:    return v >= -128 && v <= 127;
+		case INT32:   return v >= (int64_t)INT32_MIN && v <= (int64_t)INT32_MAX;
+		case INT64:   return true;
+		case UINT256: return v >= 0;
+		case F32: {
+			float f = (float)v;
+			return std::isfinite(f) && (int64_t)f == v;
+		}
+		case F64: {
+			double d = (double)v;
+			return std::isfinite(d) && (int64_t)d == v;
+		}
+		case F16:
+		case BF16: {
+			float f = (float)v;
+			if (!std::isfinite(f) || (int64_t)f != v)
+				return false;
+			float h = ndarray_half::load(t, ndarray_half::store(t, f));
+			return std::isfinite(h) && (int64_t)h == v;
+		}
+		default:
+			return false;
+	}
+}
+
+static bool doubleExactlyRepresentable(NDArrayType t, double v) {
+	if (isFloatingPoint(t)) {
+		if (!std::isfinite(v))
+			return true;
+		if (t == F64)
+			return true;
+		if (t == F32)
+			return (double)(float)v == v;
+		if ((double)(float)v != v)
+			return false;
+		float h = ndarray_half::load(t, ndarray_half::store(t, (float)v));
+		return (double)h == v;
+	}
+	if (!std::isfinite(v) || v != std::trunc(v))
+		return false;
+	if (v < -9223372036854775808.0 || v >= 9223372036854775808.0)
+		return t == UINT256 && v >= 0.0;
+	return int64ExactlyRepresentable(t, (int64_t)v);
+}
+
+static NDArrayType promoteWithFloatScalar(NDArrayType arrayType, float scalar) {
+	if (doubleExactlyRepresentable(arrayType, (double)scalar))
+		return arrayType;
 	if (isHalfFloat(arrayType))
 		return arrayType;
 	return promoteTypes(arrayType, F32);
 }
 
-static NDArrayType promoteWithDoubleScalar(NDArrayType arrayType) {
+static NDArrayType promoteWithDoubleScalar(NDArrayType arrayType, double scalar) {
+	if (doubleExactlyRepresentable(arrayType, scalar))
+		return arrayType;
 	if (isHalfFloat(arrayType))
 		return arrayType;
 	return promoteTypes(arrayType, F64);
 }
 
-static NDArrayType promoteWithIntScalar(NDArrayType arrayType) {
+static NDArrayType promoteWithIntScalar(NDArrayType arrayType, int scalar) {
+	if (int64ExactlyRepresentable(arrayType, scalar))
+		return arrayType;
 	if (arrayType == UINT256 || isHalfFloat(arrayType))
 		return arrayType;
 	return promoteTypes(arrayType, INT32);
 }
 
-static NDArrayType promoteWithInt64Scalar(NDArrayType arrayType) {
+static NDArrayType promoteWithInt64Scalar(NDArrayType arrayType, int64_t scalar) {
+	if (int64ExactlyRepresentable(arrayType, scalar))
+		return arrayType;
 	if (arrayType == UINT256 || isHalfFloat(arrayType))
 		return arrayType;
 	return promoteTypes(arrayType, INT64);
@@ -2895,19 +2956,19 @@ NDArray& NDArray::binaryOpInPlace(const NDArray& other, ArithOp op) {
 }
 
 NDArray& NDArray::scalarFloatOpInPlace(float other, ArithOp op) {
-	promoteInPlace(promoteWithFloatScalar(type));
+	promoteInPlace(promoteWithFloatScalar(type, other));
 	applyFloatScalarInPlace(other, op);
 	return *this;
 }
 
 NDArray& NDArray::scalarDoubleOpInPlace(double other, ArithOp op) {
-	promoteInPlace(promoteWithDoubleScalar(type));
+	promoteInPlace(promoteWithDoubleScalar(type, other));
 	applyDoubleScalarInPlace(other, op);
 	return *this;
 }
 
 NDArray& NDArray::scalarIntOpInPlace(int other, ArithOp op) {
-	promoteInPlace(promoteWithIntScalar(type));
+	promoteInPlace(promoteWithIntScalar(type, other));
 	if (isFloatingPoint(type))
 		applyDoubleScalarInPlace((double)other, op);
 	else
@@ -2916,7 +2977,7 @@ NDArray& NDArray::scalarIntOpInPlace(int other, ArithOp op) {
 }
 
 NDArray& NDArray::scalarInt64OpInPlace(int64_t other, ArithOp op) {
-	promoteInPlace(promoteWithInt64Scalar(type));
+	promoteInPlace(promoteWithInt64Scalar(type, other));
 	if (isFloatingPoint(type))
 		applyDoubleScalarInPlace((double)other, op);
 	else
@@ -3111,19 +3172,19 @@ NDArray NDArray::binaryOp(const NDArray& other, ArithOp op) const {
 }
 
 NDArray NDArray::scalarFloatOp(float other, ArithOp op) const {
-	NDArray result = convert(promoteWithFloatScalar(type));
+	NDArray result = convert(promoteWithFloatScalar(type, other));
 	result.applyFloatScalarInPlace(other, op);
 	return result;
 }
 
 NDArray NDArray::scalarDoubleOp(double other, ArithOp op) const {
-	NDArray result = convert(promoteWithDoubleScalar(type));
+	NDArray result = convert(promoteWithDoubleScalar(type, other));
 	result.applyDoubleScalarInPlace(other, op);
 	return result;
 }
 
 NDArray NDArray::scalarIntOp(int other, ArithOp op) const {
-	NDArrayType rt = promoteWithIntScalar(type);
+	NDArrayType rt = promoteWithIntScalar(type, other);
 	NDArray result = convert(rt);
 	if (isFloatingPoint(rt))
 		result.applyDoubleScalarInPlace((double)other, op);
@@ -3133,7 +3194,7 @@ NDArray NDArray::scalarIntOp(int other, ArithOp op) const {
 }
 
 NDArray NDArray::scalarInt64Op(int64_t other, ArithOp op) const {
-	NDArrayType rt = promoteWithInt64Scalar(type);
+	NDArrayType rt = promoteWithInt64Scalar(type, other);
 	NDArray result = convert(rt);
 	if (isFloatingPoint(rt))
 		result.applyDoubleScalarInPlace((double)other, op);
@@ -4089,9 +4150,7 @@ struct NDArray::Impl {
 	}
 
 	static NDArray elemBinDoubleScalar(const NDArray& a, double s, ElemBinOp op) {
-		NDArrayType rt = promoteWithDoubleScalar(a.type);
-		if ((op == ElemBinOp::Min || op == ElemBinOp::Max) && isLosslessConversion(a.type, F64))
-			rt = promoteTypes(a.type, F64);
+		NDArrayType rt = promoteWithDoubleScalar(a.type, s);
 		NDArray left = a.convert(rt);
 		const size_t n = left.numElements();
 		if (left.type == F16 || left.type == BF16) {
@@ -4125,6 +4184,19 @@ struct NDArray::Impl {
 			uint256_t sb(s);
 			for (size_t i = 0; i < n; ++i)
 				left.uint256[i] = elemBinU256(left.uint256[i], sb, op);
+		} else if (left.type == BINARY) {
+			uint8_t sb = s > 0.0 ? 1 : 0;
+			for (size_t i = 0; i < n; ++i) {
+				uint8_t av = binaryGet(left.uint64, i);
+				binarySet(left.uint64, i, elemBinU8(av, sb, op) & 1);
+			}
+		} else if (left.type == INT3) {
+			int sb = (int)s;
+			for (size_t i = 0; i < n; ++i) {
+				int av = int3_getSigned(left.uint64, i);
+				int3_setSigned(left.uint64, i, (int)elemBinI64(av, sb, op));
+			}
+			int3_clearPadding(left.uint64, n);
 		} else {
 			throw std::runtime_error("NDArray: invalid type in scalar element-wise op");
 		}
@@ -4133,7 +4205,7 @@ struct NDArray::Impl {
 
 	static NDArray elemBinFloatScalar(const NDArray& a, float s, ElemBinOp op) {
 		// Prefer F32 when the array promotes there cleanly.
-		NDArrayType rt = promoteWithFloatScalar(a.type);
+		NDArrayType rt = promoteWithFloatScalar(a.type, s);
 		NDArray left = a.convert(rt);
 		const size_t n = left.numElements();
 		if (left.type == F16 || left.type == BF16) {
@@ -4152,20 +4224,7 @@ struct NDArray::Impl {
 	}
 
 	static NDArray elemBinIntScalar(const NDArray& a, int s, ElemBinOp op) {
-		NDArrayType rt = promoteWithIntScalar(a.type);
-		if (op == ElemBinOp::Min || op == ElemBinOp::Max) {
-			if (a.type == UINT8 && s >= 0 && s <= 255) rt = UINT8;
-			else if (a.type == INT8 && s >= -128 && s <= 127) rt = INT8;
-			else if (a.type == INT3 && s >= -4 && s <= 3) rt = INT3;
-			else if (a.type == INT32) rt = INT32;
-			else if (a.type == INT64) rt = INT64;
-			else if (a.type == UINT256 && s >= 0) rt = UINT256;
-			else if (a.type == BINARY && (s == 0 || s == 1)) rt = BINARY;
-			else if (a.type == F16 || a.type == BF16) rt = a.type;
-			else if (a.type == F32) rt = F32;
-			else if (a.type == F64) rt = F64;
-			else rt = promoteWithIntScalar(a.type);
-		}
+		NDArrayType rt = promoteWithIntScalar(a.type, s);
 		NDArray left = a.convert(rt);
 		const size_t n = left.numElements();
 		if (isFloatingPoint(left.type))
@@ -5105,7 +5164,7 @@ NDArray NDArray::mod(int other) const { return Impl::elemBinIntScalar(*this, oth
 
 // int64 scalar min/max/pow/mod: promote to INT64 then run integer kernel
 NDArray NDArray::minimum(int64_t other) const {
-	NDArrayType rt = promoteWithInt64Scalar(type);
+	NDArrayType rt = promoteWithInt64Scalar(type, other);
 	if (isFloatingPoint(rt))
 		return minimum((double)other);
 	NDArray left = convert(rt);
@@ -5123,7 +5182,7 @@ NDArray NDArray::minimum(int64_t other) const {
 	return left;
 }
 NDArray NDArray::maximum(int64_t other) const {
-	NDArrayType rt = promoteWithInt64Scalar(type);
+	NDArrayType rt = promoteWithInt64Scalar(type, other);
 	if (isFloatingPoint(rt))
 		return maximum((double)other);
 	NDArray left = convert(rt);
@@ -5141,7 +5200,7 @@ NDArray NDArray::maximum(int64_t other) const {
 	return left;
 }
 NDArray NDArray::pow(int64_t other) const {
-	NDArrayType rt = promoteWithInt64Scalar(type);
+	NDArrayType rt = promoteWithInt64Scalar(type, other);
 	if (isFloatingPoint(rt))
 		return pow((double)other);
 	NDArray left = convert(rt);
@@ -5163,7 +5222,7 @@ NDArray NDArray::pow(int64_t other) const {
 	return left;
 }
 NDArray NDArray::mod(int64_t other) const {
-	NDArrayType rt = promoteWithInt64Scalar(type);
+	NDArrayType rt = promoteWithInt64Scalar(type, other);
 	if (isFloatingPoint(rt))
 		return mod((double)other);
 	if (other == 0)
