@@ -109,27 +109,25 @@ alignas(64) static const uint8_t int3_kMulTable[64] = {
 	0, 7, 6, 5, 4, 3, 2, 1,
 };
 
-// Div: toward-zero signed; /0 → 0 (callers reject zeros). Filled once.
-alignas(64) static uint8_t int3_kDivTable[64];
-static bool int3_kDivTableReady = false;
-
-static inline uint8_t int3_makeDivTableEntry(unsigned idx) {
-	unsigned ap = idx & 7u;
-	unsigned bp = (idx >> 3) & 7u;
-	if (bp == 0)
-		return 0;
-	int a = int3_decode((uint8_t)ap);
-	int b = int3_decode((uint8_t)bp);
-	return int3_encode(a / b);
-}
-
-static inline void int3_ensureDivTable() {
-	if (int3_kDivTableReady)
-		return;
-	for (unsigned i = 0; i < 64; ++i)
-		int3_kDivTable[i] = int3_makeDivTableEntry(i);
-	int3_kDivTableReady = true;
-}
+// index = a | (b << 3); toward-zero signed; /0 → 0 (callers reject zeros)
+alignas(64) static const uint8_t int3_kDivTable[64] = {
+	// b=0
+	0, 0, 0, 0, 0, 0, 0, 0,
+	// b=1
+	0, 1, 2, 3, 4, 5, 6, 7,
+	// b=2
+	0, 0, 1, 1, 6, 7, 7, 0,
+	// b=3
+	0, 0, 0, 1, 7, 7, 0, 0,
+	// b=4
+	0, 0, 0, 0, 1, 0, 0, 0,
+	// b=5
+	0, 0, 0, 7, 1, 1, 0, 0,
+	// b=6
+	0, 0, 7, 7, 2, 1, 1, 0,
+	// b=7
+	0, 7, 6, 5, 4, 3, 2, 1,
+};
 
 static inline void int3_clearPadding(uint64_t* dst, size_t nElems) {
 	const size_t nWords = int3_wordCount(nElems);
@@ -293,7 +291,6 @@ static inline void int3_mul(uint64_t* dst, const uint64_t* src, size_t nElems) {
 }
 
 static inline void int3_div(uint64_t* dst, const uint64_t* src, size_t nElems) {
-	int3_ensureDivTable();
 	if (int3_anyZeroDivisor(src, nElems))
 		throw std::invalid_argument("NDArray: division by zero");
 #if LIBEXCESSIVE_INT3_AVX512
@@ -330,7 +327,6 @@ static inline void int3_mulScalar(uint64_t* dst, uint8_t pattern3, size_t nElems
 }
 
 static inline void int3_divScalar(uint64_t* dst, uint8_t pattern3, size_t nElems) {
-	int3_ensureDivTable();
 	pattern3 &= 7;
 	if (pattern3 == 0)
 		throw std::invalid_argument("NDArray: division by zero");
