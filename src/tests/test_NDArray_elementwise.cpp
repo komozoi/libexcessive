@@ -189,6 +189,22 @@ TEST(NDArray_elementwise, Floor_OnInteger_NoOp) {
 	EXPECT_EQ(a.get<uint8_t>({2}), 3);
 }
 
+TEST(NDArray_elementwise, Square_BINARY_StaysBINARY) {
+	NDArray a({5}, BINARY);
+	a.set({0}, 1);
+	a.set({1}, 0);
+	a.set({2}, 1);
+	a.set({3}, 1);
+	a.set({4}, 0);
+	a.square();
+	EXPECT_EQ(a.type, BINARY);
+	EXPECT_EQ(a.get<int>({0}), 1);
+	EXPECT_EQ(a.get<int>({1}), 0);
+	EXPECT_EQ(a.get<int>({2}), 1);
+	EXPECT_EQ(a.get<int>({3}), 1);
+	EXPECT_EQ(a.get<int>({4}), 0);
+}
+
 TEST(NDArray_elementwise, Square_InPlace_ChainsToPower4) {
 	// b.square().square() → b**4 in place
 	NDArray b(ArrayList({2.0f, 3.0f}));

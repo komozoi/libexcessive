@@ -235,6 +235,67 @@ static inline void int3_addAvx512(uint64_t* dst, const uint64_t* src, size_t nWo
 		dst[w] = int3_addWord(dst[w] & int3_kValueMask, src[w] & int3_kValueMask);
 }
 
+static inline void int3_addIntoAvx512(uint64_t* dst, const uint64_t* a, const uint64_t* b, size_t nWords) {
+	const __m512i mask = _mm512_set1_epi64((long long)int3_kValueMask);
+	size_t w = 0;
+	for (; w + 8 <= nWords; w += 8) {
+		__m512i va = _mm512_and_si512(_mm512_loadu_si512(a + w), mask);
+		__m512i vb = _mm512_and_si512(_mm512_loadu_si512(b + w), mask);
+		_mm512_storeu_si512(dst + w, _mm512_and_si512(_mm512_add_epi64(va, vb), mask));
+	}
+	for (; w < nWords; ++w)
+		dst[w] = int3_addWord(a[w] & int3_kValueMask, b[w] & int3_kValueMask);
+}
+
+static inline void int3_subIntoAvx512(uint64_t* dst, const uint64_t* a, const uint64_t* b, size_t nWords) {
+	const __m512i mask = _mm512_set1_epi64((long long)int3_kValueMask);
+	const __m512i pad = _mm512_set1_epi64((long long)int3_kPadMask);
+	size_t w = 0;
+	for (; w + 8 <= nWords; w += 8) {
+		__m512i va = _mm512_and_si512(_mm512_loadu_si512(a + w), mask);
+		__m512i vb = _mm512_and_si512(_mm512_loadu_si512(b + w), mask);
+		__m512i t = _mm512_sub_epi64(_mm512_or_si512(va, pad), vb);
+		_mm512_storeu_si512(dst + w, _mm512_and_si512(t, mask));
+	}
+	for (; w < nWords; ++w)
+		dst[w] = int3_subWord(a[w] & int3_kValueMask, b[w] & int3_kValueMask);
+}
+
+static inline void int3_tableApplyIntoAvx512(uint64_t* dst, const uint64_t* a, const uint64_t* b,
+                                            size_t nElems, const uint8_t table[64]) {
+	const size_t nWords = int3_wordCount(nElems);
+	const size_t nBytes = nWords * sizeof(uint64_t);
+	uint8_t* db = reinterpret_cast<uint8_t*>(dst);
+	const uint8_t* pa = reinterpret_cast<const uint8_t*>(a);
+	const uint8_t* pb = reinterpret_cast<const uint8_t*>(b);
+	const __m512i tab = _mm512_load_si512(reinterpret_cast<const void*>(table));
+	const __m512i idxMask = _mm512_set1_epi8(0x3F);
+
+	size_t off = 0;
+	for (; off + 64 <= nBytes; off += 64) {
+		__m512i va = _mm512_loadu_si512(pa + off);
+		__m512i vb = _mm512_loadu_si512(pb + off);
+		__m512i a_lo = int3_valuesLo3(va);
+		__m512i b_lo = int3_valuesLo3(vb);
+		__m512i a_hi = int3_valuesHi3(va);
+		__m512i b_hi = int3_valuesHi3(vb);
+		__m512i idx_lo = _mm512_and_si512(
+			_mm512_or_si512(a_lo, _mm512_slli_epi16(b_lo, 3)), idxMask);
+		__m512i idx_hi = _mm512_and_si512(
+			_mm512_or_si512(a_hi, _mm512_slli_epi16(b_hi, 3)), idxMask);
+		__m512i p_lo = _mm512_permutexvar_epi8(idx_lo, tab);
+		__m512i p_hi = _mm512_permutexvar_epi8(idx_hi, tab);
+		_mm512_storeu_si512(db + off, int3_packLoHi(p_lo, p_hi));
+	}
+	const size_t doneElems = off * 2;
+	for (size_t i = doneElems; i < nElems; ++i) {
+		uint8_t ua = int3_get(a, i);
+		uint8_t ub = int3_get(b, i);
+		int3_set(dst, i, table[(size_t)ua | ((size_t)ub << 3)]);
+	}
+	int3_clearPadding(dst, nElems);
+}
+
 static inline void int3_subAvx512(uint64_t* dst, const uint64_t* src, size_t nWords) {
 	const __m512i mask = _mm512_set1_epi64((long long)int3_kValueMask);
 	const __m512i pad = _mm512_set1_epi64((long long)int3_kPadMask);
@@ -301,6 +362,91 @@ static inline void int3_div(uint64_t* dst, const uint64_t* src, size_t nElems) {
 #else
 	int3_tableApplyScalar(dst, src, nElems, int3_kDivTable);
 #endif
+}
+
+static inline void int3_addIntoScalarPath(uint64_t* dst, const uint64_t* a, const uint64_t* b, size_t nWords) {
+	for (size_t w = 0; w < nWords; ++w)
+		dst[w] = int3_addWord(a[w] & int3_kValueMask, b[w] & int3_kValueMask);
+}
+
+static inline void int3_subIntoScalarPath(uint64_t* dst, const uint64_t* a, const uint64_t* b, size_t nWords) {
+	for (size_t w = 0; w < nWords; ++w)
+		dst[w] = int3_subWord(a[w] & int3_kValueMask, b[w] & int3_kValueMask);
+}
+
+static inline void int3_tableApplyIntoScalar(uint64_t* dst, const uint64_t* a, const uint64_t* b,
+                                            size_t nElems, const uint8_t table[64]) {
+	const size_t nWords = int3_wordCount(nElems);
+	for (size_t w = 0; w < nWords; ++w) {
+		uint64_t aw = a[w];
+		uint64_t bw = b[w];
+		uint64_t out = 0;
+		for (size_t lane = 0; lane < int3_kLanesPerWord; ++lane) {
+			unsigned sh = (unsigned)(lane * 4);
+			uint8_t ua = (uint8_t)((aw >> sh) & 7u);
+			uint8_t ub = (uint8_t)((bw >> sh) & 7u);
+			out |= (uint64_t)table[(size_t)ua | ((size_t)ub << 3)] << sh;
+		}
+		dst[w] = out;
+	}
+	int3_clearPadding(dst, nElems);
+}
+
+static inline void int3_addInto(uint64_t* dst, const uint64_t* a, const uint64_t* b, size_t nElems) {
+	const size_t nWords = int3_wordCount(nElems);
+#if LIBEXCESSIVE_INT3_AVX512
+	if (nWords >= 8)
+		int3_addIntoAvx512(dst, a, b, nWords);
+	else
+		int3_addIntoScalarPath(dst, a, b, nWords);
+#else
+	int3_addIntoScalarPath(dst, a, b, nWords);
+#endif
+	int3_clearPadding(dst, nElems);
+}
+
+static inline void int3_subInto(uint64_t* dst, const uint64_t* a, const uint64_t* b, size_t nElems) {
+	const size_t nWords = int3_wordCount(nElems);
+#if LIBEXCESSIVE_INT3_AVX512
+	if (nWords >= 8)
+		int3_subIntoAvx512(dst, a, b, nWords);
+	else
+		int3_subIntoScalarPath(dst, a, b, nWords);
+#else
+	int3_subIntoScalarPath(dst, a, b, nWords);
+#endif
+	int3_clearPadding(dst, nElems);
+}
+
+static inline void int3_mulInto(uint64_t* dst, const uint64_t* a, const uint64_t* b, size_t nElems) {
+#if LIBEXCESSIVE_INT3_AVX512
+	if (int3_wordCount(nElems) * sizeof(uint64_t) >= 64)
+		int3_tableApplyIntoAvx512(dst, a, b, nElems, int3_kMulTable);
+	else
+		int3_tableApplyIntoScalar(dst, a, b, nElems, int3_kMulTable);
+#else
+	int3_tableApplyIntoScalar(dst, a, b, nElems, int3_kMulTable);
+#endif
+}
+
+static inline void int3_divInto(uint64_t* dst, const uint64_t* a, const uint64_t* b, size_t nElems) {
+	if (int3_anyZeroDivisor(b, nElems))
+		throw std::invalid_argument("NDArray: division by zero");
+#if LIBEXCESSIVE_INT3_AVX512
+	if (int3_wordCount(nElems) * sizeof(uint64_t) >= 64)
+		int3_tableApplyIntoAvx512(dst, a, b, nElems, int3_kDivTable);
+	else
+		int3_tableApplyIntoScalar(dst, a, b, nElems, int3_kDivTable);
+#else
+	int3_tableApplyIntoScalar(dst, a, b, nElems, int3_kDivTable);
+#endif
+}
+
+static inline void int3_neg(uint64_t* dst, size_t nElems) {
+	const size_t nWords = int3_wordCount(nElems);
+	for (size_t w = 0; w < nWords; ++w)
+		dst[w] = int3_subWord(0, dst[w] & int3_kValueMask);
+	int3_clearPadding(dst, nElems);
 }
 
 static inline void int3_addScalar(uint64_t* dst, uint8_t pattern3, size_t nElems) {

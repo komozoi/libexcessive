@@ -239,6 +239,7 @@ TEST(NDArray_int3, NegAbs) {
 	NDArray a({4}, INT3);
 	a.set({0}, 1); a.set({1}, -2); a.set({2}, 3); a.set({3}, -4);
 	NDArray n = a.negated();
+	EXPECT_EQ(n.type, INT3);
 	EXPECT_EQ(n.get<int>({0}), -1);
 	EXPECT_EQ(n.get<int>({1}), 2);
 	EXPECT_EQ(n.get<int>({2}), -3);
@@ -248,6 +249,35 @@ TEST(NDArray_int3, NegAbs) {
 	EXPECT_EQ(ab.get<int>({1}), 2);
 	EXPECT_EQ(ab.get<int>({2}), 3);
 	EXPECT_EQ(ab.get<int>({3}), -4); // abs(-4) wraps
+}
+
+TEST(NDArray_int3, Square_StaysINT3) {
+	NDArray a({5}, INT3);
+	const int v[] = {-4, -3, 0, 2, 3};
+	for (int i = 0; i < 5; ++i)
+		a.set({i}, v[i]);
+	a.square();
+	EXPECT_EQ(a.type, INT3);
+	for (int i = 0; i < 5; ++i)
+		EXPECT_EQ(a.get<int>({i}), wrap3(v[i] * v[i]));
+}
+
+TEST(NDArray_int3, BinaryOpInto_MatchesOperator) {
+	NDArray a({8}, INT3);
+	NDArray b({8}, INT3);
+	for (int i = 0; i < 8; ++i) {
+		a.set({i}, i - 4);
+		b.set({i}, 3 - (i % 5));
+	}
+	NDArray sum = a + b;
+	NDArray dst({8}, INT3);
+	NDArray::binaryOpInto(dst, a, b, NDArray::ArithOp::Add);
+	EXPECT_EQ(dst.type, INT3);
+	for (int i = 0; i < 8; ++i)
+		EXPECT_EQ(dst.get<int>({i}), sum.get<int>({i}));
+	NDArray::binaryOpInto(b, a, b, NDArray::ArithOp::Sub);
+	for (int i = 0; i < 8; ++i)
+		EXPECT_EQ(b.get<int>({i}), wrap3((i - 4) - (3 - (i % 5))));
 }
 
 TEST(NDArray_int3, DefaultFactories_UseInt3) {

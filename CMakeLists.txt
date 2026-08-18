@@ -13,6 +13,12 @@ file(GLOB LIBEXCESSIVE_SOURCES CONFIGURE_DEPENDS
 add_library(excessive ${LIBEXCESSIVE_SOURCES})
 add_library(LibExcessive::excessive ALIAS excessive)
 
+# libmvec / auto-vec of expf in the unary TU (does not affect errno policy elsewhere).
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+	set_source_files_properties(src/ndarray_unary.cpp PROPERTIES
+		COMPILE_OPTIONS "-ffast-math;-fopenmp-simd")
+endif()
+
 # LibExcessive should be compiled with -Wall -Werror -Wextra
 # There are a few ignored errors/warnings that I think are a bit silly in our case.
 # Currently c++17 is required for string_view, but this can be fixed in

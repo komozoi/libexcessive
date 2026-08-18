@@ -389,6 +389,45 @@ static void binarySet(uint64_t* words, size_t i, uint8_t bit) {
 		words[i >> 6] &= ~(1ULL << (i & 63));
 }
 
+enum NdBinOp { NdBinAnd = 0, NdBinOr = 1, NdBinXor = 2 };
+
+static void ndBinaryBitOpInPlace(uint64_t* dst, const uint64_t* src, size_t nElems, NdBinOp op) {
+	const size_t fullWords = nElems / 64;
+	for (size_t w = 0; w < fullWords; ++w) {
+		if (op == NdBinAnd) dst[w] &= src[w];
+		else if (op == NdBinOr) dst[w] |= src[w];
+		else dst[w] ^= src[w];
+	}
+	const unsigned rem = (unsigned)(nElems % 64);
+	if (rem) {
+		const uint64_t mask = (1ULL << rem) - 1ULL;
+		uint64_t a = dst[fullWords] & mask;
+		uint64_t b = src[fullWords] & mask;
+		if (op == NdBinAnd) a &= b;
+		else if (op == NdBinOr) a |= b;
+		else a ^= b;
+		dst[fullWords] = a & mask;
+	}
+}
+
+static void ndBinaryBitOpWords(uint64_t* dst, const uint64_t* a, const uint64_t* b, size_t nElems, NdBinOp op) {
+	const size_t fullWords = nElems / 64;
+	for (size_t w = 0; w < fullWords; ++w) {
+		if (op == NdBinAnd) dst[w] = a[w] & b[w];
+		else if (op == NdBinOr) dst[w] = a[w] | b[w];
+		else dst[w] = a[w] ^ b[w];
+	}
+	const unsigned rem = (unsigned)(nElems % 64);
+	if (rem) {
+		const uint64_t mask = (1ULL << rem) - 1ULL;
+		uint64_t r;
+		if (op == NdBinAnd) r = a[fullWords] & b[fullWords];
+		else if (op == NdBinOr) r = a[fullWords] | b[fullWords];
+		else r = a[fullWords] ^ b[fullWords];
+		dst[fullWords] = r & mask;
+	}
+}
+
 /** Type for a bare integer constant: INT3 when value ∈ {-1,0,1}, else INT32. */
 static NDArrayType typeForIntConstant(int64_t value) {
 	if (value == -1 || value == 0 || value == 1)
@@ -2332,6 +2371,19 @@ NDArray NDArray::convert(NDArrayType newType) const {
 		return result;
 	}
 
+	if (type == BINARY && newType == UINT8) {
+		size_t i = 0;
+#if LIBEXCESSIVE_NDARRAY_AVX512 && defined(__AVX512BW__)
+		for (; i + 64 <= n; i += 64) {
+			__mmask64 m = (__mmask64)uint64[i / 64];
+			_mm512_storeu_si512(result.uint8 + i, _mm512_maskz_set1_epi8(m, 1));
+		}
+#endif
+		for (; i < n; ++i)
+			result.uint8[i] = binaryGet(uint64, i);
+		return result;
+	}
+
 	if ((type == F16 && newType == F32) || (type == F32 && newType == F16)
 	    || (type == BF16 && newType == F32) || (type == F32 && newType == BF16)
 	    || (type == F16 && newType == F64) || (type == F64 && newType == F16)
@@ -2505,21 +2557,22 @@ void NDArray::applyBinaryInPlace(const NDArray& src, ArithOp op) {
 			}
 			break;
 		case BINARY:
-			for (size_t i = 0; i < n; ++i) {
-				uint8_t a = binaryGet(uint64, i);
-				uint8_t b = binaryGet(src.uint64, i);
-				uint8_t r = 0;
-				switch (op) {
-					case ArithOp::Add: r = (uint8_t)((a + b) & 1); break;
-					case ArithOp::Sub: r = (uint8_t)((a - b) & 1); break;
-					case ArithOp::Mul: r = (uint8_t)(a & b); break;
-					case ArithOp::Div:
-						if (b == 0)
-							throw std::invalid_argument("NDArray: division by zero");
-						r = a;
-						break;
+			if (op == ArithOp::Add || op == ArithOp::Sub)
+				ndBinaryBitOpInPlace(uint64, src.uint64, n, NdBinXor);
+			else if (op == ArithOp::Mul)
+				ndBinaryBitOpInPlace(uint64, src.uint64, n, NdBinAnd);
+			else {
+				const size_t fullWords = n / 64;
+				for (size_t w = 0; w < fullWords; ++w) {
+					if (~src.uint64[w])
+						throw std::invalid_argument("NDArray: division by zero");
 				}
-				binarySet(uint64, i, r);
+				const unsigned rem = (unsigned)(n % 64);
+				if (rem) {
+					const uint64_t keep = (1ULL << rem) - 1ULL;
+					if ((~src.uint64[fullWords]) & keep)
+						throw std::invalid_argument("NDArray: division by zero");
+				}
 			}
 			break;
 		case INT3:
@@ -2606,41 +2659,32 @@ void NDArray::applyBinaryInto(const NDArray& a, const NDArray& b, ArithOp op) {
 			}
 			break;
 		case BINARY:
-			for (size_t i = 0; i < n; ++i) {
-				uint8_t av = binaryGet(a.uint64, i);
-				uint8_t bv = binaryGet(b.uint64, i);
-				uint8_t r = 0;
-				switch (op) {
-					case ArithOp::Add: r = (uint8_t)((av + bv) & 1); break;
-					case ArithOp::Sub: r = (uint8_t)((av - bv) & 1); break;
-					case ArithOp::Mul: r = (uint8_t)(av & bv); break;
-					case ArithOp::Div:
-						if (bv == 0)
-							throw std::invalid_argument("NDArray: division by zero");
-						r = av;
-						break;
+			if (op == ArithOp::Add || op == ArithOp::Sub)
+				ndBinaryBitOpWords(uint64, a.uint64, b.uint64, n, NdBinXor);
+			else if (op == ArithOp::Mul)
+				ndBinaryBitOpWords(uint64, a.uint64, b.uint64, n, NdBinAnd);
+			else {
+				const size_t fullWords = n / 64;
+				for (size_t w = 0; w < fullWords; ++w) {
+					if (~b.uint64[w])
+						throw std::invalid_argument("NDArray: division by zero");
 				}
-				binarySet(uint64, i, r);
+				const unsigned rem = (unsigned)(n % 64);
+				if (rem) {
+					const uint64_t keep = (1ULL << rem) - 1ULL;
+					if ((~b.uint64[fullWords]) & keep)
+						throw std::invalid_argument("NDArray: division by zero");
+				}
+				ndBinaryBitOpWords(uint64, a.uint64, a.uint64, n, NdBinAnd);
 			}
 			break;
 		case INT3:
-			for (size_t i = 0; i < n; ++i) {
-				int av = int3_getSigned(a.uint64, i);
-				int bv = int3_getSigned(b.uint64, i);
-				int r = 0;
-				switch (op) {
-					case ArithOp::Add: r = av + bv; break;
-					case ArithOp::Sub: r = av - bv; break;
-					case ArithOp::Mul: r = av * bv; break;
-					case ArithOp::Div:
-						if (bv == 0)
-							throw std::invalid_argument("NDArray: division by zero");
-						r = av / bv;
-						break;
-				}
-				int3_setSigned(uint64, i, r);
+			switch (op) {
+				case ArithOp::Add: int3_addInto(uint64, a.uint64, b.uint64, n); break;
+				case ArithOp::Sub: int3_subInto(uint64, a.uint64, b.uint64, n); break;
+				case ArithOp::Mul: int3_mulInto(uint64, a.uint64, b.uint64, n); break;
+				case ArithOp::Div: int3_divInto(uint64, a.uint64, b.uint64, n); break;
 			}
-			int3_clearPadding(uint64, n);
 			break;
 		default:
 			throw std::runtime_error("NDArray: invalid type in arithmetic");
@@ -3426,11 +3470,7 @@ NDArray& NDArray::neg() {
 			for (size_t i = 0; i < n; ++i) int64[i] = -int64[i];
 			break;
 		case INT3:
-			// Two's-complement wrap in 3 bits: pattern → (8 - p) & 7; 0 stays 0.
-			for (size_t i = 0; i < n; ++i) {
-				uint8_t p = int3_get(uint64, i);
-				int3_set(uint64, i, p ? (uint8_t)((8 - p) & 7) : 0);
-			}
+			int3_neg(uint64, n);
 			break;
 		case INT8:
 			for (size_t i = 0; i < n; ++i) int8[i] = (int8_t)-int8[i];
@@ -5815,47 +5855,6 @@ NDArray& NDArray::invert() {
 	return *this;
 }
 
-
-// BINARY mask word ops (file-static; no namespaces)
-enum NdBinOp { NdBinAnd = 0, NdBinOr = 1, NdBinXor = 2 };
-
-static void ndBinaryBitOpInPlace(uint64_t* dst, const uint64_t* src, size_t nElems, NdBinOp op) {
-	const size_t fullWords = nElems / 64;
-	for (size_t w = 0; w < fullWords; ++w) {
-		if (op == NdBinAnd) dst[w] &= src[w];
-		else if (op == NdBinOr) dst[w] |= src[w];
-		else dst[w] ^= src[w];
-	}
-	const unsigned rem = (unsigned)(nElems % 64);
-	if (rem) {
-		const uint64_t mask = (1ULL << rem) - 1ULL;
-		uint64_t a = dst[fullWords] & mask;
-		uint64_t b = src[fullWords] & mask;
-		if (op == NdBinAnd) a &= b;
-		else if (op == NdBinOr) a |= b;
-		else a ^= b;
-		dst[fullWords] = a & mask;
-	}
-}
-
-/** dst[w] = a[w] OP b[w] for first nElems bits (both already BINARY). */
-static void ndBinaryBitOpWords(uint64_t* dst, const uint64_t* a, const uint64_t* b, size_t nElems, NdBinOp op) {
-	const size_t fullWords = nElems / 64;
-	for (size_t w = 0; w < fullWords; ++w) {
-		if (op == NdBinAnd) dst[w] = a[w] & b[w];
-		else if (op == NdBinOr) dst[w] = a[w] | b[w];
-		else dst[w] = a[w] ^ b[w];
-	}
-	const unsigned rem = (unsigned)(nElems % 64);
-	if (rem) {
-		const uint64_t mask = (1ULL << rem) - 1ULL;
-		uint64_t r;
-		if (op == NdBinAnd) r = a[fullWords] & b[fullWords];
-		else if (op == NdBinOr) r = a[fullWords] | b[fullWords];
-		else r = a[fullWords] ^ b[fullWords];
-		dst[fullWords] = r & mask;
-	}
-}
 
 NDArray NDArray::operator&(const NDArray& other) const {
 	requireSameShape(*this, other);
