@@ -399,6 +399,143 @@ TEST(NDArray_reductions, ArgMaxMin_ViewAndEmpty) {
 	EXPECT_THROW(s.argmax(0), std::invalid_argument);
 }
 
+/** First flat index of min/max via getFlat (reference for packed scans). */
+static int64_t refArgExt(const NDArray& a, bool wantMin) {
+	const size_t n = a.numElements();
+	int64_t best = 0;
+	double bv = a.getFlat<double>(0);
+	for (size_t i = 1; i < n; ++i) {
+		double v = a.getFlat<double>(i);
+		if (wantMin ? v < bv : v > bv) {
+			bv = v;
+			best = (int64_t)i;
+		}
+	}
+	return best;
+}
+
+TEST(NDArray_reductions, ArgMaxMin_PackedLong_F32) {
+	const int n = 1024;
+	NDArray a({n}, F32);
+	for (int i = 0; i < n; ++i)
+		a.set({i}, (float)((i * 17) % 251) - 80.0f);
+	a.set({16}, 200.0f);
+	a.set({17}, 200.0f);
+	a.set({32}, 200.0f);
+	a.set({512}, -200.0f);
+	a.set({513}, -200.0f);
+	EXPECT_EQ(a.argmax().get<int64_t>({}), 16);
+	EXPECT_EQ(a.argmin().get<int64_t>({}), 512);
+	EXPECT_EQ(a.argmax().get<int64_t>({}), refArgExt(a, false));
+	EXPECT_EQ(a.argmin().get<int64_t>({}), refArgExt(a, true));
+}
+
+TEST(NDArray_reductions, ArgMaxMin_PackedTypes) {
+	NDArray i8({200}, INT8);
+	for (int i = 0; i < 200; ++i)
+		i8.set({i}, (i % 40) - 20);
+	i8.set({64}, 127);
+	i8.set({65}, 127);
+	i8.set({3}, -128);
+	EXPECT_EQ(i8.argmax().get<int64_t>({}), 64);
+	EXPECT_EQ(i8.argmin().get<int64_t>({}), 3);
+
+	NDArray u8(ArrayList<uint8_t>({1, 2, 9, 9, 0, 4}));
+	EXPECT_EQ(u8.argmax().get<int64_t>({}), 2);
+	EXPECT_EQ(u8.argmin().get<int64_t>({}), 4);
+
+	NDArray i64({80}, INT64);
+	for (int i = 0; i < 80; ++i)
+		i64.set({i}, (int64_t)i - 10);
+	i64.set({70}, (int64_t)1 << 40);
+	EXPECT_EQ(i64.argmax().get<int64_t>({}), 70);
+	EXPECT_EQ(i64.argmin().get<int64_t>({}), 0);
+
+	NDArray d({50}, F64);
+	for (int i = 0; i < 50; ++i)
+		d.set({i}, (double)i);
+	d.set({7}, 1e300);
+	EXPECT_EQ(d.argmax().get<int64_t>({}), 7);
+	EXPECT_EQ(d.argmin().get<int64_t>({}), 0);
+
+	NDArray h({40}, F16);
+	for (int i = 0; i < 40; ++i)
+		h.set({i}, (float)(i - 5));
+	h.set({12}, 100.0f);
+	h.set({13}, 100.0f);
+	EXPECT_EQ(h.argmax().get<int64_t>({}), 12);
+	EXPECT_EQ(h.argmin().get<int64_t>({}), 0);
+
+	NDArray bf({40}, BF16);
+	for (int i = 0; i < 40; ++i)
+		bf.set({i}, (float)(20 - i));
+	EXPECT_EQ(bf.argmax().get<int64_t>({}), 0);
+	EXPECT_EQ(bf.argmin().get<int64_t>({}), 39);
+}
+
+TEST(NDArray_reductions, ArgMaxMin_OffsetRowAndGappedCol) {
+	NDArray m({8, 17}, F32);
+	for (int r = 0; r < 8; ++r)
+		for (int c = 0; c < 17; ++c)
+			m.set({r, c}, (float)(r * 17 + c));
+	m.set({3, 11}, 1000.0f);
+	m.set({3, 12}, 1000.0f);
+	m.set({5, 4}, -50.0f);
+	EXPECT_TRUE(m.row(3).isContiguous());
+	EXPECT_EQ(m.row(3).argmax().get<int64_t>({}), 11);
+	EXPECT_EQ(m.row(5).argmin().get<int64_t>({}), 4);
+	EXPECT_FALSE(m.col(4).isContiguous());
+	EXPECT_EQ(m.col(4).argmin().get<int64_t>({}), 5);
+	EXPECT_EQ(m.col(4).argmax().get<int64_t>({}), 7);
+
+	NDArray i3({6, 20}, INT3);
+	for (int r = 0; r < 6; ++r)
+		for (int c = 0; c < 20; ++c)
+			i3.set({r, c}, 0);
+	i3.set({2, 9}, 3);
+	i3.set({2, 10}, 3);
+	i3.set({4, 1}, -4);
+	EXPECT_EQ(i3.row(2).argmax().get<int64_t>({}), 9);
+	EXPECT_EQ(i3.row(4).argmin().get<int64_t>({}), 1);
+	EXPECT_EQ(i3.col(1).argmin().get<int64_t>({}), 4);
+}
+
+TEST(NDArray_reductions, ArgMaxMin_AxisLastPacked) {
+	NDArray m({5, 65}, F32);
+	for (int r = 0; r < 5; ++r)
+		for (int c = 0; c < 65; ++c)
+			m.set({r, c}, (float)c);
+	m.set({2, 16}, 200.0f);
+	m.set({2, 17}, 200.0f);
+	NDArray ax = m.argmax(1);
+	EXPECT_EQ(ax.type, INT64);
+	ASSERT_EQ(ax.shape.size(), 1);
+	EXPECT_EQ(ax.shape.get(0), 5);
+	EXPECT_EQ(ax.get<int64_t>({0}), 64);
+	EXPECT_EQ(ax.get<int64_t>({2}), 16);
+	NDArray mn = m.argmin(1);
+	EXPECT_EQ(mn.get<int64_t>({1}), 0);
+	NDArray a0 = m.argmax(0);
+	EXPECT_EQ(a0.shape.get(0), 65);
+	EXPECT_EQ(a0.get<int64_t>({16}), 2);
+}
+
+TEST(NDArray_reductions, ArgMaxMin_BINARY_WordBoundary) {
+	NDArray b({130}, BINARY);
+	for (int i = 0; i < 130; ++i)
+		b.set({i}, 0);
+	b.set({63}, 1);
+	b.set({64}, 1);
+	EXPECT_EQ(b.argmax().get<int64_t>({}), 63);
+	EXPECT_EQ(b.argmin().get<int64_t>({}), 0);
+	NDArray ones({70}, BINARY);
+	for (int i = 0; i < 70; ++i)
+		ones.set({i}, 1);
+	ones.set({67}, 0);
+	EXPECT_EQ(ones.argmin().get<int64_t>({}), 67);
+	EXPECT_EQ(ones.argmax().get<int64_t>({}), 0);
+}
+
 TEST(NDArray_reductions, SumAs_EmptyThrows) {
 	NDArray a = NDArray::empty(F32);
 	EXPECT_THROW(a.sumAs<float>(), std::invalid_argument);

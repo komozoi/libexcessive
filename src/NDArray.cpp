@@ -13,6 +13,7 @@
 #include "ndarray_score.h"
 #include "ndarray_matmul.h"
 #include "ndarray_half_kernels.h"
+#include "ndarray_argext.h"
 
 #include <atomic>
 #include <climits>
@@ -6361,6 +6362,11 @@ static NDArray argExtremumAll(const NDArrayView& v, bool wantMin) {
 	if (n == 0)
 		throw std::invalid_argument("NDArray: cannot argmin/argmax an empty array");
 	size_t bestI = 0;
+	if (v.isContiguous() && packedArgExt(v.getType(), v.data(), v.getOffset(), n, wantMin, &bestI)) {
+		NDArray out({}, INT64);
+		out.set({}, (int64_t)bestI);
+		return out;
+	}
 	size_t bestE = v.elementOffset(0);
 	for (size_t i = 1; i < n; ++i) {
 		size_t e = v.elementOffset(i);
@@ -6387,9 +6393,16 @@ static NDArray argExtremumAxis(const NDArrayView& v, int axis, bool wantMin) {
 	ArrayList<int> outShape = shapeWithoutAxis(sh, axis);
 	const size_t outN = resultElemsWithoutAxis(sh, axis);
 	NDArray out(outShape, INT64);
+	const ArrayList<size_t>& st = v.getStrides();
+	const bool unitAxis = axis < st.size() && st.get(axis) == 1;
+	const void* data = v.data();
 	for (size_t oi = 0; oi < outN; ++oi) {
 		size_t bestR = 0;
 		size_t bestE = viewOffsetAlongAxis(v, axis, oi, 0);
+		if (unitAxis && packedArgExt(v.getType(), data, bestE, reduced, wantMin, &bestR)) {
+			out.setFlat(oi, (int64_t)bestR);
+			continue;
+		}
 		for (size_t r = 1; r < reduced; ++r) {
 			size_t e = viewOffsetAlongAxis(v, axis, oi, r);
 			int c = cmpViewOffsets(v, e, bestE);

@@ -281,6 +281,7 @@ public:
 	/**
 	 * Index of the first minimum / maximum. No-axis form is a scalar INT64
 	 * flat index. Axis form removes that axis (index along it, 0..len-1).
+	 * Contiguous storage is a packed scan; gapped views walk strides.
 	 */
 	NDArray argmin() const;
 	/** First minimum along `axis` (that axis is removed). */
@@ -1439,6 +1440,7 @@ public:
 	/**
 	 * Index of the first min / max. Scalar INT64 (flat) or INT64 with `axis`
 	 * removed. Same convention on every dtype (INT3 uses signed lanes).
+	 * Contiguous storage is a packed scan; gapped views walk strides.
 	 */
 	NDArray argmin() const;
 	/** First minimum along `axis`. */
