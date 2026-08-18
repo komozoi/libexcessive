@@ -58,6 +58,20 @@ TEST(NDArray_score, Uint8_DotWidens) {
 	EXPECT_EQ(a.dot<int32_t>(b), 40014);
 }
 
+TEST(NDArray_score, Int8_DotWidens) {
+	NDArray a({3}, INT8);
+	NDArray b({3}, INT8);
+	a.set({0}, 100);
+	a.set({1}, -2);
+	a.set({2}, 3);
+	b.set({0}, -2);
+	b.set({1}, 50);
+	b.set({2}, 4);
+	// -200 + -100 + 12
+	EXPECT_EQ(a.dot<int32_t>(b), -288);
+	EXPECT_EQ(a.l2Squared<int32_t>(), 100 * 100 + 4 + 9);
+}
+
 TEST(NDArray_score, Binary_DotIsPopcountAnd) {
 	NDArray a({8}, BINARY);
 	NDArray b({8}, BINARY);

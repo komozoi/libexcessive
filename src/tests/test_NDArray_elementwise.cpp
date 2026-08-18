@@ -38,6 +38,30 @@ TEST(NDArray_elementwise, Neg_UnaryOperator_Copies) {
 	EXPECT_FLOAT_EQ(a.get<float>({1}), -4.0f);
 }
 
+TEST(NDArray_elementwise, Neg_INT8_StaysINT8) {
+	NDArray a({3}, INT8);
+	a.set({0}, -5);
+	a.set({1}, 0);
+	a.set({2}, 7);
+	a.neg();
+	EXPECT_EQ(a.type, INT8);
+	EXPECT_EQ(a.get<int>({0}), 5);
+	EXPECT_EQ(a.get<int>({1}), 0);
+	EXPECT_EQ(a.get<int>({2}), -7);
+}
+
+TEST(NDArray_elementwise, Abs_INT8) {
+	NDArray a({3}, INT8);
+	a.set({0}, -5);
+	a.set({1}, 0);
+	a.set({2}, -128);
+	a.abs();
+	EXPECT_EQ(a.type, INT8);
+	EXPECT_EQ(a.get<int>({0}), 5);
+	EXPECT_EQ(a.get<int>({1}), 0);
+	EXPECT_EQ(a.get<int8_t>({2}), (int8_t)-128);
+}
+
 TEST(NDArray_elementwise, Neg_UINT8_PromotesToINT32) {
 	NDArray a(ArrayList<uint8_t>({1, 2, 3}));
 	a.neg();

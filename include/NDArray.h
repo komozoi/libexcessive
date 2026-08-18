@@ -35,7 +35,7 @@ enum NDArrayType {
 	INT3 = 0x05,
 	//INT4 = 0x06,
 	//UINT4 = 0x07,
-	//INT8 = 0x0E,
+	INT8 = 0x0E,
 	UINT8 = 0x0F,
 	//UINT16 = 0x12,
 	//INT16 = 0x13,
@@ -219,11 +219,13 @@ public:
 	NDArray(ArrayList<float> vector);
 	NDArray(ArrayList<double> vector);
 	NDArray(ArrayList<uint8_t> vector);
+	NDArray(ArrayList<int8_t> vector);
 	NDArray(ArrayList<int32_t> vector);
 	NDArray(ArrayList<int64_t> vector);
 	NDArray(const ArrayList<int>& shape, ArrayList<float> vector);
 	NDArray(const ArrayList<int>& shape, ArrayList<double> vector);
 	NDArray(const ArrayList<int>& shape, ArrayList<uint8_t> vector);
+	NDArray(const ArrayList<int>& shape, ArrayList<int8_t> vector);
 	NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector);
 	NDArray(const ArrayList<int>& shape, ArrayList<int64_t> vector);
 
@@ -1040,6 +1042,11 @@ private:
 			}
 			case UINT8:
 				return static_cast<T>(uint8[offset]);
+			case INT8:
+				if constexpr (std::is_same_v<T, uint256_t>)
+					return uint256_t((int)int8[offset]);
+				else
+					return static_cast<T>(int8[offset]);
 			case INT32:
 				if constexpr (std::is_same_v<T, uint256_t>)
 					return uint256_t((int)int32[offset]);
@@ -1104,6 +1111,9 @@ private:
 				case UINT8:
 					uint8[offset] = (uint8_t)(uint64_t)value;
 					break;
+				case INT8:
+					int8[offset] = (int8_t)(uint64_t)value;
+					break;
 				case INT32:
 					int32[offset] = (int32_t)(uint64_t)value;
 					break;
@@ -1138,6 +1148,9 @@ private:
 				}
 				case UINT8:
 					uint8[offset] = static_cast<uint8_t>(value);
+					break;
+				case INT8:
+					int8[offset] = static_cast<int8_t>(value);
 					break;
 				case INT32:
 					int32[offset] = static_cast<int32_t>(value);
@@ -1257,6 +1270,7 @@ private:
 		void* memory;
 
 		uint8_t* uint8;
+		int8_t* int8;
 		int32_t* int32;
 		int64_t* int64;
 
@@ -1279,6 +1293,8 @@ static bool ndarrayDataTypeMatches(NDArrayType t) {
 		return t == F64;
 	else if constexpr (std::is_same_v<T, uint8_t>)
 		return t == UINT8;
+	else if constexpr (std::is_same_v<T, int8_t>)
+		return t == INT8;
 	else if constexpr (std::is_same_v<T, int32_t>)
 		return t == INT32;
 	else if constexpr (std::is_same_v<T, int64_t>)

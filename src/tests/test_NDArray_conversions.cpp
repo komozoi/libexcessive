@@ -144,6 +144,58 @@ TEST(NDArray_conversions, Matrix_ShapePreserved) {
 	EXPECT_EQ(u.get<uint8_t>({1, 1}), 4);
 }
 
+TEST(NDArray_conversions, INT8_to_INT32_and_F32) {
+	NDArray a({4}, INT8);
+	a.set({0}, -128);
+	a.set({1}, -1);
+	a.set({2}, 0);
+	a.set({3}, 127);
+	NDArray i = a.convert(INT32);
+	EXPECT_EQ(i.type, INT32);
+	EXPECT_EQ(i.get<int32_t>({0}), -128);
+	EXPECT_EQ(i.get<int32_t>({1}), -1);
+	EXPECT_EQ(i.get<int32_t>({3}), 127);
+	NDArray f = a.convert(F32);
+	EXPECT_EQ(f.type, F32);
+	EXPECT_FLOAT_EQ(f.get<float>({0}), -128.0f);
+	EXPECT_FLOAT_EQ(f.get<float>({1}), -1.0f);
+	EXPECT_FLOAT_EQ(f.get<float>({3}), 127.0f);
+}
+
+TEST(NDArray_conversions, INT8_to_UINT8_Wraps) {
+	NDArray a({2}, INT8);
+	a.set({0}, -1);
+	a.set({1}, 127);
+	NDArray b = a.convert(UINT8);
+	EXPECT_EQ(b.type, UINT8);
+	EXPECT_EQ(b.get<uint8_t>({0}), (uint8_t)255);
+	EXPECT_EQ(b.get<uint8_t>({1}), (uint8_t)127);
+}
+
+TEST(NDArray_conversions, INT32_to_INT8_Truncates) {
+	NDArray a({3}, INT32);
+	a.set({0}, -200);
+	a.set({1}, 200);
+	a.set({2}, -1);
+	NDArray b = a.convert(INT8);
+	EXPECT_EQ(b.type, INT8);
+	EXPECT_EQ(b.get<int8_t>({0}), (int8_t)-200);
+	EXPECT_EQ(b.get<int8_t>({1}), (int8_t)200);
+	EXPECT_EQ(b.get<int>({2}), -1);
+}
+
+TEST(NDArray_conversions, RoundTrip_INT8_INT32_INT8) {
+	NDArray a({4}, INT8);
+	a.set({0}, -128);
+	a.set({1}, -7);
+	a.set({2}, 0);
+	a.set({3}, 127);
+	NDArray b = a.convert(INT32).convert(INT8);
+	EXPECT_EQ(b.get<int>({0}), -128);
+	EXPECT_EQ(b.get<int>({1}), -7);
+	EXPECT_EQ(b.get<int>({3}), 127);
+}
+
 TEST(NDArray_conversions, RoundTrip_UINT8_F32_UINT8) {
 	NDArray a(ArrayList<uint8_t>({0, 10, 200, 255}));
 	NDArray b = a.convert(F32).convert(UINT8);

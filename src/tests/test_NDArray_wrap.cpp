@@ -30,6 +30,9 @@ static void expectEqualPacked(const NDArrayView& v, const NDArray& owned) {
 			case UINT8:
 				EXPECT_EQ(v.getFlat<uint8_t>(i), owned.getFlat<uint8_t>(i));
 				break;
+			case INT8:
+				EXPECT_EQ(v.getFlat<int8_t>(i), owned.getFlat<int8_t>(i));
+				break;
 			case INT3:
 				EXPECT_EQ(v.getFlat<int>(i), owned.getFlat<int>(i));
 				break;
@@ -71,6 +74,17 @@ TEST(NDArray_wrap, View_UINT8_StackMatchesOwned) {
 	for (int i = 0; i < 5; ++i)
 		owned.set({i}, buf[i]);
 	expectEqualPacked(v, owned);
+}
+
+TEST(NDArray_wrap, View_INT8_StackMatchesOwned) {
+	int8_t buf[4] = {-128, -1, 0, 127};
+	NDArrayView v = NDArrayView::wrap(buf, sizeof(buf), {4}, INT8);
+	NDArray owned({4}, INT8);
+	for (int i = 0; i < 4; ++i)
+		owned.set({i}, buf[i]);
+	expectEqualPacked(v, owned);
+	EXPECT_EQ(v.getFlat<int>(0), -128);
+	EXPECT_EQ(v.getFlat<int>(1), -1);
 }
 
 TEST(NDArray_wrap, View_INT3_MatchesCopy) {

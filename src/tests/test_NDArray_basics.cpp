@@ -9,6 +9,7 @@
 //
 
 #include <gtest/gtest.h>
+#include <cstdint>
 #include <cstring>
 #include <stdexcept>
 #include <type_traits>
@@ -252,6 +253,31 @@ TEST(NDArray_basics, UINT8_Conversions) {
     EXPECT_EQ(a.get<int>({1}), 255);
     EXPECT_EQ(a.get<float>({1}), 255.0f);
     EXPECT_EQ(a.get<uint8_t>({3}), 1);
+}
+
+TEST(NDArray_basics, INT8_RoundTrip) {
+	NDArray a({5}, INT8);
+	EXPECT_EQ(a.type, INT8);
+	EXPECT_EQ(a.byteSize(), (size_t)5);
+	a.set({0}, -128);
+	a.set({1}, -1);
+	a.set({2}, 0);
+	a.set({3}, 127);
+	a.set({4}, 1.9f);
+	EXPECT_EQ(a.get<int8_t>({0}), (int8_t)-128);
+	EXPECT_EQ(a.get<int>({0}), -128);
+	EXPECT_EQ(a.get<int>({1}), -1);
+	EXPECT_EQ(a.get<int>({2}), 0);
+	EXPECT_EQ(a.get<int>({3}), 127);
+	EXPECT_EQ(a.get<int8_t>({4}), (int8_t)1);
+	EXPECT_FLOAT_EQ(a.get<float>({1}), -1.0f);
+	EXPECT_EQ(a.data<int8_t>()[0], (int8_t)-128);
+	EXPECT_EQ(a.data<int8_t>()[3], (int8_t)127);
+
+	NDArray fromVec(ArrayList<int8_t>({-128, -1, 0, 42, 127}));
+	EXPECT_EQ(fromVec.type, INT8);
+	EXPECT_EQ(fromVec.get<int>({0}), -128);
+	EXPECT_EQ(fromVec.get<int>({4}), 127);
 }
 
 TEST(NDArray_basics, UINT256_Basic) {

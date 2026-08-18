@@ -730,6 +730,121 @@ int64_t ndscore_u8_i64(const uint8_t* a, const uint8_t* b, size_t n, NDScoreOp o
 	return (int64_t)ndscore_u8_i32(a, b, n, op);
 }
 
+#if NDSCORE_AVX512
+static int32_t i8_avx512(const int8_t* NDSCORE_RESTRICT a, const int8_t* NDSCORE_RESTRICT b,
+                         size_t n, NDScoreOp op) {
+	__m512i acc = _mm512_setzero_si512();
+	size_t i = 0;
+	for (; i + 32 <= n; i += 32) {
+		__m256i av = _mm256_loadu_si256((const __m256i*)(a + i));
+		__m256i bv = op == NDScoreOp::L2Self ? av : _mm256_loadu_si256((const __m256i*)(b + i));
+		__m512i aw = _mm512_cvtepi8_epi16(av);
+		__m512i bw = _mm512_cvtepi8_epi16(bv);
+		if (op == NDScoreOp::L2Pair)
+			bw = _mm512_sub_epi16(aw, bw), aw = bw;
+		acc = _mm512_add_epi32(acc, _mm512_madd_epi16(aw, op == NDScoreOp::L2Pair ? aw : bw));
+	}
+	int32_t s = _mm512_reduce_add_epi32(acc);
+	for (; i < n; ++i) {
+		int32_t va = (int32_t)a[i];
+		int32_t vb = (op == NDScoreOp::L2Self) ? va : (int32_t)b[i];
+		if (op == NDScoreOp::L2Pair) {
+			int32_t d = va - vb;
+			s += d * d;
+		} else
+			s += va * vb;
+	}
+	return s;
+}
+#endif
+
+#if NDSCORE_AVX2 && !NDSCORE_AVX512
+static int32_t i8_avx2(const int8_t* NDSCORE_RESTRICT a, const int8_t* NDSCORE_RESTRICT b,
+                       size_t n, NDScoreOp op) {
+	__m256i acc = _mm256_setzero_si256();
+	size_t i = 0;
+	for (; i + 16 <= n; i += 16) {
+		__m128i av = _mm_loadu_si128((const __m128i*)(a + i));
+		__m128i bv = op == NDScoreOp::L2Self ? av : _mm_loadu_si128((const __m128i*)(b + i));
+		__m256i aw = _mm256_cvtepi8_epi16(av);
+		__m256i bw = _mm256_cvtepi8_epi16(bv);
+		if (op == NDScoreOp::L2Pair)
+			bw = _mm256_sub_epi16(aw, bw), aw = bw;
+		acc = _mm256_add_epi32(acc, _mm256_madd_epi16(aw, op == NDScoreOp::L2Pair ? aw : bw));
+	}
+	int32_t s = hsum256_epi32(acc);
+	for (; i < n; ++i) {
+		int32_t va = (int32_t)a[i];
+		int32_t vb = (op == NDScoreOp::L2Self) ? va : (int32_t)b[i];
+		if (op == NDScoreOp::L2Pair) {
+			int32_t d = va - vb;
+			s += d * d;
+		} else
+			s += va * vb;
+	}
+	return s;
+}
+#endif
+
+#if NDSCORE_NEON
+static int32_t i8_neon(const int8_t* NDSCORE_RESTRICT a, const int8_t* NDSCORE_RESTRICT b,
+                       size_t n, NDScoreOp op) {
+	int32x4_t acc0 = vdupq_n_s32(0);
+	int32x4_t acc1 = vdupq_n_s32(0);
+	size_t i = 0;
+	for (; i + 16 <= n; i += 16) {
+		int8x16_t av = vld1q_s8(a + i);
+		int8x16_t bv = (op == NDScoreOp::L2Self) ? av : vld1q_s8(b + i);
+		int16x8_t a_lo = vmovl_s8(vget_low_s8(av));
+		int16x8_t a_hi = vmovl_s8(vget_high_s8(av));
+		int16x8_t b_lo = vmovl_s8(vget_low_s8(bv));
+		int16x8_t b_hi = vmovl_s8(vget_high_s8(bv));
+		if (op == NDScoreOp::L2Pair) {
+			b_lo = vsubq_s16(a_lo, b_lo);
+			b_hi = vsubq_s16(a_hi, b_hi);
+			a_lo = b_lo;
+			a_hi = b_hi;
+		}
+		acc0 = vmlal_s16(acc0, vget_low_s16(a_lo), vget_low_s16(op == NDScoreOp::L2Pair ? a_lo : b_lo));
+		acc1 = vmlal_s16(acc1, vget_high_s16(a_lo), vget_high_s16(op == NDScoreOp::L2Pair ? a_lo : b_lo));
+		acc0 = vmlal_s16(acc0, vget_low_s16(a_hi), vget_low_s16(op == NDScoreOp::L2Pair ? a_hi : b_hi));
+		acc1 = vmlal_s16(acc1, vget_high_s16(a_hi), vget_high_s16(op == NDScoreOp::L2Pair ? a_hi : b_hi));
+	}
+#if defined(__aarch64__)
+	int32_t s = vaddvq_s32(vaddq_s32(acc0, acc1));
+#else
+	int32x2_t p = vadd_s32(vget_low_s32(vaddq_s32(acc0, acc1)), vget_high_s32(vaddq_s32(acc0, acc1)));
+	int32_t s = vget_lane_s32(vpadd_s32(p, p), 0);
+#endif
+	for (; i < n; ++i) {
+		int32_t va = (int32_t)a[i];
+		int32_t vb = (op == NDScoreOp::L2Self) ? va : (int32_t)b[i];
+		if (op == NDScoreOp::L2Pair) {
+			int32_t d = va - vb;
+			s += d * d;
+		} else
+			s += va * vb;
+	}
+	return s;
+}
+#endif
+
+int32_t ndscore_i8_i32(const int8_t* a, const int8_t* b, size_t n, NDScoreOp op) {
+#if NDSCORE_AVX512
+	return i8_avx512(a, b, n, op);
+#elif NDSCORE_AVX2
+	return i8_avx2(a, b, n, op);
+#elif NDSCORE_NEON
+	return i8_neon(a, b, n, op);
+#else
+	return dense_auto<int8_t, int32_t>(a, b, n, op);
+#endif
+}
+
+int64_t ndscore_i8_i64(const int8_t* a, const int8_t* b, size_t n, NDScoreOp op) {
+	return (int64_t)ndscore_i8_i32(a, b, n, op);
+}
+
 // ---- INT3 widening MAC ------------------------------------------------------
 
 static int int3_lane(const uint64_t* words, size_t i) {

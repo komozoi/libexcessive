@@ -25,13 +25,12 @@ TEST(NDArray_reductions, Sum_F32) {
 	EXPECT_FLOAT_EQ(s.get<float>({}), 10.0f);
 }
 
-TEST(NDArray_reductions, Sum_UINT8_PromotesToUINT256) {
-	// Integer sums accumulate in UINT256 so they never silently wrap.
+TEST(NDArray_reductions, Sum_UINT8_PromotesToINT32) {
 	NDArray a(ArrayList<uint8_t>({200, 200, 200}));
 	NDArray s = a.sum();
-	EXPECT_EQ(s.type, UINT256);
+	EXPECT_EQ(s.type, INT32);
 	EXPECT_EQ(s.shape.size(), 0);
-	EXPECT_EQ(s.get<uint256_t>({}), uint256_t(600));
+	EXPECT_EQ(s.get<int32_t>({}), 600);
 }
 
 TEST(NDArray_reductions, Sum_BINARY) {
@@ -40,8 +39,8 @@ TEST(NDArray_reductions, Sum_BINARY) {
 	b.set({2}, 1);
 	b.set({4}, 1);
 	NDArray s = b.sum();
-	EXPECT_EQ(s.type, UINT256);
-	EXPECT_EQ(s.get<uint256_t>({}), uint256_t(3));
+	EXPECT_EQ(s.type, INT32);
+	EXPECT_EQ(s.get<int32_t>({}), 3);
 }
 
 TEST(NDArray_reductions, Prod_F32_And_UINT8) {
@@ -52,8 +51,8 @@ TEST(NDArray_reductions, Prod_F32_And_UINT8) {
 
 	NDArray u(ArrayList<uint8_t>({2, 3, 4}));
 	NDArray up = u.prod();
-	EXPECT_EQ(up.type, UINT256);
-	EXPECT_EQ(up.get<uint256_t>({}), uint256_t(24));
+	EXPECT_EQ(up.type, INT32);
+	EXPECT_EQ(up.get<int32_t>({}), 24);
 }
 
 TEST(NDArray_reductions, Mean_F32_StaysF32_IntegersUseF64) {
@@ -83,6 +82,19 @@ TEST(NDArray_reductions, MinMax_KeepType) {
 	EXPECT_EQ(u.max().type, UINT8);
 	EXPECT_EQ(u.min().get<uint8_t>({}), 3);
 	EXPECT_EQ(u.max().get<uint8_t>({}), 200);
+
+	NDArray s({4}, INT8);
+	s.set({0}, -5);
+	s.set({1}, -128);
+	s.set({2}, 7);
+	s.set({3}, 0);
+	EXPECT_EQ(s.min().type, INT8);
+	EXPECT_EQ(s.max().type, INT8);
+	EXPECT_EQ(s.min().get<int>({ }), -128);
+	EXPECT_EQ(s.max().get<int>({ }), 7);
+	NDArray sum = s.sum();
+	EXPECT_EQ(sum.type, INT32);
+	EXPECT_EQ(sum.get<int32_t>({}), -5 - 128 + 7 + 0);
 }
 
 TEST(NDArray_reductions, ScalarInput) {
@@ -177,11 +189,11 @@ TEST(NDArray_reductions, Prod_Axis) {
 TEST(NDArray_reductions, UINT8_Sum_Axis_Promotes) {
 	NDArray m({2, 2}, ArrayList<uint8_t>({200, 200, 200, 200}));
 	NDArray s = m.sum(0);
-	EXPECT_EQ(s.type, UINT256);
+	EXPECT_EQ(s.type, INT32);
 	ASSERT_EQ(s.shape.size(), 1);
 	EXPECT_EQ(s.shape.get(0), 2);
-	EXPECT_EQ(s.get<uint256_t>({0}), uint256_t(400));
-	EXPECT_EQ(s.get<uint256_t>({1}), uint256_t(400));
+	EXPECT_EQ(s.get<int32_t>({0}), 400);
+	EXPECT_EQ(s.get<int32_t>({1}), 400);
 }
 
 TEST(NDArray_reductions, Tensor3D_Sum_Axis) {

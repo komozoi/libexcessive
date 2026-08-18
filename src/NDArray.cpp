@@ -45,17 +45,18 @@ static bool isFloatingPoint(NDArrayType type) {
 }
 
 static bool isSigned(NDArrayType type) {
-	return type == F32 || type == F64 || type == INT3 || type == INT32 || type == INT64;
+	return type == F32 || type == F64 || type == INT3 || type == INT8 || type == INT32 || type == INT64;
 }
 
 static bool isSignedInteger(NDArrayType type) {
-	return type == INT3 || type == INT32 || type == INT64;
+	return type == INT3 || type == INT8 || type == INT32 || type == INT64;
 }
 
 static int maxPowerOfTypeIntPrecision(NDArrayType type) {
 	switch (type) {
 		case BINARY:  return 0;
 		case INT3:    return 2; // magnitude bits; range fits in INT32
+		case INT8:    return 7;
 		case UINT8:   return 7;
 		case INT32:   return 31;
 		case INT64:   return 63;
@@ -71,6 +72,7 @@ static int maxPowerOfType(NDArrayType type) {
 	switch (type) {
 		case BINARY:  return 0;
 		case INT3:    return 2;
+		case INT8:    return 7;
 		case UINT8:   return 7;
 		case INT32:   return 31;
 		case INT64:   return 63;
@@ -95,6 +97,10 @@ static bool isLosslessConversion(NDArrayType from, NDArrayType to) {
 	if (maxPowerOfTypeIntPrecision(to) < maxPowerOfTypeIntPrecision(from))
 		return false;
 	if (isSigned(from) && !isSigned(to))
+		return false;
+	// Unsigned source does not fit a same-width signed dest (UINT8 → INT8).
+	if (!isSigned(from) && isSigned(to)
+	    && maxPowerOfTypeIntPrecision(to) <= maxPowerOfTypeIntPrecision(from))
 		return false;
 	return true;
 }
@@ -163,7 +169,7 @@ static NDArrayType typeForRealUnary(NDArrayType t) {
 }
 
 static NDArrayType typeForNeg(NDArrayType t) {
-	if (t == F32 || t == F64 || t == INT3 || t == INT32 || t == INT64)
+	if (t == F32 || t == F64 || t == INT3 || t == INT8 || t == INT32 || t == INT64)
 		return t; // INT3: wrap two's-complement (neg of -4 stays -4)
 	if (t == UINT256)
 		return UINT256; // two's complement
@@ -175,11 +181,13 @@ static NDArrayType sumProdAccumulateType(NDArrayType t) {
 	switch (t) {
 		case F32: return F32;
 		case F64: return F64;
-		case INT3: return INT32;
+
+		case BINARY:
+		case INT3:
+		case UINT8:
+		case INT8: return INT32;
 		case INT32: return INT64;
 		case INT64: return INT64;
-		case BINARY:
-		case UINT8:
 		case UINT256:
 			return UINT256;
 		default:
@@ -411,6 +419,7 @@ size_t NDArray::bufferBytesFor(NDArrayType t, size_t numElems) {
 			if (numElems > SIZE_MAX - (int3_kLanesPerWord - 1))
 				throw std::invalid_argument("NDArray: size overflow");
 			return int3_bufferBytes(numElems);
+		case INT8:
 		case UINT8:
 			return numElems;
 		case INT32:
@@ -437,6 +446,7 @@ static size_t wrapAlignment(NDArrayType t) {
 		case INT32:
 		case F32:
 			return 4;
+		case INT8:
 		case UINT8:
 		default:
 			return 1;
@@ -533,6 +543,11 @@ NDArray::NDArray(ArrayList<uint8_t> vector) : shape({vector.size()}), type(UINT8
 	if (memorySize)
 		memcpy(uint8, vector.getMemory(), memorySize);
 }
+NDArray::NDArray(ArrayList<int8_t> vector) : shape({vector.size()}), type(INT8), memory(nullptr) {
+	initialize();
+	if (memorySize)
+		memcpy(int8, vector.getMemory(), memorySize);
+}
 NDArray::NDArray(ArrayList<int32_t> vector)
 	: shape({vector.size()}),
 	  type(allTernaryInts(vector.getMemory(), (size_t)vector.size()) ? INT3 : INT32),
@@ -580,6 +595,13 @@ NDArray::NDArray(const ArrayList<int>& shape, ArrayList<uint8_t> vector) : shape
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
 	if (memorySize)
 		memcpy(uint8, vector.getMemory(), memorySize);
+}
+NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int8_t> vector) : shape(shape), type(INT8), memory(nullptr) {
+	size_t expectedSize = initialize();
+	if (expectedSize != (size_t)vector.size())
+		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
+	if (memorySize)
+		memcpy(int8, vector.getMemory(), memorySize);
 }
 NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector)
 	: shape(shape),
@@ -906,6 +928,9 @@ NDArray NDArrayView::copy() const {
 			case UINT8:
 				out.setFlat(i, ((const uint8_t*)data)[srcOff]);
 				break;
+			case INT8:
+				out.setFlat(i, ((const int8_t*)data)[srcOff]);
+				break;
 			case INT32:
 				out.setFlat(i, ((const int32_t*)data)[srcOff]);
 				break;
@@ -1093,6 +1118,13 @@ static Acc scorePackedSameType(const NDArrayView& a, const NDArrayView* b, size_
 				return accFromKernelI64<Acc>(ndscore_u8_i64(pa, pb, n, op));
 			return accFromKernelI64<Acc>(ndscore_u8_i32(pa, pb, n, op));
 		}
+		case INT8: {
+			const int8_t* pa = (const int8_t*)da + oa;
+			const int8_t* pb = db ? (const int8_t*)db + ob : pa;
+			if constexpr (std::is_same_v<Acc, int64_t> || std::is_same_v<Acc, uint256_t>)
+				return accFromKernelI64<Acc>(ndscore_i8_i64(pa, pb, n, op));
+			return accFromKernelI64<Acc>(ndscore_i8_i32(pa, pb, n, op));
+		}
 		case INT32: {
 			const int32_t* pa = (const int32_t*)da + oa;
 			const int32_t* pb = db ? (const int32_t*)db + ob : pa;
@@ -1241,6 +1273,7 @@ namespace ndarray_detail {
 				return (double)int3_getSigned(words, elementOffset);
 			}
 			case UINT8: return (double)((const uint8_t*)data)[elementOffset];
+			case INT8: return (double)((const int8_t*)data)[elementOffset];
 			case INT32: return (double)((const int32_t*)data)[elementOffset];
 			case INT64: return (double)((const int64_t*)data)[elementOffset];
 			case F32: return (double)((const float*)data)[elementOffset];
@@ -1358,6 +1391,7 @@ double NDArray::loadAsDouble(size_t i) const {
 		case BINARY:  return (double)binaryGet(uint64, i);
 		case INT3:    return (double)int3_getSigned(uint64, i);
 		case UINT8:   return (double)uint8[i];
+		case INT8:    return (double)int8[i];
 		case INT32:   return (double)int32[i];
 		case INT64:   return (double)int64[i];
 		case F32:     return (double)float32[i];
@@ -1372,6 +1406,7 @@ int64_t NDArray::loadAsI64(size_t i) const {
 		case BINARY:  return (int64_t)binaryGet(uint64, i);
 		case INT3:    return (int64_t)int3_getSigned(uint64, i);
 		case UINT8:   return (int64_t)uint8[i];
+		case INT8:    return (int64_t)int8[i];
 		case INT32:   return (int64_t)int32[i];
 		case INT64:   return int64[i];
 		case F32:     return (int64_t)float32[i];
@@ -1386,6 +1421,7 @@ uint256_t NDArray::loadAsU256(size_t i) const {
 		case BINARY:  return uint256_t((uint64_t)binaryGet(uint64, i));
 		case INT3:    return uint256_t(int3_getSigned(uint64, i));
 		case UINT8:   return uint256_t((uint64_t)uint8[i]);
+		case INT8:    return uint256_t((int)int8[i]);
 		case INT32:   return uint256_t((int)int32[i]);
 		case INT64:   return uint256_t((uint64_t)int64[i]); // truncates sign bit interpretation
 		case F32:     return uint256_t((double)float32[i]);
@@ -1403,6 +1439,7 @@ void NDArray::storeFromDouble(size_t i, double v) {
 		case BINARY:  binarySet(uint64, i, v > 0.0 ? 1 : 0); break;
 		case INT3:    int3_setSigned(uint64, i, (int)v); break;
 		case UINT8:   uint8[i] = (uint8_t)v; break;
+		case INT8:    int8[i] = (int8_t)v; break;
 		case INT32:   int32[i] = (int32_t)v; break;
 		case INT64:   int64[i] = (int64_t)v; break;
 		case F32:     float32[i] = (float)v; break;
@@ -1418,6 +1455,7 @@ void NDArray::storeFromI64(size_t i, int64_t v) {
 		case BINARY:  binarySet(uint64, i, v > 0 ? 1 : 0); break;
 		case INT3:    int3_setSigned(uint64, i, (int)v); break;
 		case UINT8:   uint8[i] = (uint8_t)v; break;
+		case INT8:    int8[i] = (int8_t)v; break;
 		case INT32:   int32[i] = (int32_t)v; break;
 		case INT64:   int64[i] = v; break;
 		case F32:     float32[i] = (float)v; break;
@@ -1438,6 +1476,7 @@ void NDArray::storeFromU256(size_t i, const uint256_t& v) {
 		case BINARY:  binarySet(uint64, i, (uint64_t)v != 0 ? 1 : 0); break;
 		case INT3:    int3_setSigned(uint64, i, (int)(int64_t)(uint64_t)v); break;
 		case UINT8:   uint8[i] = (uint8_t)(uint64_t)v; break;
+		case INT8:    int8[i] = (int8_t)(uint64_t)v; break;
 		case INT32:   int32[i] = (int32_t)(uint64_t)v; break;
 		case INT64:   int64[i] = (int64_t)(uint64_t)v; break;
 		case F32:     float32[i] = (float)v.toDouble(); break;
@@ -1512,6 +1551,14 @@ void NDArray::applyBinaryInPlace(const NDArray& src, ArithOp op) {
 				case ArithOp::Sub: subBasic(uint8, src.uint8, n); break;
 				case ArithOp::Mul: mulBasic(uint8, src.uint8, n); break;
 				case ArithOp::Div: divBasic(uint8, src.uint8, n); break;
+			}
+			break;
+		case INT8:
+			switch (op) {
+				case ArithOp::Add: addBasic(int8, src.int8, n); break;
+				case ArithOp::Sub: subBasic(int8, src.int8, n); break;
+				case ArithOp::Mul: mulBasic(int8, src.int8, n); break;
+				case ArithOp::Div: divBasic(int8, src.int8, n); break;
 			}
 			break;
 		case INT32:
@@ -1611,6 +1658,16 @@ void NDArray::applyDoubleScalarInPlace(double scalar, ArithOp op) {
 			}
 			break;
 		}
+		case INT8: {
+			int8_t s = (int8_t)scalar;
+			switch (op) {
+				case ArithOp::Add: addBasic(int8, s, n); break;
+				case ArithOp::Sub: subBasic(int8, s, n); break;
+				case ArithOp::Mul: mulBasic(int8, s, n); break;
+				case ArithOp::Div: divBasic(int8, s, n); break;
+			}
+			break;
+		}
 		case INT32: {
 			int32_t s = (int32_t)scalar;
 			switch (op) {
@@ -1699,6 +1756,16 @@ void NDArray::applyIntScalarInPlace(int scalar, ArithOp op) {
 			}
 			break;
 		}
+		case INT8: {
+			int8_t s = (int8_t)scalar;
+			switch (op) {
+				case ArithOp::Add: addBasic(int8, s, n); break;
+				case ArithOp::Sub: subBasic(int8, s, n); break;
+				case ArithOp::Mul: mulBasic(int8, s, n); break;
+				case ArithOp::Div: divBasic(int8, s, n); break;
+			}
+			break;
+		}
 		case INT32: {
 			int32_t s = (int32_t)scalar;
 			switch (op) {
@@ -1784,6 +1851,16 @@ void NDArray::applyInt64ScalarInPlace(int64_t scalar, ArithOp op) {
 				case ArithOp::Sub: subBasic(uint8, s, n); break;
 				case ArithOp::Mul: mulBasic(uint8, s, n); break;
 				case ArithOp::Div: divBasic(uint8, s, n); break;
+			}
+			break;
+		}
+		case INT8: {
+			int8_t s = (int8_t)scalar;
+			switch (op) {
+				case ArithOp::Add: addBasic(int8, s, n); break;
+				case ArithOp::Sub: subBasic(int8, s, n); break;
+				case ArithOp::Mul: mulBasic(int8, s, n); break;
+				case ArithOp::Div: divBasic(int8, s, n); break;
 			}
 			break;
 		}
@@ -1941,6 +2018,14 @@ void NDArray::applyBroadcastInPlace(const NDArray& src, ArithOp op) {
 						case ArithOp::Sub: uint8[idx] = (uint8_t)(uint8[idx] - src.uint8[i]); break;
 						case ArithOp::Mul: uint8[idx] = (uint8_t)(uint8[idx] * src.uint8[i]); break;
 						case ArithOp::Div: uint8[idx] = (uint8_t)(uint8[idx] / src.uint8[i]); break;
+					}
+					break;
+				case INT8:
+					switch (op) {
+						case ArithOp::Add: int8[idx] = (int8_t)(int8[idx] + src.int8[i]); break;
+						case ArithOp::Sub: int8[idx] = (int8_t)(int8[idx] - src.int8[i]); break;
+						case ArithOp::Mul: int8[idx] = (int8_t)(int8[idx] * src.int8[i]); break;
+						case ArithOp::Div: int8[idx] = (int8_t)(int8[idx] / src.int8[i]); break;
 					}
 					break;
 				case INT32:
@@ -2176,6 +2261,9 @@ NDArray& NDArray::neg() {
 				int3_set(uint64, i, p ? (uint8_t)((8 - p) & 7) : 0);
 			}
 			break;
+		case INT8:
+			for (size_t i = 0; i < n; ++i) int8[i] = (int8_t)(-int8[i]);
+			break;
 		case UINT256:
 			for (size_t i = 0; i < n; ++i) uint256[i] = -uint256[i];
 			break;
@@ -2233,6 +2321,13 @@ NDArray& NDArray::abs() {
 					int3_setSigned(uint64, i, -v);
 			}
 			break;
+		case INT8:
+			for (size_t i = 0; i < n; ++i) {
+				int8_t v = int8[i];
+				if (v < 0)
+					int8[i] = (int8_t)(-v);
+			}
+			break;
 		case UINT8:
 		case UINT256:
 		case BINARY:
@@ -2267,6 +2362,10 @@ NDArray& NDArray::sign() {
 		case INT64:
 			for (size_t i = 0; i < n; ++i)
 				int64[i] = (int64[i] > 0) ? 1 : ((int64[i] < 0) ? -1 : 0);
+			break;
+		case INT8:
+			for (size_t i = 0; i < n; ++i)
+				int8[i] = (int8[i] > 0) ? 1 : ((int8[i] < 0) ? (int8_t)-1 : 0);
 			break;
 		case UINT8:
 			for (size_t i = 0; i < n; ++i)
@@ -2603,6 +2702,10 @@ struct NDArray::Impl {
 				for (size_t i = 0; i < n; ++i)
 					left.uint8[i] = elemBinU8(left.uint8[i], right.uint8[i], op);
 				break;
+			case INT8:
+				for (size_t i = 0; i < n; ++i)
+					left.int8[i] = (int8_t)elemBinI64(left.int8[i], right.int8[i], op);
+				break;
 			case INT32:
 				for (size_t i = 0; i < n; ++i)
 					left.int32[i] = (int32_t)elemBinI64(left.int32[i], right.int32[i], op);
@@ -2660,6 +2763,10 @@ struct NDArray::Impl {
 			uint8_t sb = (uint8_t)s;
 			for (size_t i = 0; i < n; ++i)
 				left.uint8[i] = elemBinU8(left.uint8[i], sb, op);
+		} else if (left.type == INT8) {
+			int8_t sb = (int8_t)s;
+			for (size_t i = 0; i < n; ++i)
+				left.int8[i] = (int8_t)elemBinI64(left.int8[i], sb, op);
 		} else if (left.type == UINT256) {
 			uint256_t sb(s);
 			for (size_t i = 0; i < n; ++i)
@@ -2689,6 +2796,7 @@ struct NDArray::Impl {
 		NDArrayType rt = promoteWithIntScalar(a.type);
 		if (op == ElemBinOp::Min || op == ElemBinOp::Max) {
 			if (a.type == UINT8 && s >= 0 && s <= 255) rt = UINT8;
+			else if (a.type == INT8 && s >= -128 && s <= 127) rt = INT8;
 			else if (a.type == INT32) rt = INT32;
 			else if (a.type == INT64) rt = INT64;
 			else if (a.type == UINT256 && s >= 0) rt = UINT256;
@@ -2711,6 +2819,10 @@ struct NDArray::Impl {
 			uint8_t sb = (uint8_t)s;
 			for (size_t i = 0; i < n; ++i)
 				left.uint8[i] = elemBinU8(left.uint8[i], sb, op);
+		} else if (left.type == INT8) {
+			int8_t sb = (int8_t)s;
+			for (size_t i = 0; i < n; ++i)
+				left.int8[i] = (int8_t)elemBinI64(left.int8[i], sb, op);
 		} else if (left.type == UINT256) {
 			uint256_t sb(s);
 			for (size_t i = 0; i < n; ++i)
@@ -2745,6 +2857,7 @@ struct NDArray::Impl {
 				case F32: r = cmpDouble(left.float32[i], right.float32[i], op); break;
 				case F64: r = cmpDouble(left.float64[i], right.float64[i], op); break;
 				case UINT8: r = cmpI64(left.uint8[i], right.uint8[i], op); break;
+				case INT8: r = cmpI64(left.int8[i], right.int8[i], op); break;
 				case INT3: r = cmpI64(int3_getSigned(left.uint64, i), int3_getSigned(right.uint64, i), op); break;
 				case INT32: r = cmpI64(left.int32[i], right.int32[i], op); break;
 				case INT64: r = cmpI64(left.int64[i], right.int64[i], op); break;
@@ -2830,6 +2943,7 @@ struct NDArray::Impl {
 				case F32: r = threeWayDouble(left.float32[i], right.float32[i]); break;
 				case F64: r = threeWayDouble(left.float64[i], right.float64[i]); break;
 				case UINT8: r = threeWayI64(left.uint8[i], right.uint8[i]); break;
+				case INT8: r = threeWayI64(left.int8[i], right.int8[i]); break;
 				case INT3: r = threeWayI64(int3_getSigned(left.uint64, i), int3_getSigned(right.uint64, i)); break;
 				case INT32: r = threeWayI64(left.int32[i], right.int32[i]); break;
 				case INT64: r = threeWayI64(left.int64[i], right.int64[i]); break;
@@ -2852,7 +2966,7 @@ struct NDArray::Impl {
 			return out;
 		}
 		if (a.type == F64 || isFloatingPoint(a.type) || isLosslessConversion(a.type, F64)
-		    || a.type == INT3 || a.type == UINT8 || a.type == INT32 || a.type == INT64
+		    || a.type == INT3 || a.type == INT8 || a.type == UINT8 || a.type == INT32 || a.type == INT64
 		    || a.type == BINARY) {
 			for (size_t i = 0; i < n; ++i)
 				int3_setSigned(out.uint64, i, threeWayDouble(a.loadAsDouble(i), s));
@@ -2910,6 +3024,7 @@ struct NDArray::Impl {
 			case BINARY: return binaryGet(a.uint64, i) == 0;
 			case INT3: return int3_get(a.uint64, i) == 0;
 			case UINT8: return a.uint8[i] == 0;
+			case INT8: return a.int8[i] == 0;
 			case INT32: return a.int32[i] == 0;
 			case INT64: return a.int64[i] == 0;
 			case F32: return a.float32[i] == 0.0f;
@@ -2924,6 +3039,7 @@ struct NDArray::Impl {
 			case F32: out.float32[oi] = src.float32[si]; break;
 			case F64: out.float64[oi] = src.float64[si]; break;
 			case UINT8: out.uint8[oi] = src.uint8[si]; break;
+			case INT8: out.int8[oi] = src.int8[si]; break;
 			case INT3: int3_set(out.uint64, oi, int3_get(src.uint64, si)); break;
 			case INT32: out.int32[oi] = src.int32[si]; break;
 			case INT64: out.int64[oi] = src.int64[si]; break;
@@ -2940,6 +3056,7 @@ struct NDArray::Impl {
 			case F32: out.float32[i] = num.float32[i] / den.float32[i]; break;
 			case F64: out.float64[i] = num.float64[i] / den.float64[i]; break;
 			case UINT8: out.uint8[i] = (uint8_t)(num.uint8[i] / den.uint8[i]); break;
+			case INT8: out.int8[i] = (int8_t)(num.int8[i] / den.int8[i]); break;
 			case INT3: {
 				int a = int3_getSigned(num.uint64, i);
 				int b = int3_getSigned(den.uint64, i);
@@ -3210,6 +3327,15 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 				out.uint8[0] = acc;
 				break;
 			}
+			case INT8: {
+				int8_t acc = a.int8[0];
+				for (size_t i = 1; i < n; ++i) {
+					int8_t v = a.int8[i];
+					acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+				}
+				out.int8[0] = acc;
+				break;
+			}
 			case INT32: {
 				int32_t acc = a.int32[0];
 				for (size_t i = 1; i < n; ++i) {
@@ -3351,6 +3477,15 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 						acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
 					}
 					out.uint8[oi] = acc;
+					break;
+				}
+				case INT8: {
+					int8_t acc = a.int8[first];
+					for (size_t r = 1; r < reduced; ++r) {
+						int8_t v = a.int8[flatIndexWithAxis(a.shape, axis, oi, r)];
+						acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+					}
+					out.int8[oi] = acc;
 					break;
 				}
 				case INT32: {
@@ -3924,6 +4059,9 @@ NDArray NDArray::asBinary() const {
 		case UINT8:
 			nonzeroIntegralToBinary(out.uint64, uint8, n);
 			break;
+		case INT8:
+			nonzeroIntegralToBinary(out.uint64, int8, n);
+			break;
 		case INT32:
 			nonzeroIntegralToBinary(out.uint64, int32, n);
 			break;
@@ -4249,6 +4387,7 @@ bool NDArray::any() const {
 					return true;
 			return false;
 		}
+		case INT8:
 		case UINT8: {
 			size_t i = 0;
 #if LIBEXCESSIVE_NDARRAY_AVX512
@@ -4367,6 +4506,7 @@ bool NDArray::all() const {
 					return false;
 			return true;
 		}
+		case INT8:
 		case UINT8: {
 			size_t i = 0;
 #if LIBEXCESSIVE_NDARRAY_AVX512
@@ -4489,7 +4629,7 @@ int NDArray::countNonzero() const {
 			tmp = (tmp & 0x1111111111111111) | ((tmp >> 1) & 0x1111111111111111);
 			total += popcnt64(tmp);
 		}
-	} else if (type == UINT8)
+	} else if (type == UINT8 || type == INT8)
 		for (size_t i = 0; i < memorySize; i++)
 			total += uint8[i] != 0 ? 1 : 0;
 	else if (type == INT32)

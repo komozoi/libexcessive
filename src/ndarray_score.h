@@ -19,6 +19,8 @@ int32_t ndscore_i32(const int32_t* a, const int32_t* b, size_t n, NDScoreOp op);
 int64_t ndscore_i64(const int64_t* a, const int64_t* b, size_t n, NDScoreOp op);
 int32_t ndscore_u8_i32(const uint8_t* a, const uint8_t* b, size_t n, NDScoreOp op);
 int64_t ndscore_u8_i64(const uint8_t* a, const uint8_t* b, size_t n, NDScoreOp op);
+int32_t ndscore_i8_i32(const int8_t* a, const int8_t* b, size_t n, NDScoreOp op);
+int64_t ndscore_i8_i64(const int8_t* a, const int8_t* b, size_t n, NDScoreOp op);
 
 // INT3 nibble-packed words. oa/ob are *element* offsets. Widening MAC (3*3 → 9).
 int64_t ndscore_int3_i64(const uint64_t* a, size_t oa, const uint64_t* b, size_t ob,

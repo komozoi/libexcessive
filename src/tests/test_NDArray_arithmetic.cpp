@@ -83,6 +83,59 @@ TEST(NDArray_arithmetic, UINT256_AddMul) {
 // Type promotion — never lose precision unless convert() was used
 // ============================================================
 
+TEST(NDArray_arithmetic, INT8_Add_StaysINT8) {
+	NDArray a({3}, INT8);
+	NDArray b({3}, INT8);
+	a.set({0}, -2);
+	a.set({1}, 10);
+	a.set({2}, 127);
+	b.set({0}, -3);
+	b.set({1}, 5);
+	b.set({2}, 1);
+	NDArray c = a + b;
+	EXPECT_EQ(c.type, INT8);
+	EXPECT_EQ(c.get<int>({0}), -5);
+	EXPECT_EQ(c.get<int>({1}), 15);
+	EXPECT_EQ(c.get<int8_t>({2}), (int8_t)-128);
+}
+
+TEST(NDArray_arithmetic, Promote_INT8_plus_INT32_to_INT32) {
+	NDArray a({2}, INT8);
+	NDArray b({2}, INT32);
+	a.set({0}, -1);
+	a.set({1}, 2);
+	b.set({0}, 10);
+	b.set({1}, 20);
+	NDArray c = a + b;
+	EXPECT_EQ(c.type, INT32);
+	EXPECT_EQ(c.get<int32_t>({0}), 9);
+	EXPECT_EQ(c.get<int32_t>({1}), 22);
+}
+
+TEST(NDArray_arithmetic, Promote_INT8_plus_F32_to_F32) {
+	NDArray a({2}, INT8);
+	a.set({0}, -1);
+	a.set({1}, 3);
+	NDArray b(ArrayList({0.5f, 0.5f}));
+	NDArray c = a + b;
+	EXPECT_EQ(c.type, F32);
+	EXPECT_FLOAT_EQ(c.get<float>({0}), -0.5f);
+	EXPECT_FLOAT_EQ(c.get<float>({1}), 3.5f);
+}
+
+TEST(NDArray_arithmetic, Promote_INT8_plus_UINT8_to_INT32) {
+	NDArray a({2}, INT8);
+	NDArray b({2}, UINT8);
+	a.set({0}, -1);
+	a.set({1}, 2);
+	b.set({0}, 200);
+	b.set({1}, 3);
+	NDArray c = a + b;
+	EXPECT_EQ(c.type, INT32);
+	EXPECT_EQ(c.get<int32_t>({0}), 199);
+	EXPECT_EQ(c.get<int32_t>({1}), 5);
+}
+
 TEST(NDArray_arithmetic, Promote_UINT8_plus_F32_to_F32) {
 	NDArray a(ArrayList<uint8_t>({1, 2, 3}));
 	NDArray b(ArrayList({0.5f, 0.5f, 0.5f}));
