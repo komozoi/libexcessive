@@ -9,6 +9,7 @@
 //
 
 #include <gtest/gtest.h>
+#include <stdexcept>
 
 #include "NDArray.h"
 
@@ -308,6 +309,28 @@ TEST(NDArray_basics, ShapePlusData_F32) {
     EXPECT_EQ(m.shape.get(1), 2);
     EXPECT_FLOAT_EQ(m.get<float>({0, 0}), 1.0f);
     EXPECT_FLOAT_EQ(m.get<float>({1, 1}), 4.0f);
+}
+
+TEST(NDArray_basics, ZeroAxis_IsEmpty) {
+	NDArray a({0, 8}, F32);
+	EXPECT_EQ(a.numElements(), (size_t)0);
+	EXPECT_EQ(a.shape.get(0), 0);
+	EXPECT_EQ(a.shape.get(1), 8);
+}
+
+TEST(NDArray_basics, NegativeAxis_Throws) {
+	EXPECT_THROW(NDArray({-1, 8}, F32), std::invalid_argument);
+	EXPECT_THROW(NDArray({8, -2}, UINT8), std::invalid_argument);
+}
+
+TEST(NDArray_basics, ShapeProductOverflow_Throws) {
+	// 2^30 * 2^30 * 2^10 overflows size_t
+	EXPECT_THROW(NDArray({1 << 30, 1 << 30, 1 << 10}, UINT8), std::invalid_argument);
+}
+
+TEST(NDArray_basics, Uint256ByteSizeOverflow_Throws) {
+	// 2^60 elements fit in size_t; 2^60 * 32 wraps
+	EXPECT_THROW(NDArray({1 << 30, 1 << 30}, UINT256), std::invalid_argument);
 }
 
 // ============================================================

@@ -5,6 +5,7 @@
 // All rights reserved.
 
 #include <gtest/gtest.h>
+#include <stdexcept>
 
 #include "NDArray.h"
 #include "alloc/pointer.h"
@@ -117,4 +118,27 @@ TEST(NDArray_views, NotBroadcastable_Throws) {
 	NDArray a(ArrayList({1.0f, 2.0f, 3.0f}));
 	EXPECT_FALSE(a.isBroadcastableTo(ArrayList<int>({2, 4})));
 	EXPECT_THROW(a.broadcastTo(ArrayList<int>({2, 4})), std::invalid_argument);
+}
+
+TEST(NDArray_views, ReshapeNegativeAxis_Throws) {
+	NDArray empty({0}, F32);
+	EXPECT_THROW(empty.reshapeView(ArrayList<int>({-1})), std::invalid_argument);
+}
+
+TEST(NDArray_views, ReshapeProductOverflow_Throws) {
+	// wrapped product is 0, matching an empty source — must still reject
+	NDArray empty({0}, F32);
+	EXPECT_THROW(empty.reshapeView(ArrayList<int>({1 << 30, 1 << 30, 16})),
+	             std::invalid_argument);
+}
+
+TEST(NDArray_views, BroadcastNegativeAxis_Throws) {
+	NDArray a({1}, F32);
+	EXPECT_THROW(a.broadcastTo(ArrayList<int>({-1, 8})), std::invalid_argument);
+}
+
+TEST(NDArray_views, BroadcastProductOverflow_Throws) {
+	NDArray s({}, F32);
+	EXPECT_THROW(s.broadcastTo(ArrayList<int>({1 << 30, 1 << 30, 1 << 10})),
+	             std::invalid_argument);
 }

@@ -13,6 +13,7 @@
 #include "ndarray_score.h"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -382,34 +383,47 @@ void NDArray::ensureWritable() {
 	rebindPointers();
 }
 
+static size_t mulOrThrow(size_t a, size_t b) {
+	if (b != 0 && a > SIZE_MAX / b)
+		throw std::invalid_argument("NDArray: size overflow");
+	return a * b;
+}
+
+// Product of axes. Rank 0 → 1. Rejects negative axes and size_t overflow.
+static size_t shapeElementCount(const ArrayList<int>& shape) {
+	size_t n = 1;
+	for (int i = 0; i < shape.size(); ++i) {
+		int d = shape.get(i);
+		if (d < 0)
+			throw std::invalid_argument("NDArray: negative dimension");
+		n = mulOrThrow(n, (size_t)d);
+	}
+	return n;
+}
+
 size_t NDArray::bufferBytesFor(NDArrayType t, size_t numElems) {
 	switch (t) {
 		case BINARY:
+			if (numElems > SIZE_MAX - 63)
+				throw std::invalid_argument("NDArray: size overflow");
 			return ((numElems + 63) / 64) * 8;
 		case INT3:
+			if (numElems > SIZE_MAX - (int3_kLanesPerWord - 1))
+				throw std::invalid_argument("NDArray: size overflow");
 			return int3_bufferBytes(numElems);
 		case UINT8:
 			return numElems;
 		case INT32:
 		case F32:
-			return numElems * 4;
+			return mulOrThrow(numElems, 4);
 		case INT64:
 		case F64:
-			return numElems * 8;
+			return mulOrThrow(numElems, 8);
 		case UINT256:
-			return numElems * 32;
+			return mulOrThrow(numElems, 32);
 		default:
 			return numElems;
 	}
-}
-
-static size_t wrapElementCount(const ArrayList<int>& shape) {
-	if (shape.size() == 0)
-		return 1;
-	size_t n = 1;
-	for (int i = 0; i < shape.size(); ++i)
-		n *= (size_t)(shape.get(i) > 0 ? shape.get(i) : 0);
-	return n;
 }
 
 static size_t wrapAlignment(NDArrayType t) {
@@ -430,7 +444,7 @@ static size_t wrapAlignment(NDArrayType t) {
 }
 
 sp<NDArrayBuffer> NDArray::makeWrapBuffer(void* data, size_t byteSize, const ArrayList<int>& shape, NDArrayType type) {
-	const size_t n = wrapElementCount(shape);
+	const size_t n = shapeElementCount(shape);
 	const size_t need = bufferBytesFor(type, n);
 	if (need > 0 && data == nullptr)
 		throw std::invalid_argument("NDArray wrap: null data");
@@ -445,7 +459,7 @@ sp<NDArrayBuffer> NDArray::makeWrapBuffer(void* data, size_t byteSize, const Arr
 }
 
 sp<NDArrayBuffer> NDArray::makeWrapBuffer(const void* data, size_t byteSize, const ArrayList<int>& shape, NDArrayType type) {
-	const size_t n = wrapElementCount(shape);
+	const size_t n = shapeElementCount(shape);
 	const size_t need = bufferBytesFor(type, n);
 	if (need > 0 && data == nullptr)
 		throw std::invalid_argument("NDArray wrap: null data");
@@ -618,11 +632,7 @@ NDArray& NDArray::operator=(NDArray&& other) noexcept {
 }
 
 size_t NDArray::initialize() {
-	size_t totalElements = 1;
-	for (int i = 0; i < shape.size(); ++i)
-		totalElements *= (size_t)(shape.get(i) > 0 ? shape.get(i) : 0);
-	if (shape.size() == 0)
-		totalElements = 1;
+	size_t totalElements = shapeElementCount(shape);
 
 	memorySize = bufferBytesFor(type, totalElements);
 	// UNIQUE sole owner; first NDArray copy becomes COPY_ON_WRITE via sp copy rules.
@@ -632,10 +642,7 @@ size_t NDArray::initialize() {
 }
 
 size_t NDArray::numElements() const {
-	size_t n = 1;
-	for (int i = 0; i < shape.size(); ++i)
-		n *= (size_t)shape.get(i);
-	return n;
+	return shapeElementCount(shape);
 }
 
 bool NDArray::operator==(const NDArray& other) const {
@@ -767,12 +774,7 @@ NDArrayView NDArrayView::wrap(const void* data, size_t byteSize, ArrayList<int> 
 }
 
 size_t NDArrayView::numElements() const {
-	if (shape.size() == 0)
-		return 1;
-	size_t n = 1;
-	for (int i = 0; i < shape.size(); ++i)
-		n *= (size_t)(shape.get(i) > 0 ? shape.get(i) : 0);
-	return n;
+	return shapeElementCount(shape);
 }
 
 bool NDArrayView::isContiguous() const {
@@ -813,6 +815,7 @@ bool NDArrayView::isBroadcastableTo(const ArrayList<int>& targetShape) const {
 }
 
 NDArrayView NDArrayView::broadcastTo(const ArrayList<int>& targetShape) const {
+	shapeElementCount(targetShape);
 	if (!isBroadcastableTo(targetShape))
 		throw std::invalid_argument("NDArrayView::broadcastTo - shape not broadcastable");
 	int ar = shape.size();
@@ -834,13 +837,7 @@ NDArrayView NDArrayView::reshape(const ArrayList<int>& newShape) const {
 	if (!isContiguous())
 		throw std::invalid_argument("NDArrayView::reshape - view is not contiguous");
 	size_t oldN = numElements();
-	size_t newN = 1;
-	if (newShape.size() == 0)
-		newN = 1;
-	else {
-		for (int i = 0; i < newShape.size(); ++i)
-			newN *= (size_t)(newShape.get(i) > 0 ? newShape.get(i) : 0);
-	}
+	size_t newN = shapeElementCount(newShape);
 	if (oldN != newN)
 		throw std::invalid_argument("NDArrayView::reshape - element count mismatch");
 	return NDArrayView(buffer, newShape, NDArray::rowMajorStrides(newShape), offset, type);

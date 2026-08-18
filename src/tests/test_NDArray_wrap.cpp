@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -133,6 +134,28 @@ TEST(NDArray_wrap, UndersizedBuffer_Throws) {
 	EXPECT_THROW(NDArrayView::wrap(buf, sizeof(buf), {3}, F32), std::invalid_argument);
 	EXPECT_THROW(NDArray::wrap(static_cast<void*>(buf), sizeof(buf), {3}, F32),
 	             std::invalid_argument);
+}
+
+TEST(NDArray_wrap, NegativeAxis_Throws) {
+	float buf[8] = {};
+	EXPECT_THROW(NDArrayView::wrap(buf, sizeof(buf), {-1, 8}, F32), std::invalid_argument);
+	EXPECT_THROW(NDArray::wrap(static_cast<void*>(buf), sizeof(buf), {-1, 8}, F32),
+	             std::invalid_argument);
+}
+
+TEST(NDArray_wrap, Uint256ByteSizeOverflow_Throws) {
+	alignas(8) uint8_t buf[8] = {};
+	EXPECT_THROW(NDArrayView::wrap(buf, sizeof(buf), {1 << 30, 1 << 30}, UINT256),
+	             std::invalid_argument);
+	EXPECT_THROW(NDArray::wrap(static_cast<void*>(buf), sizeof(buf), {1 << 30, 1 << 30}, UINT256),
+	             std::invalid_argument);
+}
+
+TEST(NDArray_wrap, ZeroAxis_EmptyOk) {
+	NDArrayView v = NDArrayView::wrap(nullptr, 0, {0, 8}, F32);
+	EXPECT_EQ(v.numElements(), (size_t)0);
+	NDArray w = NDArray::wrap(static_cast<void*>(nullptr), 0, {0, 8}, F32);
+	EXPECT_EQ(w.numElements(), (size_t)0);
 }
 
 TEST(NDArray_wrap, NullData_Throws) {

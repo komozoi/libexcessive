@@ -136,6 +136,7 @@ public:
 	 * `data`. The view has no mutators; writes go through `NDArray::wrap(void*)`.
 	 * `data` must stay valid for the lifetime of this view and any copy of it.
 	 * `byteSize` must be at least the packed size of `shape` × `type`.
+	 * Axes must be >= 0; the packed size must fit in size_t.
 	 * Packed types (BINARY, INT3, UINT256) require 8-byte alignment.
 	 */
 	static NDArrayView wrap(const void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type);
@@ -248,6 +249,7 @@ public:
 	 *
 	 * Takes `void*`, not `const void*`: mutation is part of the NDArray API.
 	 * Const memory is a view — use `NDArrayView::wrap`.
+	 * Axes must be >= 0; the packed size must fit in size_t.
 	 */
 	static NDArray wrap(void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type);
 
@@ -279,7 +281,8 @@ public:
 	 */
 	NDArray convert(NDArrayType newType) const;
 
-	/** Number of logical elements (product of shape; 1 for a scalar). */
+	/** Number of logical elements (product of shape; 1 for a scalar).
+	 *  Throws if an axis is negative or the product overflows size_t. */
 	size_t numElements() const;
 
 	/** Row-major element strides for this dense array. */
