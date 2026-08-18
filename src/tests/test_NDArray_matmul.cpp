@@ -467,6 +467,36 @@ TEST(NDArray_matmul, INT3_GemvAndFatMatchNaive) {
 	for (int i = 0; i < 17 * 19; ++i)
 		bo.setFlat((size_t)i, (i % 5) - 2);
 	expectClose(ao.matmul(bo), naiveMatmulI64(ao, bo));
+
+	NDArray am({96, 80}, INT3);
+	NDArray bm({80, 64}, INT3);
+	for (int i = 0; i < 96 * 80; ++i)
+		am.setFlat((size_t)i, (i % 7) - 3);
+	for (int i = 0; i < 80 * 64; ++i)
+		bm.setFlat((size_t)i, (i % 5) - 2);
+	expectClose(am.matmul(bm), naiveMatmulI64(am, bm));
+}
+
+TEST(NDArray_matmul, INT3_PackedBTileSample) {
+	const int M = 32;
+	const int K = 1024;
+	const int N = 1024;
+	NDArray a({M, K}, INT3);
+	NDArray b({K, N}, INT3);
+	for (int i = 0; i < M * K; ++i)
+		a.setFlat((size_t)i, (i % 7) - 3);
+	for (int i = 0; i < K * N; ++i)
+		b.setFlat((size_t)i, (i % 5) - 2);
+	NDArray c = a.matmul(b);
+	int spots[][2] = {{0, 0}, {0, 16}, {0, N - 1}, {M - 1, 0}, {15, 32}, {31, 1008}};
+	for (int s = 0; s < 6; ++s) {
+		int i = spots[s][0];
+		int j = spots[s][1];
+		int acc = 0;
+		for (int k = 0; k < K; ++k)
+			acc += a.get<int>({i, k}) * b.get<int>({k, j});
+		EXPECT_EQ(c.get<int>({i, j}), acc) << "at " << i << "," << j;
+	}
 }
 
 TEST(NDArray_matmul, INT3_StreamBeatsUnpack) {

@@ -640,6 +640,9 @@ static void gemmF64(const double* A, int lda, const double* B, int ldb,
 #if NDM_VNNI
 static const int kI8NR = 16;
 static const int kI8MR = 16;
+static const int kI8MC = 96;
+static const int kI8KC_LO = 256;
+static const int kI8KC_HI = 512;
 
 // xorB 0x80 is B-128 as int8 (UINT8 path). xorB 0 leaves bits unchanged.
 static void packB_vnni(const uint8_t* B, int ldb, int k0, int kb, int j0, int nb, int8_t* Bp,
@@ -814,16 +817,32 @@ static void gemmVNNIStrip(void* ctx, int j0, int j1) {
 	int K = job->K;
 	uint8_t xorA = job->xorA;
 	uint8_t xorB = job->xorB;
-	int8_t* Bp = (int8_t*)alloc64((size_t)((kKC + 3) / 4) * 64);
-	uint8_t* Ap = (uint8_t*)alloc64((size_t)kI8MR * (size_t)kKC);
-	for (int kc = 0; kc < K; kc += kKC) {
+	int nb = j1 - j0;
+	if (nb <= 0)
+		return;
+	int kcStep = (K > 1024) ? kI8KC_HI : kI8KC_LO;
+	if (kcStep > K)
+		kcStep = K;
+	int nPanels = (nb + kI8NR - 1) / kI8NR;
+	size_t panelBytes = ((size_t)((kcStep + 3) / 4)) * 64;
+	int8_t* Bp = (int8_t*)alloc64((size_t)nPanels * panelBytes);
+	uint8_t* Ap = (uint8_t*)alloc64((size_t)kI8MC * (size_t)kcStep);
+	for (int kc = 0; kc < K; kc += kcStep) {
 		int kb = K - kc;
-		if (kb > kKC)
-			kb = kKC;
-		for (int ic = 0; ic < M; ic += kI8MR) {
+		if (kb > kcStep)
+			kb = kcStep;
+		for (int p = 0; p < nPanels; ++p) {
+			int jr = p * kI8NR;
+			int nr = nb - jr;
+			if (nr > kI8NR)
+				nr = kI8NR;
+			packB_vnni((const uint8_t*)B, ldb, kc, kb, j0 + jr, nr,
+			           Bp + (size_t)p * panelBytes, xorB);
+		}
+		for (int ic = 0; ic < M; ic += kI8MC) {
 			int mb = M - ic;
-			if (mb > kI8MR)
-				mb = kI8MR;
+			if (mb > kI8MC)
+				mb = kI8MC;
 			for (int i = 0; i < mb; ++i) {
 				const uint8_t* src = A + (size_t)(ic + i) * (size_t)lda + (size_t)kc;
 				uint8_t* dst = Ap + (size_t)i * (size_t)kb;
@@ -840,12 +859,20 @@ static void gemmVNNIStrip(void* ctx, int j0, int j1) {
 						dst[k] = (uint8_t)(src[k] ^ xorA);
 				}
 			}
-			for (int jc = j0; jc < j1; jc += kI8NR) {
-				int nb = j1 - jc;
-				if (nb > kI8NR)
-					nb = kI8NR;
-				packB_vnni((const uint8_t*)B, ldb, kc, kb, jc, nb, Bp, xorB);
-				kernelI8_16x16(Ap, kb, Bp, C + (size_t)ic * (size_t)ldc + (size_t)jc, ldc, kb, mb, nb);
+			for (int ir = 0; ir < mb; ir += kI8MR) {
+				int mr = mb - ir;
+				if (mr > kI8MR)
+					mr = kI8MR;
+				for (int p = 0; p < nPanels; ++p) {
+					int jr = p * kI8NR;
+					int nr = nb - jr;
+					if (nr > kI8NR)
+						nr = kI8NR;
+					kernelI8_16x16(Ap + (size_t)ir * (size_t)kb, kb,
+					               Bp + (size_t)p * panelBytes,
+					               C + (size_t)(ic + ir) * (size_t)ldc + (size_t)(j0 + jr),
+					               ldc, kb, mr, nr);
+				}
 			}
 		}
 	}
@@ -943,7 +970,25 @@ static void gemmUINT8(const uint8_t* A, int lda, const uint8_t* B, int ldb,
 
 static void unpackInt3Xor4(uint8_t* dst, const uint64_t* src, size_t n) {
 	size_t words = n / 16;
-	for (size_t w = 0; w < words; ++w) {
+	size_t w = 0;
+#if NDM_AVX512
+	for (; w + 4 <= words; w += 4) {
+		__m256i p = _mm256_loadu_si256((const __m256i*)(src + w));
+		__m256i lo = _mm256_and_si256(p, _mm256_set1_epi8(0x07));
+		__m256i hi = _mm256_and_si256(_mm256_srli_epi16(p, 4), _mm256_set1_epi8(0x07));
+		lo = _mm256_xor_si256(lo, _mm256_set1_epi8(0x04));
+		hi = _mm256_xor_si256(hi, _mm256_set1_epi8(0x04));
+		__m128i lo0 = _mm256_castsi256_si128(lo);
+		__m128i lo1 = _mm256_extracti128_si256(lo, 1);
+		__m128i hi0 = _mm256_castsi256_si128(hi);
+		__m128i hi1 = _mm256_extracti128_si256(hi, 1);
+		__m256i r0 = _mm256_set_m128i(_mm_unpackhi_epi8(lo0, hi0), _mm_unpacklo_epi8(lo0, hi0));
+		__m256i r1 = _mm256_set_m128i(_mm_unpackhi_epi8(lo1, hi1), _mm_unpacklo_epi8(lo1, hi1));
+		_mm256_storeu_si256((__m256i*)(dst + w * 16), r0);
+		_mm256_storeu_si256((__m256i*)(dst + w * 16 + 32), r1);
+	}
+#endif
+	for (; w < words; ++w) {
 		uint64_t x = (src[w] & int3_kValueMask) ^ 0x4444444444444444ULL;
 		for (int lane = 0; lane < 16; ++lane)
 			dst[w * 16 + (size_t)lane] = (uint8_t)((x >> (unsigned)(lane * 4)) & 7u);
@@ -1148,6 +1193,116 @@ static void gemvINT3_streamA(const uint64_t* Aw, const int32_t* x, int32_t* y, i
 	}
 }
 
+#if NDM_VNNI
+static void packB_int3_panel(const uint64_t* Bw, int wordsN, int k0, int kb, int jw, int8_t* Bp) {
+	int kb4 = (kb + 3) & ~3;
+	memset(Bp, 0, (size_t)(kb4 / 4) * 64);
+	alignas(16) uint8_t row[4][16];
+	int k;
+	for (k = 0; k + 4 <= kb; k += 4) {
+		for (int t = 0; t < 4; ++t) {
+			uint64_t w = (Bw[(size_t)(k0 + k + t) * (size_t)wordsN + (size_t)jw] & int3_kValueMask) ^
+			             0x4444444444444444ULL;
+			__m128i b = _mm_cvtsi64_si128((long long)w);
+			__m128i lo = _mm_and_si128(b, _mm_set1_epi8(0x0f));
+			__m128i hi = _mm_and_si128(_mm_srli_epi16(b, 4), _mm_set1_epi8(0x0f));
+			_mm_store_si128((__m128i*)row[t], _mm_unpacklo_epi8(lo, hi));
+		}
+		int8_t* out = Bp + ((size_t)k / 4) * 64;
+		__m128i v0 = _mm_load_si128((const __m128i*)row[0]);
+		__m128i v1 = _mm_load_si128((const __m128i*)row[1]);
+		__m128i v2 = _mm_load_si128((const __m128i*)row[2]);
+		__m128i v3 = _mm_load_si128((const __m128i*)row[3]);
+		__m128i a = _mm_unpacklo_epi8(v0, v1);
+		__m128i b = _mm_unpackhi_epi8(v0, v1);
+		__m128i c = _mm_unpacklo_epi8(v2, v3);
+		__m128i d = _mm_unpackhi_epi8(v2, v3);
+		_mm_storeu_si128((__m128i*)(out + 0), _mm_unpacklo_epi16(a, c));
+		_mm_storeu_si128((__m128i*)(out + 16), _mm_unpackhi_epi16(a, c));
+		_mm_storeu_si128((__m128i*)(out + 32), _mm_unpacklo_epi16(b, d));
+		_mm_storeu_si128((__m128i*)(out + 48), _mm_unpackhi_epi16(b, d));
+	}
+	if (k < kb) {
+		int8_t* out = Bp + ((size_t)k / 4) * 64;
+		for (int t = 0; k + t < kb; ++t) {
+			uint64_t w = (Bw[(size_t)(k0 + k + t) * (size_t)wordsN + (size_t)jw] & int3_kValueMask) ^
+			             0x4444444444444444ULL;
+			for (int j = 0; j < 16; ++j)
+				out[j * 4 + t] = (int8_t)((w >> (unsigned)(j * 4)) & 7u);
+		}
+	}
+}
+
+struct I3PackedJob {
+	const uint8_t* A;
+	const uint64_t* Bw;
+	int32_t* C;
+	const int32_t* row;
+	const int32_t* col;
+	int ldc, M, N, K;
+};
+
+static void gemmINT3_fromPackedB_strip(void* ctx, int j0, int j1) {
+	const I3PackedJob* job = (const I3PackedJob*)ctx;
+	const uint8_t* A = job->A;
+	const uint64_t* Bw = job->Bw;
+	int32_t* C = job->C;
+	int ldc = job->ldc;
+	int M = job->M;
+	int N = job->N;
+	int K = job->K;
+	int wordsN = N / 16;
+	int nb = j1 - j0;
+	if (nb <= 0)
+		return;
+	int kcStep = (K > 1024) ? kI8KC_HI : kI8KC_LO;
+	if (kcStep > K)
+		kcStep = K;
+	int nPanels = (nb + kI8NR - 1) / kI8NR;
+	size_t panelBytes = ((size_t)((kcStep + 3) / 4)) * 64;
+	int8_t* Bp = (int8_t*)alloc64((size_t)nPanels * panelBytes);
+	uint8_t* Ap = (uint8_t*)alloc64((size_t)kI8MC * (size_t)kcStep);
+	for (int kc = 0; kc < K; kc += kcStep) {
+		int kb = K - kc;
+		if (kb > kcStep)
+			kb = kcStep;
+		for (int p = 0; p < nPanels; ++p)
+			packB_int3_panel(Bw, wordsN, kc, kb, (j0 / 16) + p, Bp + (size_t)p * panelBytes);
+		for (int ic = 0; ic < M; ic += kI8MC) {
+			int mb = M - ic;
+			if (mb > kI8MC)
+				mb = kI8MC;
+			for (int i = 0; i < mb; ++i)
+				memcpy(Ap + (size_t)i * (size_t)kb,
+				       A + (size_t)(ic + i) * (size_t)K + (size_t)kc, (size_t)kb);
+			for (int ir = 0; ir < mb; ir += kI8MR) {
+				int mr = mb - ir;
+				if (mr > kI8MR)
+					mr = kI8MR;
+				for (int p = 0; p < nPanels; ++p) {
+					int jr = p * kI8NR;
+					int nr = nb - jr;
+					if (nr > kI8NR)
+						nr = kI8NR;
+					kernelI8_16x16(Ap + (size_t)ir * (size_t)kb, kb,
+					               Bp + (size_t)p * panelBytes,
+					               C + (size_t)(ic + ir) * (size_t)ldc + (size_t)(j0 + jr),
+					               ldc, kb, mr, nr);
+				}
+			}
+		}
+	}
+	free64(Ap);
+	free64(Bp);
+	for (int i = 0; i < M; ++i) {
+		int32_t rs = job->row[i];
+		int32_t* crow = C + (size_t)i * (size_t)ldc;
+		for (int j = j0; j < j1; ++j)
+			crow[j] = crow[j] - 4 * rs - 4 * job->col[j] + 16 * K;
+	}
+}
+#endif
+
 static void gemmINT3(const uint64_t* Aw, const uint64_t* Bw, int32_t* C, int ldc,
                      int M, int N, int K, bool wrap) {
 	if (wrap) {
@@ -1181,6 +1336,54 @@ static void gemmINT3(const uint64_t* Aw, const uint64_t* Bw, int32_t* C, int ldc
 		free64(X);
 		return;
 	}
+
+#if NDM_VNNI
+	if ((N % 16) == 0 && K >= 16 && M >= 32 &&
+	    (size_t)K * (size_t)N >= 1048576ull) {
+		uint8_t* A = (uint8_t*)alloc64((size_t)M * (size_t)K);
+		unpackInt3Xor4(A, Aw, (size_t)M * (size_t)K);
+		int32_t* row = (int32_t*)calloc((size_t)M, sizeof(int32_t));
+		int32_t* col = (int32_t*)calloc((size_t)N, sizeof(int32_t));
+		if (!row || !col) {
+			free(row);
+			free(col);
+			free64(A);
+			throw std::bad_alloc();
+		}
+		for (int i = 0; i < M; ++i) {
+			int32_t s = 0;
+			for (int k = 0; k < K; ++k)
+				s += (int32_t)A[(size_t)i * (size_t)K + (size_t)k];
+			row[i] = s;
+		}
+		int wordsN = N / 16;
+		for (int k = 0; k < K; ++k) {
+			for (int jw = 0; jw < wordsN; ++jw) {
+				uint64_t r = (Bw[(size_t)k * (size_t)wordsN + (size_t)jw] & int3_kValueMask) ^
+				             0x4444444444444444ULL;
+				int32_t* cp = col + jw * 16;
+				for (int j = 0; j < 16; ++j)
+					cp[j] += (int32_t)((r >> (unsigned)(j * 4)) & 7u);
+			}
+		}
+		memset(C, 0, (size_t)M * (size_t)ldc * sizeof(int32_t));
+		I3PackedJob job;
+		job.A = A;
+		job.Bw = Bw;
+		job.C = C;
+		job.row = row;
+		job.col = col;
+		job.ldc = ldc;
+		job.M = M;
+		job.N = N;
+		job.K = K;
+		ndmRunNStrips(N, 16, (size_t)M * (size_t)N * (size_t)K, gemmINT3_fromPackedB_strip, &job);
+		free(row);
+		free(col);
+		free64(A);
+		return;
+	}
+#endif
 
 	uint8_t* A = (uint8_t*)alloc64((size_t)M * (size_t)K);
 	uint8_t* B = (uint8_t*)alloc64((size_t)K * (size_t)N);
