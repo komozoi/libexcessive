@@ -17,11 +17,14 @@
 
 
 #include "fs/FdHandle.h"
+#include "fs/FdHandleTestHooks.h"
 #include <gtest/gtest.h>
 #include "fcntl.h"
 #include <string>
 #include <atomic>
+#include <chrono>
 #include <thread>
+#include <utility>
 #include <vector>
 #include <unistd.h>
 
@@ -36,6 +39,7 @@ protected:
 
 	// Set up (called before each test)
 	void SetUp() override {
+		fdhandle_test::reset();
 		// Clean up any existing test file
 		if (remove(TEST_FILE) != 0 && errno != ENOENT) {
 			// Ignore errors if the file doesn't exist
@@ -44,10 +48,43 @@ protected:
 
 	// Tear down (called after each test)
 	void TearDown() override {
+		fdhandle_test::reset();
 		// Clean up the test file
 		remove(TEST_FILE);
 	}
 };
+
+// True once some thread is inside queueWrite/flushWrites while watch is on.
+static bool waitUntilQueueCritical(std::chrono::milliseconds timeout = std::chrono::milliseconds(2000)) {
+	const auto deadline = std::chrono::steady_clock::now() + timeout;
+	while (fdhandle_test::threads_in_critical() == 0) {
+		if (std::chrono::steady_clock::now() >= deadline)
+			return false;
+		std::this_thread::yield();
+	}
+	return true;
+}
+
+// Hold one thread inside a writeQueue critical section, then run `other`
+// on this thread.  Overlap means the handle mutex does not cover the queue.
+template<typename First, typename Second>
+static void expectQueueOpsSerialized(First first, Second other) {
+	fdhandle_test::reset();
+	fdhandle_test::set_critical_delay(std::chrono::milliseconds(30));
+	fdhandle_test::set_watch_enabled(true);
+
+	std::thread t(std::forward<First>(first));
+	const bool entered = waitUntilQueueCritical();
+	if (entered)
+		other();
+	t.join();
+
+	ASSERT_TRUE(entered) << "first operation never entered queueWrite/flushWrites";
+	EXPECT_FALSE(fdhandle_test::overlap_detected())
+		<< "writeQueue was accessed by two threads at once; "
+		   "queueWrite/flush/read must take FdHandleData::mutex";
+	fdhandle_test::reset();
+}
 
 
 // Test case: Opening a new file in write mode
@@ -628,6 +665,99 @@ TEST_F(FdHandleTest, PreadPwriteSharedHandleCopies) {
 	writer.join();
 	reader.join();
 	EXPECT_EQ(bad.load(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// writeQueue must be covered by FdHandleData::mutex.
+//
+// A 30ms delay is injected at the start of queueWrite/flushWrites so a
+// missing lock is visible on Linux as overlap_detected(), not as a rare
+// x86 segfault.  queueWrite, flush(), and read() must take the same mutex
+// that pread/pwrite already use around flushWrites.
+// ---------------------------------------------------------------------------
+
+TEST_F(FdHandleTest, QueueWriteAndFlushDoNotOverlap) {
+	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	uint32_t v = 0x11111111u;
+	expectQueueOpsSerialized(
+		[&]() { h.queueWrite(v, 0); },
+		[&]() { h.flush(); });
+}
+
+TEST_F(FdHandleTest, TwoQueueWritesDoNotOverlap) {
+	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	uint32_t a = 0x11111111u;
+	uint32_t b = 0x22222222u;
+	expectQueueOpsSerialized(
+		[&]() { h.queueWrite(a, 0); },
+		[&]() { h.queueWrite(b, 16); });
+}
+
+TEST_F(FdHandleTest, QueueWriteAndPreadDoNotOverlap) {
+	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	uint32_t seed = 0;
+	ASSERT_EQ(h.write(seed), (ssize_t)sizeof(seed));
+	h.flush();
+
+	uint32_t v = 0x33333333u;
+	expectQueueOpsSerialized(
+		[&]() { h.queueWrite(v, 0); },
+		[&]() {
+			uint32_t got = 0;
+			h.pread(got, 0);
+		});
+}
+
+TEST_F(FdHandleTest, QueueWriteAndPwriteDoNotOverlap) {
+	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	uint32_t seed = 0;
+	ASSERT_EQ(h.write(seed), (ssize_t)sizeof(seed));
+	h.flush();
+
+	uint32_t queued = 0x44444444u;
+	uint32_t direct = 0x55555555u;
+	expectQueueOpsSerialized(
+		[&]() { h.queueWrite(queued, 0); },
+		[&]() { h.pwrite(direct, 0); });
+}
+
+TEST_F(FdHandleTest, FlushAndPreadDoNotOverlap) {
+	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	uint32_t seed = 0;
+	ASSERT_EQ(h.write(seed), (ssize_t)sizeof(seed));
+	h.flush();
+
+	// Seed a queued write so flushWrites has work; both paths still enter
+	// the watched section even if the queue is empty.
+	uint32_t queued = 0x66666666u;
+	h.queueWrite(queued, 0);
+
+	expectQueueOpsSerialized(
+		[&]() { h.flush(); },
+		[&]() {
+			uint32_t got = 0;
+			h.pread(got, 0);
+		});
+}
+
+TEST_F(FdHandleTest, QueueWriteAndReadDoNotOverlap) {
+	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	uint32_t seed = 0;
+	ASSERT_EQ(h.write(seed), (ssize_t)sizeof(seed));
+	h.flush();
+
+	// read() only drains the queue when it is non-empty.  Pre-seed so the
+	// reader thread is guaranteed to enter flushWrites.
+	uint32_t queued = 0x77777777u;
+	h.queueWrite(queued, 0);
+
+	uint32_t extra = 0x88888888u;
+	expectQueueOpsSerialized(
+		[&]() {
+			uint32_t got = 0;
+			h.read(got);
+		},
+		[&]() { h.queueWrite(extra, 8); });
 }
 
 

@@ -17,16 +17,86 @@
 
 
 #include "fs/FdHandle.h"
+#include "fs/FdHandleTestHooks.h"
 
 #include <cstdio>
 #include <mutex>
 #include <atomic>
+#include <chrono>
+#include <thread>
 #include <sys/poll.h>
 #include "fcntl.h"
 #include "unistd.h"
 
 #include "ds/HashMap.h"
 #include "ds/Queue.h"
+
+
+namespace fdhandle_test {
+
+static std::atomic<bool> g_watch{false};
+static std::atomic<int> g_critical{0};
+static std::atomic<bool> g_overlap{false};
+static std::atomic<long long> g_delay_us{0};
+
+void reset() {
+	g_watch.store(false, std::memory_order_release);
+	g_delay_us.store(0, std::memory_order_release);
+	g_critical.store(0, std::memory_order_release);
+	g_overlap.store(false, std::memory_order_release);
+}
+
+void set_watch_enabled(bool enabled) {
+	g_watch.store(enabled, std::memory_order_release);
+}
+
+void set_critical_delay(std::chrono::microseconds delay) {
+	g_delay_us.store(delay.count(), std::memory_order_release);
+}
+
+int threads_in_critical() {
+	return g_critical.load(std::memory_order_acquire);
+}
+
+bool overlap_detected() {
+	return g_overlap.load(std::memory_order_acquire);
+}
+
+}
+
+namespace {
+
+// First statement of every writeQueue critical section.  If two threads
+// are inside queueWrite/flushWrites at once, the handle mutex is not
+// covering the queue.  The overlapping caller skips the body so the
+// test can report overlap instead of crashing on a corrupted Queue.
+struct QueueCriticalGuard {
+	bool active = false;
+	bool skip = false;
+
+	QueueCriticalGuard() {
+		active = fdhandle_test::g_watch.load(std::memory_order_acquire);
+		if (!active)
+			return;
+		if (fdhandle_test::g_critical.fetch_add(1, std::memory_order_acq_rel) != 0) {
+			fdhandle_test::g_overlap.store(true, std::memory_order_release);
+			skip = true;
+			return;
+		}
+		long long us = fdhandle_test::g_delay_us.load(std::memory_order_acquire);
+		if (us > 0)
+			std::this_thread::sleep_for(std::chrono::microseconds(us));
+	}
+
+	~QueueCriticalGuard() {
+		if (active)
+			fdhandle_test::g_critical.fetch_sub(1, std::memory_order_acq_rel);
+	}
+
+	bool abort() const { return skip; }
+};
+
+}
 
 
 //#define DEBUG
@@ -99,6 +169,11 @@ public:
 	}
 
 	void queueWrite(const void* value, size_t size, off_t where) {
+		std::lock_guard<std::recursive_mutex> _(mutex);
+		QueueCriticalGuard watch;
+		if (watch.abort())
+			return;
+
 		queued_write_t* last = writeQueue.empty() ? nullptr : writeQueue.peekLast();
 
 		if (last && last->size + last->where == where) {
@@ -134,24 +209,33 @@ public:
 	}
 
 	void flushWrites() {
+		std::lock_guard<std::recursive_mutex> _(mutex);
+		QueueCriticalGuard watch;
+		if (watch.abort())
+			return;
+
 		while (!writeQueue.empty()) {
 			queued_write_t* op = writeQueue.pop();
-			lseek(fd, op->where, SEEK_SET);
-			write(op->content, op->size);
+			const char* buf = op->content;
+			size_t done = 0;
+			while (done < op->size) {
+				ssize_t n = ::pwrite(fd, buf + done, op->size - done, op->where + (off_t)done);
+				if (n <= 0)
+					break;
+				done += (size_t)n;
+			}
 			free(op);
 		}
 	}
 
 	virtual ssize_t read(void* value, size_t size) {
+		// Drain under the handle mutex, then drop it before read(2) so a
+		// blocking socket/pipe read does not stall other users of this fd.
+		flushWrites();
+
 		char* buffer = (char*)value;
 		int totalRead = 0;
 		int remaining = (int)size;
-
-		if (!writeQueue.empty()) {
-			off_t offset = lseek(fd, 0, SEEK_CUR);
-			flushWrites();
-			lseek(fd, offset, SEEK_SET);
-		}
 
 		while (totalRead < (int)size) {
 			int res = (int)::read(fd, &buffer[totalRead], remaining);
