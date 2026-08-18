@@ -1332,6 +1332,274 @@ LIBEXCESSIVE_INSTANTIATE_SCORE(int64_t)
 LIBEXCESSIVE_INSTANTIATE_SCORE(uint256_t)
 #undef LIBEXCESSIVE_INSTANTIATE_SCORE
 
+// ---- typed reductions (sumAs / prodAs / meanAs) -----------------------------
+// Acc is the template argument, same as dot<Acc>. Packed contiguous views walk
+// typed pointers / packed words; F32/INT32 use the score-TU horizontal add.
+
+template <typename Lane, typename Acc>
+static Acc accFromLane(Lane v) {
+	if constexpr (std::is_same_v<Lane, uint256_t>) {
+		if constexpr (std::is_same_v<Acc, uint256_t>)
+			return v;
+		else
+			return accFromDouble<Acc>(v.toDouble());
+	} else if constexpr (std::is_same_v<Acc, uint256_t>) {
+		if constexpr (std::is_floating_point_v<Lane>)
+			return uint256_t((double)v);
+		else if constexpr (std::is_signed_v<Lane>)
+			return accFromI64<Acc>((int64_t)v);
+		else
+			return uint256_t((uint64_t)v);
+	} else {
+		return Acc(v);
+	}
+}
+
+template <typename Lane, typename Acc>
+static Acc denseSum(const Lane* a, size_t n) {
+	Acc s0{}, s1{}, s2{}, s3{};
+	size_t i = 0;
+	for (; i + 4 <= n; i += 4) {
+		s0 += accFromLane<Lane, Acc>(a[i]);
+		s1 += accFromLane<Lane, Acc>(a[i + 1]);
+		s2 += accFromLane<Lane, Acc>(a[i + 2]);
+		s3 += accFromLane<Lane, Acc>(a[i + 3]);
+	}
+	Acc s = (s0 + s1) + (s2 + s3);
+	for (; i < n; ++i)
+		s += accFromLane<Lane, Acc>(a[i]);
+	return s;
+}
+
+template <typename Acc>
+static void accMulEq(Acc& p, const Acc& x) {
+	if constexpr (std::is_same_v<Acc, uint256_t>)
+		p = p * x;
+	else
+		p *= x;
+}
+
+template <typename Lane, typename Acc>
+static Acc denseProd(const Lane* a, size_t n) {
+	Acc p0 = Acc(1), p1 = Acc(1), p2 = Acc(1), p3 = Acc(1);
+	size_t i = 0;
+	for (; i + 4 <= n; i += 4) {
+		accMulEq(p0, accFromLane<Lane, Acc>(a[i]));
+		accMulEq(p1, accFromLane<Lane, Acc>(a[i + 1]));
+		accMulEq(p2, accFromLane<Lane, Acc>(a[i + 2]));
+		accMulEq(p3, accFromLane<Lane, Acc>(a[i + 3]));
+	}
+	Acc p = (p0 * p1) * (p2 * p3);
+	for (; i < n; ++i)
+		accMulEq(p, accFromLane<Lane, Acc>(a[i]));
+	return p;
+}
+
+template <typename Acc>
+static Acc accFromSigned(int v) {
+	if constexpr (std::is_same_v<Acc, uint256_t>)
+		return v < 0 ? uint256_t(v) : uint256_t((uint64_t)v);
+	else
+		return static_cast<Acc>(v);
+}
+
+template <typename Acc>
+static Acc packedSum(const NDArrayView& v, size_t n) {
+	const void* data = v.sharedBuffer().get()->data;
+	const size_t o = v.getOffset();
+	switch (v.getType()) {
+		case F32: {
+			const float* p = (const float*)data + o;
+			if constexpr (std::is_same_v<Acc, float>)
+				return ndreduce_sum_f32(p, n);
+			return denseSum<float, Acc>(p, n);
+		}
+		case F64:
+			return denseSum<double, Acc>((const double*)data + o, n);
+		case UINT8:
+			return denseSum<uint8_t, Acc>((const uint8_t*)data + o, n);
+		case INT8:
+			return denseSum<int8_t, Acc>((const int8_t*)data + o, n);
+		case INT32: {
+			const int32_t* p = (const int32_t*)data + o;
+			if constexpr (std::is_same_v<Acc, int32_t>)
+				return ndreduce_sum_i32(p, n);
+			return denseSum<int32_t, Acc>(p, n);
+		}
+		case INT64:
+			return denseSum<int64_t, Acc>((const int64_t*)data + o, n);
+		case INT3: {
+			const uint64_t* w = (const uint64_t*)data;
+			Acc s0{}, s1{}, s2{}, s3{};
+			size_t i = 0;
+			for (; i + 4 <= n; i += 4) {
+				s0 += accFromSigned<Acc>(int3_getSigned(w, o + i));
+				s1 += accFromSigned<Acc>(int3_getSigned(w, o + i + 1));
+				s2 += accFromSigned<Acc>(int3_getSigned(w, o + i + 2));
+				s3 += accFromSigned<Acc>(int3_getSigned(w, o + i + 3));
+			}
+			Acc s = (s0 + s1) + (s2 + s3);
+			for (; i < n; ++i)
+				s += accFromSigned<Acc>(int3_getSigned(w, o + i));
+			return s;
+		}
+		case BINARY:
+			return accFromKernelI64<Acc>(ndscore_binary_i64(
+				(const uint64_t*)data, o, (const uint64_t*)data, o, n, NDScoreOp::L2Self));
+		case UINT256: {
+			const uint256_t* p = (const uint256_t*)data + o;
+			Acc s{};
+			for (size_t i = 0; i < n; ++i) {
+				if constexpr (std::is_same_v<Acc, uint256_t>)
+					s += p[i];
+				else
+					s += accFromDouble<Acc>(p[i].toDouble());
+			}
+			return s;
+		}
+		default:
+			break;
+	}
+	Acc s{};
+	for (size_t i = 0; i < n; ++i)
+		s += accFromDouble<Acc>(ndarray_detail::viewLoadDouble(v, v.getOffset() + i));
+	return s;
+}
+
+template <typename Acc>
+static Acc packedProd(const NDArrayView& v, size_t n) {
+	const void* data = v.sharedBuffer().get()->data;
+	const size_t o = v.getOffset();
+	switch (v.getType()) {
+		case F32:
+			return denseProd<float, Acc>((const float*)data + o, n);
+		case F64:
+			return denseProd<double, Acc>((const double*)data + o, n);
+		case UINT8:
+			return denseProd<uint8_t, Acc>((const uint8_t*)data + o, n);
+		case INT8:
+			return denseProd<int8_t, Acc>((const int8_t*)data + o, n);
+		case INT32:
+			return denseProd<int32_t, Acc>((const int32_t*)data + o, n);
+		case INT64:
+			return denseProd<int64_t, Acc>((const int64_t*)data + o, n);
+		case INT3: {
+			const uint64_t* w = (const uint64_t*)data;
+			Acc p = Acc(1);
+			for (size_t i = 0; i < n; ++i)
+				accMulEq(p, accFromSigned<Acc>(int3_getSigned(w, o + i)));
+			return p;
+		}
+		case BINARY: {
+			Acc p = Acc(1);
+			const uint64_t* w = (const uint64_t*)data;
+			for (size_t i = 0; i < n; ++i)
+				accMulEq(p, Acc(binaryGet(w, o + i)));
+			return p;
+		}
+		case UINT256: {
+			const uint256_t* ptr = (const uint256_t*)data + o;
+			Acc p = Acc(1);
+			for (size_t i = 0; i < n; ++i) {
+				if constexpr (std::is_same_v<Acc, uint256_t>)
+					p = p * ptr[i];
+				else
+					accMulEq(p, accFromDouble<Acc>(ptr[i].toDouble()));
+			}
+			return p;
+		}
+		default:
+			break;
+	}
+	Acc p = Acc(1);
+	for (size_t i = 0; i < n; ++i)
+		accMulEq(p, accFromDouble<Acc>(ndarray_detail::viewLoadDouble(v, v.getOffset() + i)));
+	return p;
+}
+
+template <typename Acc>
+static Acc genericSum(const NDArrayView& v, size_t n) {
+	Acc s{};
+	if constexpr (std::is_floating_point_v<Acc>) {
+		for (size_t i = 0; i < n; ++i)
+			s += accFromDouble<Acc>(ndarray_detail::viewLoadDouble(v, viewElemOffset(v, i)));
+	} else if constexpr (std::is_same_v<Acc, uint256_t>) {
+		for (size_t i = 0; i < n; ++i)
+			s += ndarray_detail::viewLoadU256(v, viewElemOffset(v, i));
+	} else {
+		for (size_t i = 0; i < n; ++i)
+			s += accFromI64<Acc>(ndarray_detail::viewLoadI64(v, viewElemOffset(v, i)));
+	}
+	return s;
+}
+
+template <typename Acc>
+static Acc genericProd(const NDArrayView& v, size_t n) {
+	Acc p = Acc(1);
+	if constexpr (std::is_floating_point_v<Acc>) {
+		for (size_t i = 0; i < n; ++i)
+			accMulEq(p, accFromDouble<Acc>(ndarray_detail::viewLoadDouble(v, viewElemOffset(v, i))));
+	} else if constexpr (std::is_same_v<Acc, uint256_t>) {
+		for (size_t i = 0; i < n; ++i)
+			p = p * ndarray_detail::viewLoadU256(v, viewElemOffset(v, i));
+	} else {
+		for (size_t i = 0; i < n; ++i)
+			accMulEq(p, accFromI64<Acc>(ndarray_detail::viewLoadI64(v, viewElemOffset(v, i))));
+	}
+	return p;
+}
+
+template <typename Acc>
+static Acc reduceViewSum(const NDArrayView& v) {
+	const size_t n = v.numElements();
+	if (n == 0)
+		throw std::invalid_argument("NDArray: cannot reduce empty array");
+	if (viewIsPacked(v) && v.sharedBuffer() && v.sharedBuffer().get())
+		return packedSum<Acc>(v, n);
+	return genericSum<Acc>(v, n);
+}
+
+template <typename Acc>
+static Acc reduceViewProd(const NDArrayView& v) {
+	const size_t n = v.numElements();
+	if (n == 0)
+		throw std::invalid_argument("NDArray: cannot reduce empty array");
+	if (viewIsPacked(v) && v.sharedBuffer() && v.sharedBuffer().get())
+		return packedProd<Acc>(v, n);
+	return genericProd<Acc>(v, n);
+}
+
+template <typename Acc>
+Acc NDArrayView::sumAs() const {
+	return reduceViewSum<Acc>(*this);
+}
+
+template <typename Acc>
+Acc NDArrayView::prodAs() const {
+	return reduceViewProd<Acc>(*this);
+}
+
+template <typename Acc>
+Acc NDArrayView::meanAs() const {
+	const size_t n = numElements();
+	Acc s = reduceViewSum<Acc>(*this);
+	return s / Acc(n);
+}
+
+#define LIBEXCESSIVE_INSTANTIATE_REDUCE(Acc) \
+	template Acc NDArrayView::sumAs<Acc>() const; \
+	template Acc NDArrayView::prodAs<Acc>() const; \
+	template Acc NDArrayView::meanAs<Acc>() const;
+
+LIBEXCESSIVE_INSTANTIATE_REDUCE(float)
+LIBEXCESSIVE_INSTANTIATE_REDUCE(double)
+LIBEXCESSIVE_INSTANTIATE_REDUCE(int32_t)
+LIBEXCESSIVE_INSTANTIATE_REDUCE(int64_t)
+LIBEXCESSIVE_INSTANTIATE_REDUCE(uint32_t)
+LIBEXCESSIVE_INSTANTIATE_REDUCE(uint64_t)
+LIBEXCESSIVE_INSTANTIATE_REDUCE(uint256_t)
+#undef LIBEXCESSIVE_INSTANTIATE_REDUCE
+
 namespace ndarray_detail {
 	double viewLoadDouble(const NDArrayView& v, size_t elementOffset) {
 		const void* data = v.sharedBuffer()->data;
@@ -3522,6 +3790,102 @@ struct NDArray::Impl {
 
 // Define reduceAll / reduceAxis outside struct for size (still as Impl members)
 
+template <typename Acc>
+static Acc laneToAcc(const NDArray& a, size_t i) {
+	switch (a.type) {
+		case F32:     return accFromLane<float, Acc>(a.data<float>()[i]);
+		case F64:     return accFromLane<double, Acc>(a.data<double>()[i]);
+		case UINT8:   return accFromLane<uint8_t, Acc>(a.data<uint8_t>()[i]);
+		case INT8:    return accFromLane<int8_t, Acc>(a.data<int8_t>()[i]);
+		case INT32:   return accFromLane<int32_t, Acc>(a.data<int32_t>()[i]);
+		case INT64:   return accFromLane<int64_t, Acc>(a.data<int64_t>()[i]);
+		case INT3:    return accFromSigned<Acc>(int3_getSigned(a.data<uint64_t>(), i));
+		case BINARY:  return accFromLane<uint8_t, Acc>(binaryGet(a.data<uint64_t>(), i));
+		case UINT256: return accFromLane<uint256_t, Acc>(a.data<uint256_t>()[i]);
+		default:
+			throw std::runtime_error("NDArray: invalid type in reduction");
+	}
+}
+
+template <typename Acc>
+static Acc sumRange(const NDArray& a, size_t first, size_t count, size_t stride) {
+	if (stride == 1) {
+		switch (a.type) {
+			case F32:
+				if constexpr (std::is_same_v<Acc, float>)
+					return ndreduce_sum_f32(a.data<float>() + first, count);
+				return denseSum<float, Acc>(a.data<float>() + first, count);
+			case F64:
+				return denseSum<double, Acc>(a.data<double>() + first, count);
+			case UINT8:
+				return denseSum<uint8_t, Acc>(a.data<uint8_t>() + first, count);
+			case INT8:
+				return denseSum<int8_t, Acc>(a.data<int8_t>() + first, count);
+			case INT32:
+				if constexpr (std::is_same_v<Acc, int32_t>)
+					return ndreduce_sum_i32(a.data<int32_t>() + first, count);
+				return denseSum<int32_t, Acc>(a.data<int32_t>() + first, count);
+			case INT64:
+				return denseSum<int64_t, Acc>(a.data<int64_t>() + first, count);
+			case INT3: {
+				const uint64_t* w = a.data<uint64_t>();
+				Acc s{};
+				for (size_t i = 0; i < count; ++i)
+					s += accFromSigned<Acc>(int3_getSigned(w, first + i));
+				return s;
+			}
+			case BINARY:
+				return accFromKernelI64<Acc>(ndscore_binary_i64(
+					a.data<uint64_t>(), first, a.data<uint64_t>(), first, count, NDScoreOp::L2Self));
+			case UINT256:
+				if constexpr (std::is_same_v<Acc, uint256_t>)
+					return denseSum<uint256_t, Acc>(a.data<uint256_t>() + first, count);
+				else {
+					Acc s{};
+					const uint256_t* p = a.data<uint256_t>() + first;
+					for (size_t i = 0; i < count; ++i)
+						s += accFromDouble<Acc>(p[i].toDouble());
+					return s;
+				}
+			default:
+				break;
+		}
+	}
+	Acc s{};
+	for (size_t r = 0; r < count; ++r)
+		s += laneToAcc<Acc>(a, first + r * stride);
+	return s;
+}
+
+template <typename Acc>
+static Acc prodRange(const NDArray& a, size_t first, size_t count, size_t stride) {
+	if (stride == 1) {
+		switch (a.type) {
+			case F32:   return denseProd<float, Acc>(a.data<float>() + first, count);
+			case F64:   return denseProd<double, Acc>(a.data<double>() + first, count);
+			case UINT8: return denseProd<uint8_t, Acc>(a.data<uint8_t>() + first, count);
+			case INT8:  return denseProd<int8_t, Acc>(a.data<int8_t>() + first, count);
+			case INT32: return denseProd<int32_t, Acc>(a.data<int32_t>() + first, count);
+			case INT64: return denseProd<int64_t, Acc>(a.data<int64_t>() + first, count);
+			case UINT256:
+				if constexpr (std::is_same_v<Acc, uint256_t>)
+					return denseProd<uint256_t, Acc>(a.data<uint256_t>() + first, count);
+				else {
+					Acc p = Acc(1);
+					const uint256_t* ptr = a.data<uint256_t>() + first;
+					for (size_t i = 0; i < count; ++i)
+						accMulEq(p, accFromDouble<Acc>(ptr[i].toDouble()));
+					return p;
+				}
+			default: break;
+		}
+	}
+	Acc p = Acc(1);
+	for (size_t r = 0; r < count; ++r)
+		accMulEq(p, laneToAcc<Acc>(a, first + r * stride));
+	return p;
+}
+
 NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 	const size_t n = a.numElements();
 	if (n == 0)
@@ -3624,44 +3988,25 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 		return out;
 	}
 
-	// Sum / Prod
+	// Sum / Prod — Acc kernels (sumAs / prodAs), lossless default type.
 	NDArrayType rt = sumProdAccumulateType(a.type);
 	NDArray out({}, rt);
-	if (rt == F32) {
-		float acc = (op == ReduceOp::Sum) ? 0.0f : 1.0f;
-		for (size_t i = 0; i < n; ++i) {
-			float v = a.loadAsFloat(i);
-			acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
+	if (op == ReduceOp::Sum) {
+		switch (rt) {
+			case F32:     out.float32[0] = a.sumAs<float>(); break;
+			case F64:     out.float64[0] = a.sumAs<double>(); break;
+			case INT32:   out.int32[0] = a.sumAs<int32_t>(); break;
+			case INT64:   out.int64[0] = a.sumAs<int64_t>(); break;
+			default:      out.uint256[0] = a.sumAs<uint256_t>(); break;
 		}
-		out.float32[0] = acc;
-	} else if (rt == F64) {
-		double acc = (op == ReduceOp::Sum) ? 0.0 : 1.0;
-		for (size_t i = 0; i < n; ++i) {
-			double v = a.loadAsDouble(i);
-			acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
-		}
-		out.float64[0] = acc;
-	} else if (rt == INT32) {
-		int32_t acc = (op == ReduceOp::Sum) ? 0 : 1;
-		for (size_t i = 0; i < n; ++i) {
-			int32_t v = (int32_t)a.loadAsI64(i);
-			acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
-		}
-		out.int32[0] = acc;
-	} else if (rt == INT64) {
-		int64_t acc = (op == ReduceOp::Sum) ? 0 : 1;
-		for (size_t i = 0; i < n; ++i) {
-			int64_t v = a.loadAsI64(i);
-			acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
-		}
-		out.int64[0] = acc;
 	} else {
-		uint256_t acc = (op == ReduceOp::Sum) ? uint256_t(0) : uint256_t(1);
-		for (size_t i = 0; i < n; ++i) {
-			uint256_t v = a.loadAsU256(i);
-			acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
+		switch (rt) {
+			case F32:     out.float32[0] = a.prodAs<float>(); break;
+			case F64:     out.float64[0] = a.prodAs<double>(); break;
+			case INT32:   out.int32[0] = a.prodAs<int32_t>(); break;
+			case INT64:   out.int64[0] = a.prodAs<int64_t>(); break;
+			default:      out.uint256[0] = a.prodAs<uint256_t>(); break;
 		}
-		out.uint256[0] = acc;
 	}
 	return out;
 }
@@ -3796,42 +4141,27 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 
 	NDArrayType rt = sumProdAccumulateType(a.type);
 	NDArray out(outShape, rt);
+	size_t stride = 1;
+	for (int d = axis + 1; d < a.shape.size(); ++d)
+		stride *= (size_t)a.shape.get(d);
 	for (size_t oi = 0; oi < outN; ++oi) {
-		if (rt == F32) {
-			float acc = (op == ReduceOp::Sum) ? 0.0f : 1.0f;
-			for (size_t r = 0; r < reduced; ++r) {
-				float v = a.loadAsFloat(flatIndexWithAxis(a.shape, axis, oi, r));
-				acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
+		const size_t first = flatIndexWithAxis(a.shape, axis, oi, 0);
+		if (op == ReduceOp::Sum) {
+			switch (rt) {
+				case F32:   out.float32[oi] = sumRange<float>(a, first, reduced, stride); break;
+				case F64:   out.float64[oi] = sumRange<double>(a, first, reduced, stride); break;
+				case INT32: out.int32[oi] = sumRange<int32_t>(a, first, reduced, stride); break;
+				case INT64: out.int64[oi] = sumRange<int64_t>(a, first, reduced, stride); break;
+				default:    out.uint256[oi] = sumRange<uint256_t>(a, first, reduced, stride); break;
 			}
-			out.float32[oi] = acc;
-		} else if (rt == F64) {
-			double acc = (op == ReduceOp::Sum) ? 0.0 : 1.0;
-			for (size_t r = 0; r < reduced; ++r) {
-				double v = a.loadAsDouble(flatIndexWithAxis(a.shape, axis, oi, r));
-				acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
-			}
-			out.float64[oi] = acc;
-		} else if (rt == INT32) {
-			int32_t acc = (op == ReduceOp::Sum) ? 0 : 1;
-			for (size_t r = 0; r < reduced; ++r) {
-				int32_t v = (int32_t)a.loadAsI64(flatIndexWithAxis(a.shape, axis, oi, r));
-				acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
-			}
-			out.int32[oi] = acc;
-		} else if (rt == INT64) {
-			int64_t acc = (op == ReduceOp::Sum) ? 0 : 1;
-			for (size_t r = 0; r < reduced; ++r) {
-				int64_t v = a.loadAsI64(flatIndexWithAxis(a.shape, axis, oi, r));
-				acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
-			}
-			out.int64[oi] = acc;
 		} else {
-			uint256_t acc = (op == ReduceOp::Sum) ? uint256_t(0) : uint256_t(1);
-			for (size_t r = 0; r < reduced; ++r) {
-				uint256_t v = a.loadAsU256(flatIndexWithAxis(a.shape, axis, oi, r));
-				acc = (op == ReduceOp::Sum) ? (acc + v) : (acc * v);
+			switch (rt) {
+				case F32:   out.float32[oi] = prodRange<float>(a, first, reduced, stride); break;
+				case F64:   out.float64[oi] = prodRange<double>(a, first, reduced, stride); break;
+				case INT32: out.int32[oi] = prodRange<int32_t>(a, first, reduced, stride); break;
+				case INT64: out.int64[oi] = prodRange<int64_t>(a, first, reduced, stride); break;
+				default:    out.uint256[oi] = prodRange<uint256_t>(a, first, reduced, stride); break;
 			}
-			out.uint256[oi] = acc;
 		}
 	}
 	return out;

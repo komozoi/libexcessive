@@ -1208,3 +1208,143 @@ int64_t ndscore_binary_i64(const uint64_t* a, size_t oa, const uint64_t* b, size
 	const size_t rem = n % 64;
 	return binary_words_pop(aw, bw, nWords, rem, op);
 }
+
+// ---- horizontal sum (contiguous F32 / INT32) --------------------------------
+
+float ndreduce_sum_f32(const float* NDSCORE_RESTRICT a, size_t n) {
+#if NDSCORE_AVX512
+	__m512 acc0 = _mm512_setzero_ps();
+	__m512 acc1 = _mm512_setzero_ps();
+	size_t i = 0;
+	for (; i + 32 <= n; i += 32) {
+		acc0 = _mm512_add_ps(acc0, _mm512_loadu_ps(a + i));
+		acc1 = _mm512_add_ps(acc1, _mm512_loadu_ps(a + i + 16));
+	}
+	for (; i + 16 <= n; i += 16)
+		acc0 = _mm512_add_ps(acc0, _mm512_loadu_ps(a + i));
+	float s = _mm512_reduce_add_ps(_mm512_add_ps(acc0, acc1));
+	for (; i < n; ++i)
+		s += a[i];
+	return s;
+#elif NDSCORE_AVX2
+	__m256 acc0 = _mm256_setzero_ps();
+	__m256 acc1 = _mm256_setzero_ps();
+	__m256 acc2 = _mm256_setzero_ps();
+	__m256 acc3 = _mm256_setzero_ps();
+	size_t i = 0;
+	for (; i + 32 <= n; i += 32) {
+		acc0 = _mm256_add_ps(acc0, _mm256_loadu_ps(a + i));
+		acc1 = _mm256_add_ps(acc1, _mm256_loadu_ps(a + i + 8));
+		acc2 = _mm256_add_ps(acc2, _mm256_loadu_ps(a + i + 16));
+		acc3 = _mm256_add_ps(acc3, _mm256_loadu_ps(a + i + 24));
+	}
+	float s = hsum256_ps(_mm256_add_ps(_mm256_add_ps(acc0, acc1), _mm256_add_ps(acc2, acc3)));
+	for (; i < n; ++i)
+		s += a[i];
+	return s;
+#elif NDSCORE_NEON
+	float32x4_t acc0 = vdupq_n_f32(0.f);
+	float32x4_t acc1 = vdupq_n_f32(0.f);
+	float32x4_t acc2 = vdupq_n_f32(0.f);
+	float32x4_t acc3 = vdupq_n_f32(0.f);
+	size_t i = 0;
+	for (; i + 16 <= n; i += 16) {
+		acc0 = vaddq_f32(acc0, vld1q_f32(a + i));
+		acc1 = vaddq_f32(acc1, vld1q_f32(a + i + 4));
+		acc2 = vaddq_f32(acc2, vld1q_f32(a + i + 8));
+		acc3 = vaddq_f32(acc3, vld1q_f32(a + i + 12));
+	}
+	float32x4_t acc = vaddq_f32(vaddq_f32(acc0, acc1), vaddq_f32(acc2, acc3));
+#if defined(__aarch64__)
+	float s = vaddvq_f32(acc);
+#else
+	float32x2_t p = vadd_f32(vget_low_f32(acc), vget_high_f32(acc));
+	p = vpadd_f32(p, p);
+	float s = vget_lane_f32(p, 0);
+#endif
+	for (; i < n; ++i)
+		s += a[i];
+	return s;
+#else
+	float s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+	size_t i = 0;
+	for (; i + 4 <= n; i += 4) {
+		s0 += a[i];
+		s1 += a[i + 1];
+		s2 += a[i + 2];
+		s3 += a[i + 3];
+	}
+	float s = (s0 + s1) + (s2 + s3);
+	for (; i < n; ++i)
+		s += a[i];
+	return s;
+#endif
+}
+
+int32_t ndreduce_sum_i32(const int32_t* NDSCORE_RESTRICT a, size_t n) {
+#if NDSCORE_AVX512
+	__m512i acc0 = _mm512_setzero_si512();
+	__m512i acc1 = _mm512_setzero_si512();
+	size_t i = 0;
+	for (; i + 32 <= n; i += 32) {
+		acc0 = _mm512_add_epi32(acc0, _mm512_loadu_si512(a + i));
+		acc1 = _mm512_add_epi32(acc1, _mm512_loadu_si512(a + i + 16));
+	}
+	for (; i + 16 <= n; i += 16)
+		acc0 = _mm512_add_epi32(acc0, _mm512_loadu_si512(a + i));
+	int32_t s = _mm512_reduce_add_epi32(_mm512_add_epi32(acc0, acc1));
+	for (; i < n; ++i)
+		s += a[i];
+	return s;
+#elif NDSCORE_AVX2
+	__m256i acc0 = _mm256_setzero_si256();
+	__m256i acc1 = _mm256_setzero_si256();
+	size_t i = 0;
+	for (; i + 16 <= n; i += 16) {
+		acc0 = _mm256_add_epi32(acc0, _mm256_loadu_si256((const __m256i*)(a + i)));
+		acc1 = _mm256_add_epi32(acc1, _mm256_loadu_si256((const __m256i*)(a + i + 8)));
+	}
+	__m256i acc = _mm256_add_epi32(acc0, acc1);
+	__m128i lo = _mm256_castsi256_si128(acc);
+	__m128i hi = _mm256_extracti128_si256(acc, 1);
+	__m128i s4 = _mm_add_epi32(lo, hi);
+	s4 = _mm_hadd_epi32(s4, s4);
+	s4 = _mm_hadd_epi32(s4, s4);
+	int32_t s = _mm_cvtsi128_si32(s4);
+	for (; i < n; ++i)
+		s += a[i];
+	return s;
+#elif NDSCORE_NEON
+	int32x4_t acc0 = vdupq_n_s32(0);
+	int32x4_t acc1 = vdupq_n_s32(0);
+	size_t i = 0;
+	for (; i + 8 <= n; i += 8) {
+		acc0 = vaddq_s32(acc0, vld1q_s32(a + i));
+		acc1 = vaddq_s32(acc1, vld1q_s32(a + i + 4));
+	}
+	int32x4_t acc = vaddq_s32(acc0, acc1);
+#if defined(__aarch64__)
+	int32_t s = vaddvq_s32(acc);
+#else
+	int32x2_t p = vadd_s32(vget_low_s32(acc), vget_high_s32(acc));
+	p = vpadd_s32(p, p);
+	int32_t s = vget_lane_s32(p, 0);
+#endif
+	for (; i < n; ++i)
+		s += a[i];
+	return s;
+#else
+	int32_t s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+	size_t i = 0;
+	for (; i + 4 <= n; i += 4) {
+		s0 += a[i];
+		s1 += a[i + 1];
+		s2 += a[i + 2];
+		s3 += a[i + 3];
+	}
+	int32_t s = (s0 + s1) + (s2 + s3);
+	for (; i < n; ++i)
+		s += a[i];
+	return s;
+#endif
+}

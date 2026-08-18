@@ -31,4 +31,8 @@ int64_t ndscore_int3_i64(const uint64_t* a, size_t oa, const uint64_t* b, size_t
 int64_t ndscore_binary_i64(const uint64_t* a, size_t oa, const uint64_t* b, size_t ob,
                            size_t n, NDScoreOp op);
 
+// Contiguous horizontal sums (same ISA TU as scores).
+float   ndreduce_sum_f32(const float* a, size_t n);
+int32_t ndreduce_sum_i32(const int32_t* a, size_t n);
+
 #endif

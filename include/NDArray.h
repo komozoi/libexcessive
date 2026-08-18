@@ -178,6 +178,20 @@ public:
 	template <typename Acc>
 	Acc hamming(const NDArrayView& other) const;
 
+	/**
+	 * Full reductions with accumulator type as the template argument
+	 * (same Acc set as dot, plus uint32_t / uint64_t). Packed contiguous
+	 * views walk typed pointers / packed words; INT3 uses signed lanes
+	 * (not wrap-mul). Empty throws. Defaults on NDArray::sum() keep the
+	 * lossless NDArray policy.
+	 */
+	template <typename Acc>
+	Acc sumAs() const;
+	template <typename Acc>
+	Acc prodAs() const;
+	template <typename Acc>
+	Acc meanAs() const;
+
 	/** A[...,M,K] @ B[...,K,N] → C[...,M,N] (batch is leading). Same dtype; see docs/ndarray_matmul.md. */
 	NDArray matmul(const NDArrayView& b) const;
 	NDArray matmul(const NDArray& b) const;
@@ -372,6 +386,13 @@ public:
 	Acc hamming(const NDArray& other) const { return view().hamming<Acc>(other.view()); }
 	template <typename Acc>
 	Acc hamming(const NDArrayView& other) const { return view().hamming<Acc>(other); }
+
+	template <typename Acc>
+	Acc sumAs() const { return view().sumAs<Acc>(); }
+	template <typename Acc>
+	Acc prodAs() const { return view().prodAs<Acc>(); }
+	template <typename Acc>
+	Acc meanAs() const { return view().meanAs<Acc>(); }
 
 	NDArray matmul(const NDArray& b) const;
 	NDArray matmul(const NDArrayView& b) const;
@@ -961,6 +982,9 @@ public:
 	** axis from the shape.  BINARY / INT3 / UINT8 / INT8 sum/prod use INT32;
 	** INT32 uses INT64; INT64 and UINT256 stay; floats keep their type.
 	** mean uses F64 except pure F32 inputs (stay F32).
+	**
+	** sumAs<Acc>() / prodAs<Acc>() / meanAs<Acc>() request a cheap machine
+	** accumulator (see NDArrayView). Defaults above do not change.
 	*/
 	NDArray sum() const;
 	NDArray sum(int axis) const;

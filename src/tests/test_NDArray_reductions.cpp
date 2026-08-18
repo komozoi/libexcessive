@@ -248,3 +248,90 @@ TEST(NDArray_reductions, OriginalUnchanged) {
 	EXPECT_FLOAT_EQ(a.get<float>({0}), 1.0f);
 	EXPECT_FLOAT_EQ(a.get<float>({2}), 3.0f);
 }
+
+
+// ============================================================
+// sumAs / prodAs / meanAs — Acc is the template argument
+// ============================================================
+
+TEST(NDArray_reductions, SumAs_UINT8_IntoUint32AndUint64) {
+	NDArray a(ArrayList<uint8_t>({200, 200, 200}));
+	EXPECT_EQ(a.sumAs<uint32_t>(), 600u);
+	EXPECT_EQ(a.sumAs<uint64_t>(), 600ull);
+	EXPECT_EQ(a.sumAs<int32_t>(), 600);
+	EXPECT_EQ(a.view().sumAs<uint32_t>(), 600u);
+	// default lossless policy unchanged
+	EXPECT_EQ(a.sum().type, INT32);
+	EXPECT_EQ(a.sum().get<int32_t>({}), 600);
+}
+
+TEST(NDArray_reductions, SumAs_BINARY_IntoUint32) {
+	NDArray b({8}, BINARY);
+	b.set({0}, 1);
+	b.set({3}, 1);
+	b.set({7}, 1);
+	EXPECT_EQ(b.sumAs<uint32_t>(), 3u);
+	EXPECT_EQ(b.sumAs<int32_t>(), 3);
+	EXPECT_EQ(b.sum().type, INT32);
+}
+
+TEST(NDArray_reductions, SumAs_INT3_SignedValuesNotWrap) {
+	NDArray a({4}, INT3);
+	a.set({0}, 3);
+	a.set({1}, 3);
+	a.set({2}, -4);
+	a.set({3}, 1);
+	// signed lanes: 3+3-4+1 = 3 (not nibble wrap)
+	EXPECT_EQ(a.sumAs<int32_t>(), 3);
+	EXPECT_EQ(a.sumAs<int64_t>(), 3);
+	EXPECT_FLOAT_EQ(a.sumAs<float>(), 3.0f);
+	EXPECT_EQ(a.sum().get<int32_t>({}), 3);
+	EXPECT_EQ(a.prodAs<int32_t>(), 3 * 3 * -4 * 1);
+}
+
+TEST(NDArray_reductions, ProdAs_INT3_Widens) {
+	NDArray a({2}, INT3);
+	a.set({0}, 3);
+	a.set({1}, 3);
+	EXPECT_EQ(a.prodAs<int32_t>(), 9);
+	NDArray wrapped = a * a; // wrap-mul stays 1
+	EXPECT_EQ(wrapped.get<int>({0}), 1);
+}
+
+TEST(NDArray_reductions, SumAs_F32_MatchesNaive) {
+	NDArray a({256}, F32);
+	float naive = 0.0f;
+	double naive64 = 0.0;
+	for (int i = 0; i < 256; ++i) {
+		float v = 0.25f * (float)((i % 7) - 3);
+		a.set({i}, v);
+		naive += v;
+		naive64 += (double)v;
+	}
+	EXPECT_NEAR(a.sumAs<float>(), naive, 1e-5f);
+	EXPECT_NEAR(a.sumAs<double>(), naive64, 1e-12);
+	EXPECT_FLOAT_EQ(a.sum().get<float>({}), a.sumAs<float>());
+}
+
+TEST(NDArray_reductions, MeanAs_F32_AndInteger) {
+	NDArray a(ArrayList({1.0f, 2.0f, 3.0f, 4.0f}));
+	EXPECT_FLOAT_EQ(a.meanAs<float>(), 2.5f);
+	EXPECT_DOUBLE_EQ(a.meanAs<double>(), 2.5);
+
+	NDArray u(ArrayList<uint8_t>({2, 4, 6}));
+	EXPECT_DOUBLE_EQ(u.meanAs<double>(), 4.0);
+	EXPECT_EQ(u.mean().type, F64);
+}
+
+TEST(NDArray_reductions, SumAs_WrapViewNoCopy) {
+	alignas(4) float buf[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+	NDArray a = NDArray::wrap(buf, sizeof(buf), {4}, F32);
+	EXPECT_FLOAT_EQ(a.sumAs<float>(), 10.0f);
+	EXPECT_EQ(a.data(), static_cast<const void*>(buf));
+}
+
+TEST(NDArray_reductions, SumAs_EmptyThrows) {
+	NDArray a = NDArray::empty(F32);
+	EXPECT_THROW(a.sumAs<float>(), std::invalid_argument);
+	EXPECT_THROW(a.sum(), std::invalid_argument);
+}
