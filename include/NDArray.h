@@ -174,7 +174,9 @@ struct NDArrayBuffer {
 	NDArrayBuffer(const NDArrayBuffer& other);
 	/** Move; `other` is left empty and non-owning. */
 	NDArrayBuffer(NDArrayBuffer&& other) noexcept;
+	/** Copy-assign: replace with an owned snapshot of `other`. */
 	NDArrayBuffer& operator=(const NDArrayBuffer& other);
+	/** Move-assign; `other` is left empty and non-owning. */
 	NDArrayBuffer& operator=(NDArrayBuffer&& other) noexcept;
 	/** Frees `data` only when `ownsData`. */
 	~NDArrayBuffer();
@@ -275,8 +277,11 @@ public:
 	 * flat index. Axis form removes that axis (index along it, 0..len-1).
 	 */
 	NDArray argmin() const;
+	/** First minimum along `axis` (that axis is removed). */
 	NDArray argmin(int axis) const;
+	/** Flat INT64 index of the first maximum. */
 	NDArray argmax() const;
+	/** First maximum along `axis` (that axis is removed). */
 	NDArray argmax(int axis) const;
 
 	/**
@@ -290,21 +295,22 @@ public:
 	 * Instantiated Acc: float, double, int32_t, int64_t, uint256_t.
 	 */
 	template <typename Acc>
+	/** Widening inner product with `other`. */
 	Acc dot(const NDArrayView& other) const;
+	template <typename Acc>
 	/** ||*this||² (widened). */
-	template <typename Acc>
 	Acc l2Squared() const;
+	template <typename Acc>
 	/** ||*this − other||² (widened diffs). */
-	template <typename Acc>
 	Acc l2Squared(const NDArrayView& other) const;
+	template <typename Acc>
 	/** sqrt(||*this||²) as Acc. */
-	template <typename Acc>
 	Acc l2Norm() const;
+	template <typename Acc>
 	/** sqrt(||*this − other||²) as Acc. */
-	template <typename Acc>
 	Acc l2Norm(const NDArrayView& other) const;
-	/** Hamming distance. Both views must be BINARY. */
 	template <typename Acc>
+	/** Hamming distance. Both views must be BINARY. */
 	Acc hamming(const NDArrayView& other) const;
 
 	/**
@@ -315,12 +321,13 @@ public:
 	 * lossless NDArray policy.
 	 */
 	template <typename Acc>
+	/** Sum of all elements into Acc. Empty throws. */
 	Acc sumAs() const;
+	template <typename Acc>
 	/** Product of all elements into Acc. Empty throws. */
-	template <typename Acc>
 	Acc prodAs() const;
-	/** mean = sumAs<Acc>() / numElements(). Empty throws. */
 	template <typename Acc>
+	/** mean = sumAs<Acc>() / numElements(). Empty throws. */
 	Acc meanAs() const;
 
 	/**
@@ -335,16 +342,18 @@ public:
 	 * mismatch throws std::invalid_argument. Empty / zero-axis is empty.
 	 */
 	NDArray matmul(const NDArrayView& b) const;
+	/** matmul against an NDArray (uses `b.view()`). */
 	NDArray matmul(const NDArray& b) const;
 	/** A[M,K] @ x[K] → y[M]. Same type and widening rules as matmul. */
 	NDArray gemv(const NDArrayView& x) const;
+	/** gemv against an NDArray (uses `x.view()`). */
 	NDArray gemv(const NDArray& x) const;
 
+	template <typename T>
 	/** Element at `indices` (rank must match). */
-	template <typename T>
 	T get(const ArrayList<int>& indices) const;
-	/** Dense row-major flat index. Throws if `flat >= numElements()`. */
 	template <typename T>
+	/** Dense row-major flat index. Throws if `flat >= numElements()`. */
 	T getFlat(size_t flat) const;
 
 	/** Buffer element index of `indices` (shape rank; uses strides + offset). */
@@ -356,6 +365,7 @@ public:
 	const ArrayList<size_t>& getStrides() const { return strides; }
 	/** Element offset into the shared buffer. */
 	size_t getOffset() const { return offset; }
+	/** Storage type of the shared buffer. */
 	NDArrayType getType() const { return type; }
 
 	/** Shared storage (refcount); used by ndarray_detail load helpers. */
@@ -392,12 +402,12 @@ public:
 		/** Append one index; read/write only after rank matches the array. */
 		Ref operator[](int i);
 
-		/** Load the element at the accumulated indices. */
 		template <typename T>
+		/** Load the element at the accumulated indices. */
 		operator T() const;
 
-		/** Store `value` at the accumulated indices. */
 		template <typename T>
+		/** Store `value` at the accumulated indices. */
 		Ref& operator=(const T& value);
 
 	private:
@@ -414,8 +424,8 @@ public:
 		/** Append one index; convert to T after rank matches the array. */
 		CRef operator[](int i) const;
 
-		/** Load the element at the accumulated indices. */
 		template <typename T>
+		/** Load the element at the accumulated indices. */
 		operator T() const;
 
 	private:
@@ -444,27 +454,31 @@ public:
 	NDArray(const ArrayList<int>& shape, ArrayList<float> vector);
 	/** F64 / UINT8 / INT8 / INT32 / INT64 owner of `shape` from `vector`. */
 	NDArray(const ArrayList<int>& shape, ArrayList<double> vector);
+	/** UINT8 owner of `shape` filled from `vector`. */
 	NDArray(const ArrayList<int>& shape, ArrayList<uint8_t> vector);
+	/** INT8 owner of `shape` filled from `vector`. */
 	NDArray(const ArrayList<int>& shape, ArrayList<int8_t> vector);
+	/** INT32 owner of `shape` filled from `vector`. */
 	NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector);
+	/** INT64 owner of `shape` filled from `vector`. */
 	NDArray(const ArrayList<int>& shape, ArrayList<int64_t> vector);
 
-	/** Rank-0 scalar of `type` holding `value`. */
 	template <typename T, typename = std::enable_if_t<std::is_same_v<T, NDArrayType>>>
+	/** Rank-0 scalar of `type` holding `value`. */
 	NDArray(T type, float value) : shape({}), type(static_cast<NDArrayType>(type)) {
 		initialize();
 		set({}, value);
 	}
 
-	/** Rank-0 scalar of `type` holding `value`. */
 	template <typename T, typename = std::enable_if_t<std::is_same_v<T, NDArrayType>>>
+	/** Rank-0 scalar of `type` holding `value`. */
 	NDArray(T type, double value) : shape({}), type(static_cast<NDArrayType>(type)) {
 		initialize();
 		set({}, value);
 	}
 
-	/** Rank-0 scalar of `type` holding `value`. */
 	template <typename T, typename = std::enable_if_t<std::is_same_v<T, NDArrayType>>>
+	/** Rank-0 scalar of `type` holding `value`. */
 	NDArray(T type, int value) : shape({}), type(static_cast<NDArrayType>(type)) {
 		initialize();
 		set({}, value);
@@ -590,40 +604,52 @@ public:
 		return buffer && buffer.get() ? buffer.get()->byteSize : 0;
 	}
 
+	template <typename T>
 	/** Typed packed base; throws if `T` does not match `type`. */
-	template <typename T>
 	const T* data() const;
-	/** Mutable typed base (ensureWritable first). Throws on type mismatch. */
 	template <typename T>
+	/** Mutable typed base (ensureWritable first). Throws on type mismatch. */
 	T* data();
 
-	/** Widening scores; same contract as NDArrayView (Acc is the accumulator). */
 	template <typename Acc>
+	/** Widening inner product; same contract as NDArrayView. */
 	Acc dot(const NDArray& other) const { return view().dot<Acc>(other.view()); }
 	template <typename Acc>
+	/** Widening inner product with a view. */
 	Acc dot(const NDArrayView& other) const { return view().dot<Acc>(other); }
 	template <typename Acc>
+	/** ||*this||² (widened). */
 	Acc l2Squared() const { return view().l2Squared<Acc>(); }
 	template <typename Acc>
+	/** ||*this − other||² (widened). */
 	Acc l2Squared(const NDArray& other) const { return view().l2Squared<Acc>(other.view()); }
 	template <typename Acc>
+	/** ||*this − other||² against a view. */
 	Acc l2Squared(const NDArrayView& other) const { return view().l2Squared<Acc>(other); }
 	template <typename Acc>
+	/** sqrt(||*this||²) as Acc. */
 	Acc l2Norm() const { return view().l2Norm<Acc>(); }
 	template <typename Acc>
+	/** sqrt(||*this − other||²) as Acc. */
 	Acc l2Norm(const NDArray& other) const { return view().l2Norm<Acc>(other.view()); }
 	template <typename Acc>
+	/** sqrt(||*this − other||²) against a view. */
 	Acc l2Norm(const NDArrayView& other) const { return view().l2Norm<Acc>(other); }
 	template <typename Acc>
+	/** Hamming distance. Both must be BINARY. */
 	Acc hamming(const NDArray& other) const { return view().hamming<Acc>(other.view()); }
 	template <typename Acc>
+	/** Hamming distance against a view. */
 	Acc hamming(const NDArrayView& other) const { return view().hamming<Acc>(other); }
 
 	template <typename Acc>
+	/** Sum of all elements into Acc. Empty throws. */
 	Acc sumAs() const { return view().sumAs<Acc>(); }
 	template <typename Acc>
+	/** Product of all elements into Acc. Empty throws. */
 	Acc prodAs() const { return view().prodAs<Acc>(); }
 	template <typename Acc>
+	/** mean = sumAs<Acc>() / numElements(). Empty throws. */
 	Acc meanAs() const { return view().meanAs<Acc>(); }
 
 	/**
@@ -638,33 +664,36 @@ public:
 	 * mismatch throws std::invalid_argument. Empty / zero-axis is empty.
 	 */
 	NDArray matmul(const NDArray& b) const;
+	/** matmul against a view. */
 	NDArray matmul(const NDArrayView& b) const;
 	/** A[M,K] @ x[K] → y[M]. Same type and widening rules as matmul. */
 	NDArray gemv(const NDArray& x) const;
+	/** gemv against a view. */
 	NDArray gemv(const NDArrayView& x) const;
 
 	/** Start a chained index proxy (`a[i][j]`). Full rank required to read/write. */
 	Ref operator[](int i);
+	/** Const chained index proxy. */
 	CRef operator[](int i) const;
 
-	/** Runtime multi-index (rank = shape.size()). */
 	template <typename T>
+	/** Runtime multi-index (rank = shape.size()). */
 	T get(const ArrayList<int>& indices) const {
 		if (indices.size() != shape.size())
 			throw std::out_of_range("NDArray::get - rank mismatch");
 		return getAtOffset<T>(computeOffset(indices));
 	}
 
-	/** Store `value` at `indices` (rank must match). */
 	template <typename T>
+	/** Store `value` at `indices` (rank must match). */
 	void set(const ArrayList<int>& indices, const T& value) {
 		if (indices.size() != shape.size())
 			throw std::out_of_range("NDArray::set - rank mismatch");
 		setAtOffset(computeOffset(indices), value);
 	}
 
-	/** get() with a brace list (`a.get<float>({i, j})`). Rank ≤ kMaxRank. */
 	template <typename T>
+	/** get() with a brace list (`a.get<float>({i, j})`). Rank ≤ kMaxRank. */
 	T get(std::initializer_list<int> indices) const {
 		const int r = (int)indices.size();
 		if (r > kMaxRank)
@@ -676,8 +705,8 @@ public:
 		return getAtOffset<T>(computeOffset(tmp, n));
 	}
 
-	/** set() with a brace list. Rank ≤ kMaxRank. */
 	template <typename T>
+	/** set() with a brace list. Rank ≤ kMaxRank. */
 	void set(std::initializer_list<int> indices, const T& value) {
 		const int r = (int)indices.size();
 		if (r > kMaxRank)
@@ -689,16 +718,16 @@ public:
 		setAtOffset(computeOffset(tmp, n), value);
 	}
 
-	/** Flat element index in dense row-major order. */
 	template <typename T>
+	/** Flat element index in dense row-major order. */
 	T getFlat(size_t flat) const {
 		if (flat >= numElements())
 			throw std::out_of_range("NDArray::getFlat - index out of range");
 		return getAtOffset<T>(flat);
 	}
 
-	/** Store `value` at dense row-major `flat`. */
 	template <typename T>
+	/** Store `value` at dense row-major `flat`. */
 	void setFlat(size_t flat, const T& value) {
 		if (flat >= numElements())
 			throw std::out_of_range("NDArray::setFlat - index out of range");
@@ -819,8 +848,11 @@ public:
 	static NDArray full(const ArrayList<int>& shape, int64_t value);
 	/** Fill `shape` with `value` stored as `type`. */
 	static NDArray full(const ArrayList<int>& shape, NDArrayType type, float value);
+	/** Fill `shape` with a double stored as `type`. */
 	static NDArray full(const ArrayList<int>& shape, NDArrayType type, double value);
+	/** Fill `shape` with an int stored as `type`. */
 	static NDArray full(const ArrayList<int>& shape, NDArrayType type, int value);
+	/** Fill `shape` with an int64 stored as `type`. */
 	static NDArray full(const ArrayList<int>& shape, NDArrayType type, int64_t value);
 	/** Same shape/type as ref, all zeros. */
 	static NDArray zerosLike(const NDArray& ref);
@@ -828,8 +860,11 @@ public:
 	static NDArray onesLike(const NDArray& ref);
 	/** Same shape/type as ref, every element `value`. */
 	static NDArray fullLike(const NDArray& ref, float value);
+	/** Same shape/type as ref, every element a double. */
 	static NDArray fullLike(const NDArray& ref, double value);
+	/** Same shape/type as ref, every element an int. */
 	static NDArray fullLike(const NDArray& ref, int value);
+	/** Same shape/type as ref, every element an int64. */
 	static NDArray fullLike(const NDArray& ref, int64_t value);
 
 	/*
@@ -851,25 +886,43 @@ public:
 	NDArray& square();
 	/** In-place sqrt (promotes to a real type). Returns *this. */
 	NDArray& sqrt();
+	/** In-place cube root. Returns *this. */
 	NDArray& cbrt();
+	/** In-place exp. Returns *this. */
 	NDArray& exp();
+	/** In-place expm1. Returns *this. */
 	NDArray& expm1();
+	/** In-place natural log. Returns *this. */
 	NDArray& log();
+	/** In-place log2. Returns *this. */
 	NDArray& log2();
+	/** In-place log10. Returns *this. */
 	NDArray& log10();
+	/** In-place log1p. Returns *this. */
 	NDArray& log1p();
 	/** In-place trig in radians; stay in the current float width. Returns *this. */
 	NDArray& sin();
+	/** In-place cosine. Returns *this. */
 	NDArray& cos();
+	/** In-place tangent. Returns *this. */
 	NDArray& tan();
+	/** In-place arcsine. Returns *this. */
 	NDArray& asin();
+	/** In-place arccosine. Returns *this. */
 	NDArray& acos();
+	/** In-place arctangent. Returns *this. */
 	NDArray& atan();
+	/** In-place sinh. Returns *this. */
 	NDArray& sinh();
+	/** In-place cosh. Returns *this. */
 	NDArray& cosh();
+	/** In-place tanh. Returns *this. */
 	NDArray& tanh();
+	/** In-place asinh. Returns *this. */
 	NDArray& asinh();
+	/** In-place acosh. Returns *this. */
 	NDArray& acosh();
+	/** In-place atanh. Returns *this. */
 	NDArray& atanh();
 	/** Degrees → radians (in place). */
 	NDArray& deg2rad();
@@ -878,7 +931,9 @@ public:
 
 	/** In-place floor / ceil / round. Returns *this. */
 	NDArray& floor();
+	/** In-place ceil. Returns *this. */
 	NDArray& ceil();
+	/** In-place round-to-nearest. Returns *this. */
 	NDArray& round();
 
 	/**
@@ -887,6 +942,7 @@ public:
 	 * F16/BF16 stay half (compute in F32). Scalar → 1.
 	 */
 	NDArray& softmax();
+	/** In-place softmax over `axis`. */
 	NDArray& softmax(int axis);
 	/** Copy then softmax (last axis). */
 	NDArray softmaxed() const;
@@ -915,7 +971,9 @@ public:
 
 	/** Out-of-place: copy then square / neg / abs. */
 	NDArray squared() const;
+	/** Copy then negate. */
 	NDArray negated() const;
+	/** Copy then abs. */
 	NDArray absolute() const;
 
 	/**
@@ -923,14 +981,20 @@ public:
 	 * Same convention as std::atan2(y, x) with *this as y.
 	 */
 	NDArray atan2(const NDArray& x) const;
+	/** atan2 against a double scalar. */
 	NDArray atan2(double x) const;
+	/** atan2 against a float scalar. */
 	NDArray atan2(float x) const;
+	/** atan2 against an int scalar. */
 	NDArray atan2(int x) const;
 
 	/** Hypotenuse: hypot(*this, x) = sqrt(this² + x²), returns new array. */
 	NDArray hypot(const NDArray& x) const;
+	/** hypot against a double scalar. */
 	NDArray hypot(double x) const;
+	/** hypot against a float scalar. */
 	NDArray hypot(float x) const;
+	/** hypot against an int scalar. */
 	NDArray hypot(int x) const;
 
 	/** Unary minus — returns a new array (operators copy). */
@@ -949,28 +1013,45 @@ public:
 	NDArray mod(const NDArray& other) const;
 	/** Clamp each element into [lo, hi] (promotes as needed). */
 	NDArray clip(const NDArray& lo, const NDArray& hi) const;
+	/** Clamp into [lo, hi] with float bounds. */
 	NDArray clip(float lo, float hi) const;
+	/** Clamp into [lo, hi] with double bounds. */
 	NDArray clip(double lo, double hi) const;
 
 	/** Scalar overloads: broadcast `other` to every element. */
 	NDArray minimum(float other) const;
+	/** Element-wise max with a float scalar. */
 	NDArray maximum(float other) const;
+	/** Element-wise pow with a float scalar. */
 	NDArray pow(float other) const;
+	/** Element-wise mod with a float scalar. */
 	NDArray mod(float other) const;
 
+	/** Element-wise min with a double scalar. */
 	NDArray minimum(double other) const;
+	/** Element-wise max with a double scalar. */
 	NDArray maximum(double other) const;
+	/** Element-wise pow with a double scalar. */
 	NDArray pow(double other) const;
+	/** Element-wise mod with a double scalar. */
 	NDArray mod(double other) const;
 
+	/** Element-wise min with an int scalar. */
 	NDArray minimum(int other) const;
+	/** Element-wise max with an int scalar. */
 	NDArray maximum(int other) const;
+	/** Element-wise pow with an int scalar. */
 	NDArray pow(int other) const;
+	/** Element-wise mod with an int scalar. */
 	NDArray mod(int other) const;
 
+	/** Element-wise min with an int64 scalar. */
 	NDArray minimum(int64_t other) const;
+	/** Element-wise max with an int64 scalar. */
 	NDArray maximum(int64_t other) const;
+	/** Element-wise pow with an int64 scalar. */
 	NDArray pow(int64_t other) const;
+	/** Element-wise mod with an int64 scalar. */
 	NDArray mod(int64_t other) const;
 
 	/*
@@ -1141,8 +1222,11 @@ public:
 		ArrayOrScalar(const NDArray& a);
 		/** Hold a scalar (broadcast when selected). */
 		ArrayOrScalar(double v);
+		/** Hold a float scalar. */
 		ArrayOrScalar(float v);
+		/** Hold an int scalar. */
 		ArrayOrScalar(int v);
+		/** Hold an int64 scalar. */
 		ArrayOrScalar(int64_t v);
 
 	private:
@@ -1312,88 +1396,146 @@ public:
 	NDArray sum() const;
 	/** Reduce along `axis` (that axis is removed). Empty throws. */
 	NDArray sum(int axis) const;
+	/** Mean of all elements (rank-0). Empty throws. */
 	NDArray mean() const;
+	/** Mean along `axis`. Empty throws. */
 	NDArray mean(int axis) const;
+	/** Minimum of all elements (rank-0). Empty throws. */
 	NDArray min() const;
+	/** Minimum along `axis`. Empty throws. */
 	NDArray min(int axis) const;
+	/** Maximum of all elements (rank-0). Empty throws. */
 	NDArray max() const;
+	/** Maximum along `axis`. Empty throws. */
 	NDArray max(int axis) const;
+	/** Product of all elements (rank-0). Empty throws. */
 	NDArray prod() const;
+	/** Product along `axis`. Empty throws. */
 	NDArray prod(int axis) const;
 	/**
 	 * Index of the first min / max. Scalar INT64 (flat) or INT64 with `axis`
 	 * removed. Same convention on every dtype (INT3 uses signed lanes).
 	 */
 	NDArray argmin() const;
+	/** First minimum along `axis`. */
 	NDArray argmin(int axis) const;
+	/** Flat INT64 index of the first maximum. */
 	NDArray argmax() const;
+	/** First maximum along `axis`. */
 	NDArray argmax(int axis) const;
 
 	/*
 	**    OPERATORS  (return new arrays — they copy)
 	*/
 
-	/** Element-wise + − * / % with a scalar (broadcast) or another array. */
+	/** Element-wise + with a float scalar. */
 	NDArray operator+(float other) const;
+	/** Element-wise − with a float scalar. */
 	NDArray operator-(float other) const;
+	/** Element-wise * with a float scalar. */
 	NDArray operator*(float other) const;
+	/** Element-wise / with a float scalar. */
 	NDArray operator/(float other) const;
+	/** Element-wise % with a float scalar. */
 	NDArray operator%(float other) const;
 
+	/** Element-wise + with an int scalar. */
 	NDArray operator+(int other) const;
+	/** Element-wise − with an int scalar. */
 	NDArray operator-(int other) const;
+	/** Element-wise * with an int scalar. */
 	NDArray operator*(int other) const;
+	/** Element-wise / with an int scalar. */
 	NDArray operator/(int other) const;
+	/** Element-wise % with an int scalar. */
 	NDArray operator%(int other) const;
 
+	/** Element-wise + with an int64 scalar. */
 	NDArray operator+(int64_t other) const;
+	/** Element-wise − with an int64 scalar. */
 	NDArray operator-(int64_t other) const;
+	/** Element-wise * with an int64 scalar. */
 	NDArray operator*(int64_t other) const;
+	/** Element-wise / with an int64 scalar. */
 	NDArray operator/(int64_t other) const;
+	/** Element-wise % with an int64 scalar. */
 	NDArray operator%(int64_t other) const;
 
+	/** Element-wise + with a double scalar. */
 	NDArray operator+(double other) const;
+	/** Element-wise − with a double scalar. */
 	NDArray operator-(double other) const;
+	/** Element-wise * with a double scalar. */
 	NDArray operator*(double other) const;
+	/** Element-wise / with a double scalar. */
 	NDArray operator/(double other) const;
+	/** Element-wise % with a double scalar. */
 	NDArray operator%(double other) const;
 
+	/** Element-wise + with another array (same shape). */
 	NDArray operator+(const NDArray& other) const;
+	/** Element-wise − with another array. */
 	NDArray operator-(const NDArray& other) const;
+	/** Element-wise * with another array. */
 	NDArray operator*(const NDArray& other) const;
+	/** Element-wise / with another array. */
 	NDArray operator/(const NDArray& other) const;
 	/** Element-wise modulo; same as mod(). */
 	NDArray operator%(const NDArray& other) const;
 
-	/** In-place + − * / % (CoW-detach if shared). Returns *this. */
+	/** In-place += float. Returns *this. */
 	NDArray& operator+=(float other);
+	/** In-place -= float. Returns *this. */
 	NDArray& operator-=(float other);
+	/** In-place *= float. Returns *this. */
 	NDArray& operator*=(float other);
+	/** In-place /= float. Returns *this. */
 	NDArray& operator/=(float other);
+	/** In-place %= float. Returns *this. */
 	NDArray& operator%=(float other);
 
+	/** In-place += int. Returns *this. */
 	NDArray& operator+=(int other);
+	/** In-place -= int. Returns *this. */
 	NDArray& operator-=(int other);
+	/** In-place *= int. Returns *this. */
 	NDArray& operator*=(int other);
+	/** In-place /= int. Returns *this. */
 	NDArray& operator/=(int other);
+	/** In-place %= int. Returns *this. */
 	NDArray& operator%=(int other);
 
+	/** In-place += int64. Returns *this. */
 	NDArray& operator+=(int64_t other);
+	/** In-place -= int64. Returns *this. */
 	NDArray& operator-=(int64_t other);
+	/** In-place *= int64. Returns *this. */
 	NDArray& operator*=(int64_t other);
+	/** In-place /= int64. Returns *this. */
 	NDArray& operator/=(int64_t other);
+	/** In-place %= int64. Returns *this. */
 	NDArray& operator%=(int64_t other);
 
+	/** In-place += double. Returns *this. */
 	NDArray& operator+=(double other);
+	/** In-place -= double. Returns *this. */
 	NDArray& operator-=(double other);
+	/** In-place *= double. Returns *this. */
 	NDArray& operator*=(double other);
+	/** In-place /= double. Returns *this. */
 	NDArray& operator/=(double other);
+	/** In-place %= double. Returns *this. */
 	NDArray& operator%=(double other);
 
+	/** In-place += array. Returns *this. */
 	NDArray& operator+=(const NDArray& other);
+	/** In-place -= array. Returns *this. */
 	NDArray& operator-=(const NDArray& other);
+	/** In-place *= array. Returns *this. */
 	NDArray& operator*=(const NDArray& other);
+	/** In-place /= array. Returns *this. */
 	NDArray& operator/=(const NDArray& other);
+	/** In-place %= array. Returns *this. */
 	NDArray& operator%=(const NDArray& other);
 
 	ArrayList<int> shape;
@@ -1410,14 +1552,17 @@ private:
 	size_t initialize();
 	/** Dense row-major offset of `indices` (rank = shape.size()). */
 	size_t computeOffset(const ArrayList<int>& indices) const;
+	/** Dense offset from a C array of `rank` indices. */
 	size_t computeOffset(const int* indices, int rank) const;
 	/** Refresh typed pointers from `buffer`. */
 	void rebindPointers();
 	/** CoW-detach owned buffers that are shared; wraps write through. */
 	void ensureWritable();
+	/** Row-major element strides for `shape`. */
 	static ArrayList<size_t> rowMajorStrides(const ArrayList<int>& shape);
 	/** Packed byte size of `numElems` of type `t`. */
 	static size_t bufferBytesFor(NDArrayType t, size_t numElems);
+	/** Mutable wrap buffer (UNIQUE, write-through). */
 	static sp<NDArrayBuffer> makeWrapBuffer(void* data, size_t byteSize, const ArrayList<int>& shape, NDArrayType type);
 	/** Const wrap: COPY_ON_WRITE handle (mutation should detach). */
 	static sp<NDArrayBuffer> makeWrapBuffer(const void* data, size_t byteSize, const ArrayList<int>& shape, NDArrayType type);
@@ -1425,8 +1570,8 @@ private:
 	/** Adopt an existing buffer (used by reshape / reshapeOwned). */
 	NDArray(ArrayList<int> shape, NDArrayType type, sp<NDArrayBuffer> buf);
 
-	/** Load the element at packed index `offset` as T. */
 	template <typename T>
+	/** Load the element at packed index `offset` as T. */
 	T getAtOffset(size_t offset) const {
 		switch (type) {
 			case BINARY:
@@ -1479,6 +1624,7 @@ private:
 	 *  Matches storeFromDouble / storeFromI64. bool is special-cased so
 	 *  `value > 0` never instantiates under -Werror=bool-compare. */
 	template <typename T>
+	/** BINARY store: 1 iff value is truthy (see comment above). */
 	static bool toBinaryBit(const T& value) {
 		if constexpr (std::is_same_v<T, bool>)
 			return value;
@@ -1492,8 +1638,8 @@ private:
 			return static_cast<bool>(value);
 	}
 
-	/** Store `value` at packed index `offset`. */
 	template <typename T>
+	/** Store `value` at packed index `offset`. */
 	void setAtOffset(size_t offset, const T& value) {
 		ensureWritable();
 		if constexpr (std::is_same_v<T, uint256_t>) {
@@ -1596,13 +1742,19 @@ private:
 
 	/** Load packed index `i` widened to float / double / int64 / uint256. */
 	float loadAsFloat(size_t i) const;
+	/** Load packed index `i` as double. */
 	double loadAsDouble(size_t i) const;
+	/** Load packed index `i` as int64. */
 	int64_t loadAsI64(size_t i) const;
+	/** Load packed index `i` as uint256. */
 	uint256_t loadAsU256(size_t i) const;
 	/** Store into packed index `i` (ensureWritable first). */
 	void storeFromFloat(size_t i, float v);
+	/** Store a double into packed index `i`. */
 	void storeFromDouble(size_t i, double v);
+	/** Store an int64 into packed index `i`. */
 	void storeFromI64(size_t i, int64_t v);
+	/** Store a uint256 into packed index `i`. */
 	void storeFromU256(size_t i, const uint256_t& v);
 
 	/** Convert storage in place to `newType` (no-op if already that type). */
@@ -1614,7 +1766,9 @@ private:
 	void applyBinaryInto(const NDArray& a, const NDArray& b, ArithOp op);
 	/** Apply `op` with a scalar in place. */
 	void applyFloatScalarInPlace(float scalar, ArithOp op);
+	/** Apply `op` with a double scalar in place. */
 	void applyDoubleScalarInPlace(double scalar, ArithOp op);
+	/** Apply `op` with an int scalar in place. */
 	void applyIntScalarInPlace(int scalar, ArithOp op);
 
 	/** Promote *this to a common type with `other`, then apply op. */
@@ -1627,6 +1781,7 @@ private:
 	NDArray& scalarIntOpInPlace(int other, ArithOp op);
 	/** Promote *this for an int64 scalar, then apply op. */
 	NDArray& scalarInt64OpInPlace(int64_t other, ArithOp op);
+	/** Apply `op` with an int64 scalar in place. */
 	void applyInt64ScalarInPlace(int64_t scalar, ArithOp op);
 	/**
 	 * Broadcast `other` (shape prefix of *this) and apply op in place.
@@ -1638,8 +1793,11 @@ private:
 
 	/** Out-of-place scalar ⊕ *this (copy, then apply). */
 	NDArray scalarFloatOp(float other, ArithOp op) const;
+	/** Out-of-place double scalar ⊕ *this. */
 	NDArray scalarDoubleOp(double other, ArithOp op) const;
+	/** Out-of-place int scalar ⊕ *this. */
 	NDArray scalarIntOp(int other, ArithOp op) const;
+	/** Out-of-place int64 scalar ⊕ *this. */
 	NDArray scalarInt64Op(int64_t other, ArithOp op) const;
 
 	/** Promote in place to a real type and apply unary kernel (F32 or F64). */
@@ -1654,6 +1812,7 @@ private:
 	void fillFromI64(int64_t value);
 
 	template <typename T>
+	/** Cast a uint256 limb value to T. */
 	static T convert_from_uint256(const uint256_t& v) {
 		// Exact match
 		if constexpr (std::is_same_v<T, uint256_t>) {
@@ -1707,8 +1866,8 @@ using NDArrayRef = NDArray::Ref;
 using NDArrayCRef = NDArray::CRef;
 
 
-/** True if packed `data<T>()` is valid for storage type `t`. */
 template <typename T>
+/** True if packed `data<T>()` is valid for storage type `t`. */
 static bool ndarrayDataTypeMatches(NDArrayType t) {
 	if constexpr (std::is_same_v<T, float>)
 		return t == F32;
@@ -1733,6 +1892,7 @@ static bool ndarrayDataTypeMatches(NDArrayType t) {
 }
 
 template <typename T>
+/** Typed const packed base; throws on type mismatch. */
 const T* NDArray::data() const {
 	if (!ndarrayDataTypeMatches<T>(type))
 		throw std::invalid_argument("NDArray::data<T>: type mismatch");
@@ -1740,6 +1900,7 @@ const T* NDArray::data() const {
 }
 
 template <typename T>
+/** Typed mutable packed base; throws on type mismatch. */
 T* NDArray::data() {
 	if (!ndarrayDataTypeMatches<T>(type))
 		throw std::invalid_argument("NDArray::data<T>: type mismatch");
@@ -1749,17 +1910,20 @@ T* NDArray::data() {
 // ---- proxy template methods (need NDArray complete) -------------------------
 
 template <typename T>
+/** Load the element at the proxy indices. */
 NDArray::Ref::operator T() const {
 	return parent->getAtOffset<T>(parent->computeOffset(idx, rank));
 }
 
 template <typename T>
+/** Store `value` at the proxy indices. */
 NDArray::Ref& NDArray::Ref::operator=(const T& value) {
 	parent->setAtOffset(parent->computeOffset(idx, rank), value);
 	return *this;
 }
 
 template <typename T>
+/** Load the element at the const proxy indices. */
 NDArray::CRef::operator T() const {
 	return parent->getAtOffset<T>(parent->computeOffset(idx, rank));
 }
@@ -1769,11 +1933,14 @@ NDArray::CRef::operator T() const {
 namespace ndarray_detail {
 	/** Load one view element as double / int64 / uint256. */
 	double viewLoadDouble(const NDArrayView& v, size_t elementOffset);
+	/** Load one view element as int64 (typed pointer / packed word). */
 	int64_t viewLoadI64(const NDArrayView& v, size_t elementOffset);
+	/** Load one view element as uint256. */
 	uint256_t viewLoadU256(const NDArrayView& v, size_t elementOffset);
 }
 
 template <typename T>
+/** Dense row-major flat index. Throws if `flat >= numElements()`. */
 T NDArrayView::getFlat(size_t flat) const {
 	if (flat >= numElements())
 		throw std::out_of_range("NDArrayView::getFlat - index out of range");
@@ -1787,6 +1954,7 @@ T NDArrayView::getFlat(size_t flat) const {
 }
 
 template <typename T>
+/** Element at `indices` (rank must match). */
 T NDArrayView::get(const ArrayList<int>& indices) const {
 	if (indices.size() != shape.size())
 		throw std::out_of_range("NDArrayView::get - rank mismatch");
@@ -1800,39 +1968,53 @@ T NDArrayView::get(const ArrayList<int>& indices) const {
 }
 
 
-/**
- * Left-hand scalar operators: scalar ⊕ NDArray.
- * Member operators already cover NDArray ⊕ scalar.
- */
+/** Left-hand float + NDArray. */
 NDArray operator+(float lhs, const NDArray& rhs);
+/** Left-hand float − NDArray. */
 NDArray operator-(float lhs, const NDArray& rhs);
+/** Left-hand float * NDArray. */
 NDArray operator*(float lhs, const NDArray& rhs);
+/** Left-hand float / NDArray. */
 NDArray operator/(float lhs, const NDArray& rhs);
+/** Left-hand float % NDArray. */
 NDArray operator%(float lhs, const NDArray& rhs);
 
+/** Left-hand double + NDArray. */
 NDArray operator+(double lhs, const NDArray& rhs);
+/** Left-hand double − NDArray. */
 NDArray operator-(double lhs, const NDArray& rhs);
+/** Left-hand double * NDArray. */
 NDArray operator*(double lhs, const NDArray& rhs);
+/** Left-hand double / NDArray. */
 NDArray operator/(double lhs, const NDArray& rhs);
+/** Left-hand double % NDArray. */
 NDArray operator%(double lhs, const NDArray& rhs);
 
+/** Left-hand int + NDArray. */
 NDArray operator+(int lhs, const NDArray& rhs);
+/** Left-hand int − NDArray. */
 NDArray operator-(int lhs, const NDArray& rhs);
+/** Left-hand int * NDArray. */
 NDArray operator*(int lhs, const NDArray& rhs);
+/** Left-hand int / NDArray. */
 NDArray operator/(int lhs, const NDArray& rhs);
+/** Left-hand int % NDArray. */
 NDArray operator%(int lhs, const NDArray& rhs);
 
+/** Left-hand int64 + NDArray. */
 NDArray operator+(int64_t lhs, const NDArray& rhs);
+/** Left-hand int64 − NDArray. */
 NDArray operator-(int64_t lhs, const NDArray& rhs);
+/** Left-hand int64 * NDArray. */
 NDArray operator*(int64_t lhs, const NDArray& rhs);
+/** Left-hand int64 / NDArray. */
 NDArray operator/(int64_t lhs, const NDArray& rhs);
+/** Left-hand int64 % NDArray. */
 NDArray operator%(int64_t lhs, const NDArray& rhs);
 
 /**
  * Left-hand number vs NDArray comparisons (element-wise).
  * Each returns a BINARY mask with the same shape as rhs.
- * Defined so expressions like (0.0 == vb) or (3 > a) work; implemented by
- * reversing the operands onto the corresponding member operator.
  */
 NDArray operator==(float lhs, const NDArray& rhs);
 /** Element-wise: float != each element of rhs. @return BINARY mask. */
@@ -1848,18 +2030,28 @@ NDArray operator<=(float lhs, const NDArray& rhs);
 
 /** Element-wise: double == each element of rhs. @return BINARY mask. */
 NDArray operator==(double lhs, const NDArray& rhs);
+/** Element-wise: double != each element of rhs. @return BINARY mask. */
 NDArray operator!=(double lhs, const NDArray& rhs);
+/** Element-wise: double > each element of rhs. @return BINARY mask. */
 NDArray operator>(double lhs, const NDArray& rhs);
+/** Element-wise: double < each element of rhs. @return BINARY mask. */
 NDArray operator<(double lhs, const NDArray& rhs);
+/** Element-wise: double >= each element of rhs. @return BINARY mask. */
 NDArray operator>=(double lhs, const NDArray& rhs);
+/** Element-wise: double <= each element of rhs. @return BINARY mask. */
 NDArray operator<=(double lhs, const NDArray& rhs);
 
 /** Element-wise: int == each element of rhs. @return BINARY mask. */
 NDArray operator==(int lhs, const NDArray& rhs);
+/** Element-wise: int != each element of rhs. @return BINARY mask. */
 NDArray operator!=(int lhs, const NDArray& rhs);
+/** Element-wise: int > each element of rhs. @return BINARY mask. */
 NDArray operator>(int lhs, const NDArray& rhs);
+/** Element-wise: int < each element of rhs. @return BINARY mask. */
 NDArray operator<(int lhs, const NDArray& rhs);
+/** Element-wise: int >= each element of rhs. @return BINARY mask. */
 NDArray operator>=(int lhs, const NDArray& rhs);
+/** Element-wise: int <= each element of rhs. @return BINARY mask. */
 NDArray operator<=(int lhs, const NDArray& rhs);
 
 
