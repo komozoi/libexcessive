@@ -1164,7 +1164,8 @@ NDArrayView NDArrayView::reshape(const ArrayList<int>& newShape) const {
 NDArray NDArrayView::reshapeOwned(const ArrayList<int>& newShape) const {
 	if (shapeElementCount(newShape) != numElements())
 		throw std::invalid_argument("NDArrayView::reshapeOwned - element count mismatch");
-	if (isContiguous() && offset == 0)
+	const bool owned = buffer && buffer.get() && buffer.get()->ownsData;
+	if (owned && isContiguous() && offset == 0)
 		return NDArray(newShape, type, buffer);
 	return copy().reshape(newShape);
 }
@@ -2406,8 +2407,8 @@ void NDArray::applyBinaryInPlace(const NDArray& src, ArithOp op) {
 				uint8_t b = binaryGet(src.uint64, i);
 				uint8_t r = 0;
 				switch (op) {
-					case ArithOp::Add: r = (uint8_t)(a + b & 1); break;
-					case ArithOp::Sub: r = (uint8_t)(a - b & 1); break;
+					case ArithOp::Add: r = (uint8_t)((a + b) & 1); break;
+					case ArithOp::Sub: r = (uint8_t)((a - b) & 1); break;
 					case ArithOp::Mul: r = (uint8_t)(a & b); break;
 					case ArithOp::Div:
 						if (b == 0)
@@ -2507,8 +2508,8 @@ void NDArray::applyBinaryInto(const NDArray& a, const NDArray& b, ArithOp op) {
 				uint8_t bv = binaryGet(b.uint64, i);
 				uint8_t r = 0;
 				switch (op) {
-					case ArithOp::Add: r = (uint8_t)(av + bv & 1); break;
-					case ArithOp::Sub: r = (uint8_t)(av - bv & 1); break;
+					case ArithOp::Add: r = (uint8_t)((av + bv) & 1); break;
+					case ArithOp::Sub: r = (uint8_t)((av - bv) & 1); break;
 					case ArithOp::Mul: r = (uint8_t)(av & bv); break;
 					case ArithOp::Div:
 						if (bv == 0)
@@ -2640,8 +2641,8 @@ void NDArray::applyDoubleScalarInPlace(double scalar, ArithOp op) {
 				uint8_t a = binaryGet(uint64, i);
 				uint8_t r = 0;
 				switch (op) {
-					case ArithOp::Add: r = (uint8_t)(a + s & 1); break;
-					case ArithOp::Sub: r = (uint8_t)(a - s & 1); break;
+					case ArithOp::Add: r = (uint8_t)((a + s) & 1); break;
+					case ArithOp::Sub: r = (uint8_t)((a - s) & 1); break;
 					case ArithOp::Mul: r = (uint8_t)(a & s); break;
 					case ArithOp::Div:
 						if (s == 0)
@@ -2740,8 +2741,8 @@ void NDArray::applyIntScalarInPlace(int scalar, ArithOp op) {
 				uint8_t a = binaryGet(uint64, i);
 				uint8_t r = 0;
 				switch (op) {
-					case ArithOp::Add: r = (uint8_t)(a + s & 1); break;
-					case ArithOp::Sub: r = (uint8_t)(a - s & 1); break;
+					case ArithOp::Add: r = (uint8_t)((a + s) & 1); break;
+					case ArithOp::Sub: r = (uint8_t)((a - s) & 1); break;
 					case ArithOp::Mul: r = (uint8_t)(a & s); break;
 					case ArithOp::Div:
 						if (s == 0)
@@ -2841,8 +2842,8 @@ void NDArray::applyInt64ScalarInPlace(int64_t scalar, ArithOp op) {
 				uint8_t a = binaryGet(uint64, i);
 				uint8_t r = 0;
 				switch (op) {
-					case ArithOp::Add: r = (uint8_t)(a + s & 1); break;
-					case ArithOp::Sub: r = (uint8_t)(a - s & 1); break;
+					case ArithOp::Add: r = (uint8_t)((a + s) & 1); break;
+					case ArithOp::Sub: r = (uint8_t)((a - s) & 1); break;
 					case ArithOp::Mul: r = (uint8_t)(a & s); break;
 					case ArithOp::Div:
 						if (s == 0)
@@ -3015,8 +3016,8 @@ void NDArray::applyBroadcastInPlace(const NDArrayView& src, ArithOp op) {
 				uint8_t b = (uint8_t)ndarray_detail::viewLoadI64(src, viewElemOffset(src, i));
 				uint8_t r = 0;
 				switch (op) {
-					case ArithOp::Add: r = (uint8_t)(a + b & 1); break;
-					case ArithOp::Sub: r = (uint8_t)(a - b & 1); break;
+					case ArithOp::Add: r = (uint8_t)((a + b) & 1); break;
+					case ArithOp::Sub: r = (uint8_t)((a - b) & 1); break;
 					case ArithOp::Mul: r = (uint8_t)(a & b); break;
 					case ArithOp::Div:
 						if (b == 0)
@@ -3258,7 +3259,7 @@ NDArray& NDArray::neg() {
 			// Two's-complement wrap in 3 bits: pattern → (8 - p) & 7; 0 stays 0.
 			for (size_t i = 0; i < n; ++i) {
 				uint8_t p = int3_get(uint64, i);
-				int3_set(uint64, i, p ? (uint8_t)(8 - p & 7) : 0);
+				int3_set(uint64, i, p ? (uint8_t)((8 - p) & 7) : 0);
 			}
 			break;
 		case INT8:
@@ -5276,7 +5277,7 @@ static void binaryInvertInPlace(uint64_t* words, size_t nElems) {
 		words[w] = ~words[w];
 	const unsigned rem = (unsigned)(nElems % 64);
 	if (rem)
-		words[fullWords] = ~words[fullWords] & (1ULL << rem) - 1ULL;
+		words[fullWords] = ~words[fullWords] & ((1ULL << rem) - 1ULL);
 }
 
 /** Non-zero test → BINARY, word-packed (F32). */
@@ -5907,7 +5908,7 @@ bool NDArray::any() const {
 				if (uint64[w] != 0)
 					return true;
 			const unsigned rem = (unsigned)(n % 64);
-			if (rem && (uint64[full] & (1ULL << rem) - 1ULL) != 0)
+			if (rem && (uint64[full] & ((1ULL << rem) - 1ULL)) != 0)
 				return true;
 			return false;
 		}
@@ -6064,7 +6065,7 @@ bool NDArray::all() const {
 				// has zero byte: (chunk - ones) & ~chunk & 0x8080...
 				const uint64_t ones = 0x0101010101010101ULL;
 				const uint64_t high = 0x8080808080808080ULL;
-				if ((chunk - ones & ~chunk & high) != 0)
+				if (((chunk - ones) & ~chunk & high) != 0)
 					return false;
 			}
 			for (; i < n; ++i)
@@ -6172,8 +6173,8 @@ int NDArray::countNonzero() const {
 	} else if (type == INT3 /* || type == INT4 || type == UINT3 || type == UINT4*/) {
 		for (size_t i = 0; i < memorySize / 8; i++) {
 			uint64_t tmp = uint64[i];
-			tmp = tmp & 0x3333333333333333 | tmp >> 2 & 0x3333333333333333;
-			tmp = tmp & 0x1111111111111111 | tmp >> 1 & 0x1111111111111111;
+			tmp = (tmp & 0x3333333333333333ULL) | ((tmp >> 2) & 0x3333333333333333ULL);
+			tmp = (tmp & 0x1111111111111111ULL) | ((tmp >> 1) & 0x1111111111111111ULL);
 			total += popcnt64(tmp);
 		}
 	} else if (type == UINT8 || type == INT8)

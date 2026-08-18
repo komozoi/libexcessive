@@ -256,8 +256,8 @@ public:
 	/** Contiguous reshape when product matches; otherwise throws. Keeps offset. */
 	NDArrayView reshape(const ArrayList<int>& newShape) const;
 	/**
-	 * Owned reshape: shares the buffer when contiguous with offset 0,
-	 * otherwise copy() then reshape. Product must match.
+	 * Owned reshape: shares the buffer when it is owned, contiguous, and
+	 * offset 0; otherwise copy() then reshape. Product must match.
 	 */
 	NDArray reshapeOwned(const ArrayList<int>& newShape) const;
 	/** Reverse axes (rank < 2 is a no-op). */

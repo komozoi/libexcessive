@@ -171,6 +171,17 @@ TEST(NDArray_wrap, ConstBuffer_IsAView) {
 	EXPECT_FALSE(v.sharedBuffer().get()->ownsData);
 }
 
+TEST(NDArray_wrap, ConstReshapeOwned_DoesNotWriteThrough) {
+	const float buf[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+	NDArrayView v = NDArrayView::wrap(buf, sizeof(buf), {2, 2}, F32);
+	NDArray a = v.reshapeOwned(ArrayList<int>({4}));
+	EXPECT_TRUE(a.ownsStorage());
+	a.set({0}, 99.0f);
+	EXPECT_FLOAT_EQ(buf[0], 1.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 99.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({3}), 4.0f);
+}
+
 TEST(NDArray_wrap, UndersizedBuffer_Throws) {
 	float buf[2] = {1.0f, 2.0f};
 	EXPECT_THROW(NDArrayView::wrap(buf, sizeof(buf), {3}, F32), std::invalid_argument);
