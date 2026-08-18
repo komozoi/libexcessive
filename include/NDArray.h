@@ -178,7 +178,7 @@ public:
 	template <typename Acc>
 	Acc hamming(const NDArrayView& other) const;
 
-	/** A[...,M,K] @ B[...,K,N] → C[...,M,N]. Same dtype; see docs/ndarray_matmul.md. */
+	/** A[...,M,K] @ B[...,K,N] → C[...,M,N] (batch is leading). Same dtype; see docs/ndarray_matmul.md. */
 	NDArray matmul(const NDArrayView& b) const;
 	NDArray matmul(const NDArray& b) const;
 	/** A[M,K] @ x[K] → y[M]. */

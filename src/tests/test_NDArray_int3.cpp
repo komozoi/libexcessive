@@ -6,6 +6,7 @@
 // INT3 is exercised only through the public NDArray API (no private int3 headers).
 
 #include <gtest/gtest.h>
+#include <stdexcept>
 
 #include "NDArray.h"
 
@@ -235,4 +236,111 @@ TEST(NDArray_int3, Compare_ArrayAndScalars) {
 	NDArray uc = u.compare(uint256_t(5));
 	EXPECT_EQ(uc.get<int>({0}), 1);
 	EXPECT_EQ(uc.get<int>({1}), -1);
+}
+
+TEST(NDArray_int3, MinMax_MatchScalarReference) {
+	NDArray a = NDArray::full({5}, INT3, 0);
+	const int vals[] = {1, -4, 3, -2, 0};
+	for (int i = 0; i < 5; ++i)
+		a.set({i}, vals[i]);
+
+	int expectMin = vals[0];
+	int expectMax = vals[0];
+	for (int i = 1; i < 5; ++i) {
+		if (vals[i] < expectMin)
+			expectMin = vals[i];
+		if (vals[i] > expectMax)
+			expectMax = vals[i];
+	}
+
+	NDArray mn = a.min();
+	NDArray mx = a.max();
+	EXPECT_EQ(mn.type, INT3);
+	EXPECT_EQ(mx.type, INT3);
+	EXPECT_EQ(mn.shape.size(), 0);
+	EXPECT_EQ(mn.get<int>({}), expectMin);
+	EXPECT_EQ(mx.get<int>({}), expectMax);
+}
+
+TEST(NDArray_int3, MinMax_Axis) {
+	NDArray m({2, 3}, INT3);
+	const int vals[2][3] = {
+		{-4, 2, 1},
+		{3, -1, 0}
+	};
+	for (int i = 0; i < 2; ++i)
+		for (int j = 0; j < 3; ++j)
+			m.set({i, j}, vals[i][j]);
+
+	NDArray mn0 = m.min(0);
+	EXPECT_EQ(mn0.type, INT3);
+	EXPECT_EQ(mn0.get<int>({0}), -4);
+	EXPECT_EQ(mn0.get<int>({1}), -1);
+	EXPECT_EQ(mn0.get<int>({2}), 0);
+
+	NDArray mx1 = m.max(1);
+	EXPECT_EQ(mx1.get<int>({0}), 2);
+	EXPECT_EQ(mx1.get<int>({1}), 3);
+}
+
+TEST(NDArray_int3, Sign) {
+	NDArray a({5}, INT3);
+	const int vals[] = {-4, -1, 0, 1, 3};
+	for (int i = 0; i < 5; ++i)
+		a.set({i}, vals[i]);
+	a.sign();
+	EXPECT_EQ(a.type, INT3);
+	EXPECT_EQ(a.get<int>({0}), -1);
+	EXPECT_EQ(a.get<int>({1}), -1);
+	EXPECT_EQ(a.get<int>({2}), 0);
+	EXPECT_EQ(a.get<int>({3}), 1);
+	EXPECT_EQ(a.get<int>({4}), 1);
+}
+
+TEST(NDArray_int3, BroadcastAdd_Prefix) {
+	NDArray a({2, 3}, INT3);
+	for (int i = 0; i < 2; ++i)
+		for (int j = 0; j < 3; ++j)
+			a.set({i, j}, 1);
+	NDArray b({2}, INT3);
+	b.set({0}, 2);
+	b.set({1}, -3);
+
+	a.broadcastAdd(b);
+	EXPECT_EQ(a.type, INT3);
+	EXPECT_EQ(a.get<int>({0, 0}), 3);
+	EXPECT_EQ(a.get<int>({0, 1}), 3);
+	EXPECT_EQ(a.get<int>({0, 2}), 3);
+	EXPECT_EQ(a.get<int>({1, 0}), wrap3(1 + -3));
+	EXPECT_EQ(a.get<int>({1, 1}), wrap3(1 + -3));
+	EXPECT_EQ(a.get<int>({1, 2}), wrap3(1 + -3));
+}
+
+TEST(NDArray_int3, BroadcastAdd_WrapsLikeElemwise) {
+	NDArray a({2, 2}, INT3);
+	a.set({0, 0}, 3);
+	a.set({0, 1}, 3);
+	a.set({1, 0}, -4);
+	a.set({1, 1}, -4);
+	NDArray b({2}, INT3);
+	b.set({0}, 2);
+	b.set({1}, -1);
+
+	a.broadcastAdd(b);
+	EXPECT_EQ(a.get<int>({0, 0}), wrap3(3 + 2));
+	EXPECT_EQ(a.get<int>({0, 1}), wrap3(3 + 2));
+	EXPECT_EQ(a.get<int>({1, 0}), wrap3(-4 + -1));
+	EXPECT_EQ(a.get<int>({1, 1}), wrap3(-4 + -1));
+}
+
+TEST(NDArray_int3, BroadcastDiv_Zero_Throws) {
+	NDArray a({2, 2}, INT3);
+	a.set({0, 0}, 1);
+	a.set({0, 1}, 1);
+	a.set({1, 0}, 2);
+	a.set({1, 1}, 2);
+	NDArray b({2}, INT3);
+	b.set({0}, 1);
+	b.set({1}, 0);
+	EXPECT_THROW(a.broadcastDiv(b), std::invalid_argument);
 }

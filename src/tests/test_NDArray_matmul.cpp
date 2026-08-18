@@ -295,6 +295,124 @@ TEST(NDArray_matmul, F32_TiledBeatsNaive) {
 	EXPECT_LT(tiledUs, naiveUs * 2 + 5000);
 }
 
+TEST(NDArray_matmul, Dot1D) {
+	NDArray a({3}, F32);
+	NDArray b({3}, F32);
+	a.set({0}, 1.f); a.set({1}, 2.f); a.set({2}, 3.f);
+	b.set({0}, 4.f); b.set({1}, 5.f); b.set({2}, 6.f);
+	NDArray c = a.matmul(b);
+	EXPECT_EQ(c.shape.size(), 0);
+	EXPECT_FLOAT_EQ(c.get<float>({}), 32.f);
+}
+
+TEST(NDArray_matmul, BatchLeadingMatchesNumPy) {
+	NDArray a({2, 2, 3}, F32);
+	NDArray b({2, 3, 2}, F32);
+	for (int p = 0; p < 2; ++p)
+		for (int i = 0; i < 2; ++i)
+			for (int k = 0; k < 3; ++k)
+				a.set({p, i, k}, (float)(p * 10 + i * 3 + k + 1));
+	for (int p = 0; p < 2; ++p)
+		for (int k = 0; k < 3; ++k)
+			for (int j = 0; j < 2; ++j)
+				b.set({p, k, j}, (float)(p * 7 + k * 2 + j + 1));
+	NDArray c = a.matmul(b);
+	ASSERT_EQ(c.shape.size(), 3);
+	EXPECT_EQ(c.shape.get(0), 2);
+	EXPECT_EQ(c.shape.get(1), 2);
+	EXPECT_EQ(c.shape.get(2), 2);
+	for (int p = 0; p < 2; ++p) {
+		NDArray ap({2, 3}, F32);
+		NDArray bp({3, 2}, F32);
+		for (int i = 0; i < 2; ++i)
+			for (int k = 0; k < 3; ++k)
+				ap.set({i, k}, a.get<float>({p, i, k}));
+		for (int k = 0; k < 3; ++k)
+			for (int j = 0; j < 2; ++j)
+				bp.set({k, j}, b.get<float>({p, k, j}));
+		NDArray exp = ap.matmul(bp);
+		for (int i = 0; i < 2; ++i)
+			for (int j = 0; j < 2; ++j)
+				EXPECT_FLOAT_EQ(c.get<float>({p, i, j}), exp.get<float>({i, j}));
+	}
+}
+
+TEST(NDArray_matmul, BatchBroadcastsRank2) {
+	NDArray a({2, 2, 2}, F32);
+	NDArray b({2, 2}, F32);
+	fillSeq(b, 1);
+	for (int p = 0; p < 2; ++p)
+		for (int i = 0; i < 2; ++i)
+			for (int k = 0; k < 2; ++k)
+				a.set({p, i, k}, (float)(p + i + k + 1));
+	NDArray c = a.matmul(b);
+	ASSERT_EQ(c.shape.get(0), 2);
+	NDArray a0({2, 2}, F32);
+	for (int i = 0; i < 2; ++i)
+		for (int k = 0; k < 2; ++k)
+			a0.set({i, k}, a.get<float>({0, i, k}));
+	NDArray exp = a0.matmul(b);
+	for (int i = 0; i < 2; ++i)
+		for (int j = 0; j < 2; ++j)
+			EXPECT_FLOAT_EQ(c.get<float>({0, i, j}), exp.get<float>({i, j}));
+}
+
+TEST(NDArray_matmul, ZeroKIsZeroResult) {
+	NDArray a({2, 0}, F32);
+	NDArray b({0, 3}, F32);
+	NDArray c = a.matmul(b);
+	EXPECT_EQ(c.shape.get(0), 2);
+	EXPECT_EQ(c.shape.get(1), 3);
+	EXPECT_EQ(c.numElements(), (size_t)6);
+	EXPECT_FLOAT_EQ(c.get<float>({0, 0}), 0.f);
+	EXPECT_FLOAT_EQ(c.get<float>({1, 2}), 0.f);
+}
+
+TEST(NDArray_matmul, INT3_LargerThan1x1) {
+	NDArray a({2, 3}, INT3);
+	NDArray b({3, 2}, INT3);
+	int av[6] = {1, -2, 3, -4, 0, 2};
+	int bv[6] = {3, -1, 2, 0, -3, 1};
+	for (int i = 0; i < 6; ++i) {
+		a.setFlat((size_t)i, av[i]);
+		b.setFlat((size_t)i, bv[i]);
+	}
+	NDArray c = a.matmul(b);
+	EXPECT_EQ(c.type, INT32);
+	expectClose(c, naiveMatmulI64(a, b));
+}
+
+TEST(NDArray_matmul, BINARY_Larger) {
+	NDArray a({2, 8}, BINARY);
+	NDArray b({8, 2}, BINARY);
+	for (int i = 0; i < 16; ++i)
+		a.setFlat((size_t)i, i & 1);
+	for (int i = 0; i < 16; ++i)
+		b.setFlat((size_t)i, (i / 2) & 1);
+	NDArray c = a.matmul(b);
+	EXPECT_EQ(c.type, INT32);
+	expectClose(c, naiveMatmulI64(a, b));
+}
+
+TEST(NDArray_matmul, NonContiguousView) {
+	NDArray a({2, 3}, F32);
+	NDArray b({3, 2}, F32);
+	fillSeq(a, 1);
+	fillSeq(b, 2);
+	// Transpose of A: shape (3,2), strides (1, 3) over row-major (2,3).
+	ArrayList<size_t> st;
+	st.add(1);
+	st.add(3);
+	NDArrayView at(a.view().sharedBuffer(), ArrayList<int>({3, 2}), st, 0, F32);
+	NDArray denseT({3, 2}, F32);
+	for (int i = 0; i < 3; ++i)
+		for (int j = 0; j < 2; ++j)
+			denseT.set({i, j}, a.get<float>({j, i}));
+	NDArray br({2, 2}, F32);
+	fillSeq(br, 3);
+	expectClose(at.matmul(br), denseT.matmul(br));
+}
+
 TEST(NDArray_matmul, AdviseOnHeapAndMmap) {
 	int x = 0;
 	memoryAdviseWillNeed(&x, sizeof(x));

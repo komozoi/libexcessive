@@ -2102,6 +2102,23 @@ void NDArray::applyBroadcastInPlace(const NDArray& src, ArithOp op) {
 					binarySet(uint64, idx, r);
 					break;
 				}
+				case INT3: {
+					int av = int3_getSigned(uint64, idx);
+					int bv = int3_getSigned(src.uint64, i);
+					int r = 0;
+					switch (op) {
+						case ArithOp::Add: r = av + bv; break;
+						case ArithOp::Sub: r = av - bv; break;
+						case ArithOp::Mul: r = av * bv; break;
+						case ArithOp::Div:
+							if (bv == 0)
+								throw std::invalid_argument("NDArray: division by zero");
+							r = av / bv;
+							break;
+					}
+					int3_setSigned(uint64, idx, r);
+					break;
+				}
 				default:
 					throw std::runtime_error("NDArray: invalid type in broadcast arithmetic");
 			}
@@ -2399,6 +2416,12 @@ NDArray& NDArray::sign() {
 		case INT8:
 			for (size_t i = 0; i < n; ++i)
 				int8[i] = (int8[i] > 0) ? 1 : ((int8[i] < 0) ? (int8_t)-1 : 0);
+			break;
+		case INT3:
+			for (size_t i = 0; i < n; ++i) {
+				int v = int3_getSigned(uint64, i);
+				int3_setSigned(uint64, i, (v > 0) ? 1 : ((v < 0) ? -1 : 0));
+			}
 			break;
 		case UINT8:
 			for (size_t i = 0; i < n; ++i)
@@ -3369,6 +3392,15 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 				out.int8[0] = acc;
 				break;
 			}
+			case INT3: {
+				int acc = int3_getSigned(a.uint64, 0);
+				for (size_t i = 1; i < n; ++i) {
+					int v = int3_getSigned(a.uint64, i);
+					acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+				}
+				int3_setSigned(out.uint64, 0, acc);
+				break;
+			}
 			case INT32: {
 				int32_t acc = a.int32[0];
 				for (size_t i = 1; i < n; ++i) {
@@ -3526,6 +3558,15 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 						acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
 					}
 					out.int8[oi] = acc;
+					break;
+				}
+				case INT3: {
+					int acc = int3_getSigned(a.uint64, first);
+					for (size_t r = 1; r < reduced; ++r) {
+						int v = int3_getSigned(a.uint64, flatIndexWithAxis(a.shape, axis, oi, r));
+						acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+					}
+					int3_setSigned(out.uint64, oi, acc);
 					break;
 				}
 				case INT32: {
