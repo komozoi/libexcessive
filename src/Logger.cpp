@@ -18,6 +18,8 @@
 
 #include <cstring>
 #include <cstdio>
+#include <cerrno>
+#include <stdexcept>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <ctime>
@@ -43,15 +45,15 @@ const char* Logger::levelNames[] = {
 };
 
 
-Logger::Logger(const char* dir, int fileLevel, int outLevel) : fileLevel(fileLevel), outLevel(outLevel) {
+Logger::Logger(const char* dir, int fileLevel, int outLevel, mode_t dirMode) : fd(-1), fileLevel(fileLevel), outLevel(outLevel) {
 	// Create directory if it doesn't exist
 	struct stat st;
 	if (stat(dir, &st) != 0) {
 		// Directory does not exist, create it
-		if (mkdir(dir, S_IRWXU | S_IRWXG | S_IROTH) != 0) {
-			// Ideally something should be done here
-		}
-	}
+		if (mkdir(dir, dirMode) != 0 && errno != EEXIST)
+			throw std::runtime_error("Failed to create log directory");
+	} else if (!S_ISDIR(st.st_mode))
+		throw std::runtime_error("Failed to open log file");
 
 	// Generate filename based on current date and time
 	time_t now = time(0);
@@ -63,7 +65,7 @@ Logger::Logger(const char* dir, int fileLevel, int outLevel) : fileLevel(fileLev
 	// Open the log file
 	fd = open(filePath, O_WRONLY | O_CREAT | O_APPEND, 0600);
 	if (fd == -1) {
-		// Do something??
+		throw std::runtime_error("Failed to open log file");
 	} else {
 		char buffer[TIMESTAMP_LEN + 5];
 		buffer[0] = '\n';
@@ -98,15 +100,15 @@ void Logger::log(int level, const char* process, const char* fmt, va_list arg) {
 		va_list tmp;
 		va_copy(tmp, arg);
 		vdprintf(oFd, fmt, tmp);
+		va_end(tmp);
 		write(oFd, "\n", 1);
-		syncfs(oFd);
 	}
 
-	if (level >= fileLevel) {
+	if (level >= fileLevel && fd >= 0) {
 		write(fd, buffer, contextLen);
 		vdprintf(fd, fmt, arg);
 		write(fd, "\n", 1);
-		syncfs(fd);
+		fsync(fd);
 	}
 }
 

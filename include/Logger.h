@@ -21,6 +21,7 @@
 
 #include <cstdarg>
 #include <mutex>
+#include <sys/types.h>
 
 
 #define LOG_LEVEL_DEBUG 0
@@ -32,7 +33,7 @@
 
 class Logger {
 public:
-	Logger(const char* dir, int fileLevel, int outLevel);
+	Logger(const char* dir, int fileLevel, int outLevel, mode_t dirMode = 0700);
 
 	void log(int level, const char* process, const char* fmt, va_list arg);
 
