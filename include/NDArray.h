@@ -909,11 +909,11 @@ public:
 	NDArray& sign();
 	/** In-place square. Returns *this. */
 	NDArray& square();
-	/** In-place sqrt (promotes to a real type). Returns *this. */
+	/** In-place sqrt. Integers promote to F32 when every value is exact there. Returns *this. */
 	NDArray& sqrt();
 	/** In-place cube root. Returns *this. */
 	NDArray& cbrt();
-	/** In-place exp. Returns *this. */
+	/** In-place exp. Integers promote like sqrt (F32 if exact). Returns *this. */
 	NDArray& exp();
 	/** In-place expm1. Returns *this. */
 	NDArray& expm1();
@@ -1826,7 +1826,7 @@ private:
 	/** Out-of-place int64 scalar ⊕ *this. */
 	NDArray scalarInt64Op(int64_t other, ArithOp op) const;
 
-	/** Promote in place to a real type and apply unary kernel (F32 or F64). */
+	/** Promote in place to a real type and apply the packed unary kernel. */
 	NDArray& mapRealUnary(double (*fn)(double));
 
 	/** Replace storage with that of `result` (moves buffer; used by %= etc.). */

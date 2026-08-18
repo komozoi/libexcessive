@@ -14,6 +14,7 @@
 #include "ndarray_matmul.h"
 #include "ndarray_half_kernels.h"
 #include "ndarray_argext.h"
+#include "ndarray_unary.h"
 
 #include <atomic>
 #include <climits>
@@ -237,7 +238,7 @@ static NDArrayType promoteWithInt64Scalar(NDArrayType arrayType, int64_t scalar)
 	return promoteTypes(arrayType, INT64);
 }
 
-/** Real unary ops (log, sin, …): stay in current float width, else promote to F64. */
+/** Real unary ops (log, sin, …): stay in current float width. */
 static NDArrayType typeForRealUnary(NDArrayType t) {
 	if (t == F16 || t == BF16 || t == F32)
 		return t;
@@ -245,7 +246,39 @@ static NDArrayType typeForRealUnary(NDArrayType t) {
 		return F64;
 	if (t == UINT256)
 		throw std::invalid_argument("NDArray: real unary op not supported on UINT256 without a wider float");
+	if (t == BINARY || t == INT3 || t == UINT8 || t == INT8)
+		return F32;
 	return F64;
+}
+
+static bool integerLanesFitF32(const NDArray& a) {
+	const size_t n = a.numElements();
+	const int64_t lim = 16777216; // 2^24
+	if (a.type == INT32) {
+		const int32_t* p = a.data<int32_t>();
+		for (size_t i = 0; i < n; ++i) {
+			int32_t v = p[i];
+			if (v > lim || v < -lim)
+				return false;
+		}
+		return true;
+	}
+	if (a.type == INT64) {
+		const int64_t* p = a.data<int64_t>();
+		for (size_t i = 0; i < n; ++i) {
+			int64_t v = p[i];
+			if (v > lim || v < -lim)
+				return false;
+		}
+		return true;
+	}
+	return true;
+}
+
+static NDArrayType typeForRealUnary(const NDArray& a) {
+	if (a.type == INT32 || a.type == INT64)
+		return integerLanesFitF32(a) ? F32 : F64;
+	return typeForRealUnary(a.type);
 }
 
 static NDArrayType typeForNeg(NDArrayType t) {
@@ -3287,10 +3320,77 @@ NDArray& NDArray::operator%=(int64_t other) {
 
 // ---- element-wise unary (IN PLACE) -----------------------------------------
 
+static double d_sqrt(double x);
+static double d_cbrt(double x);
+static double d_exp(double x);
+static double d_expm1(double x);
+static double d_log(double x);
+static double d_log2(double x);
+static double d_log10(double x);
+static double d_log1p(double x);
+static double d_sin(double x);
+static double d_cos(double x);
+static double d_tan(double x);
+static double d_asin(double x);
+static double d_acos(double x);
+static double d_atan(double x);
+static double d_sinh(double x);
+static double d_cosh(double x);
+static double d_tanh(double x);
+static double d_asinh(double x);
+static double d_acosh(double x);
+static double d_atanh(double x);
+static double d_deg2rad(double x);
+static double d_rad2deg(double x);
+static double d_floor(double x);
+static double d_ceil(double x);
+static double d_round(double x);
+
+static bool classifyRealUnary(double (*fn)(double), NDUnaryOp* out) {
+	if (fn == d_sqrt) { *out = NDUnaryOp::Sqrt; return true; }
+	if (fn == d_cbrt) { *out = NDUnaryOp::Cbrt; return true; }
+	if (fn == d_exp) { *out = NDUnaryOp::Exp; return true; }
+	if (fn == d_expm1) { *out = NDUnaryOp::Expm1; return true; }
+	if (fn == d_log) { *out = NDUnaryOp::Log; return true; }
+	if (fn == d_log2) { *out = NDUnaryOp::Log2; return true; }
+	if (fn == d_log10) { *out = NDUnaryOp::Log10; return true; }
+	if (fn == d_log1p) { *out = NDUnaryOp::Log1p; return true; }
+	if (fn == d_sin) { *out = NDUnaryOp::Sin; return true; }
+	if (fn == d_cos) { *out = NDUnaryOp::Cos; return true; }
+	if (fn == d_tan) { *out = NDUnaryOp::Tan; return true; }
+	if (fn == d_asin) { *out = NDUnaryOp::Asin; return true; }
+	if (fn == d_acos) { *out = NDUnaryOp::Acos; return true; }
+	if (fn == d_atan) { *out = NDUnaryOp::Atan; return true; }
+	if (fn == d_sinh) { *out = NDUnaryOp::Sinh; return true; }
+	if (fn == d_cosh) { *out = NDUnaryOp::Cosh; return true; }
+	if (fn == d_tanh) { *out = NDUnaryOp::Tanh; return true; }
+	if (fn == d_asinh) { *out = NDUnaryOp::Asinh; return true; }
+	if (fn == d_acosh) { *out = NDUnaryOp::Acosh; return true; }
+	if (fn == d_atanh) { *out = NDUnaryOp::Atanh; return true; }
+	if (fn == d_deg2rad) { *out = NDUnaryOp::Deg2Rad; return true; }
+	if (fn == d_rad2deg) { *out = NDUnaryOp::Rad2Deg; return true; }
+	if (fn == d_floor) { *out = NDUnaryOp::Floor; return true; }
+	if (fn == d_ceil) { *out = NDUnaryOp::Ceil; return true; }
+	if (fn == d_round) { *out = NDUnaryOp::Round; return true; }
+	return false;
+}
+
 NDArray& NDArray::mapRealUnary(double (*fn)(double)) {
-	promoteInPlace(typeForRealUnary(type));
+	promoteInPlace(typeForRealUnary(*this));
 	ensureWritable();
 	const size_t n = numElements();
+	NDUnaryOp op;
+	if (classifyRealUnary(fn, &op)) {
+		if (type == F64)
+			ndunary_f64(float64, n, op);
+		else if (type == F16)
+			ndunary_f16(u16, n, op);
+		else if (type == BF16)
+			ndunary_bf16(u16, n, op);
+		else
+			ndunary_f32(float32, n, op);
+		return *this;
+	}
 	if (type == F64) {
 		for (size_t i = 0; i < n; ++i)
 			float64[i] = fn(float64[i]);
@@ -3614,7 +3714,7 @@ NDArray& NDArray::softmax() {
 }
 
 NDArray& NDArray::softmax(int axis) {
-	promoteInPlace(typeForRealUnary(type));
+	promoteInPlace(typeForRealUnary(*this));
 	ensureWritable();
 	if (numElements() == 0)
 		return *this;
@@ -3693,7 +3793,7 @@ NDArray NDArray::rmsnorm(const NDArray& weight, float eps) const {
 }
 
 NDArray NDArray::rmsnorm(const NDArray& weight, int axis, float eps) const {
-	NDArray x = convert(typeForRealUnary(type));
+	NDArray x = convert(typeForRealUnary(*this));
 	x.ensureWritable();
 	if (x.numElements() == 0)
 		return x;
@@ -3761,7 +3861,7 @@ NDArray NDArray::rmsnorm(const NDArray& weight, int axis, float eps) const {
 }
 
 NDArray& NDArray::silu() {
-	promoteInPlace(typeForRealUnary(type));
+	promoteInPlace(typeForRealUnary(*this));
 	ensureWritable();
 	const size_t n = numElements();
 	if (type == F32) {
@@ -3800,7 +3900,7 @@ NDArray NDArray::silued() const {
 
 NDArray& NDArray::siluMul(const NDArray& other) {
 	requireSameShape(*this, other);
-	promoteInPlace(promoteTypes(typeForRealUnary(type), typeForRealUnary(other.type)));
+	promoteInPlace(promoteTypes(typeForRealUnary(*this), typeForRealUnary(other)));
 	NDArray rhs = other.convert(type);
 	ensureWritable();
 	const size_t n = numElements();
@@ -3891,7 +3991,7 @@ NDArray NDArray::atan2(const NDArray& x) const {
 }
 
 NDArray NDArray::atan2(double x) const {
-	NDArrayType rt = isFloatingPoint(type) ? type : typeForRealUnary(type);
+	NDArrayType rt = isFloatingPoint(type) ? type : typeForRealUnary(*this);
 	NDArray y = convert(rt);
 	mapRealBinaryScalar(y, x, std::atan2);
 	return y;
@@ -3912,7 +4012,7 @@ NDArray NDArray::hypot(const NDArray& x) const {
 }
 
 NDArray NDArray::hypot(double x) const {
-	NDArrayType rt = isFloatingPoint(type) ? type : typeForRealUnary(type);
+	NDArrayType rt = isFloatingPoint(type) ? type : typeForRealUnary(*this);
 	NDArray a = convert(rt);
 	mapRealBinaryScalar(a, x, std::hypot);
 	return a;

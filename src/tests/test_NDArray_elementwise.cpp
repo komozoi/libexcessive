@@ -103,13 +103,65 @@ TEST(NDArray_elementwise, Sqrt_Exp_Log) {
 	EXPECT_NEAR(l.get<float>({1}), 1.0f, 1e-5f);
 }
 
-TEST(NDArray_elementwise, Sqrt_UINT8_PromotesToF64) {
+TEST(NDArray_elementwise, Sqrt_UINT8_PromotesToF32) {
 	NDArray a(ArrayList<uint8_t>({4, 9, 16}));
 	a.sqrt();
+	EXPECT_EQ(a.type, F32);
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 2.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1}), 3.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({2}), 4.0f);
+}
+
+TEST(NDArray_elementwise, Exp_INT8_PromotesToF32) {
+	NDArray a({3}, INT8);
+	a.set({0}, 0);
+	a.set({1}, 1);
+	a.set({2}, -1);
+	a.exp();
+	EXPECT_EQ(a.type, F32);
+	EXPECT_NEAR(a.get<float>({0}), std::exp(0.0f), 1e-5f);
+	EXPECT_NEAR(a.get<float>({1}), std::exp(1.0f), 1e-5f);
+	EXPECT_NEAR(a.get<float>({2}), std::exp(-1.0f), 1e-5f);
+}
+
+TEST(NDArray_elementwise, Sin_INT3_PromotesToF32) {
+	NDArray a({2}, INT3);
+	a.set({0}, 0);
+	a.set({1}, 1);
+	a.sin();
+	EXPECT_EQ(a.type, F32);
+	EXPECT_NEAR(a.get<float>({0}), 0.0f, 1e-6f);
+	EXPECT_NEAR(a.get<float>({1}), std::sin(1.0f), 1e-5f);
+}
+
+TEST(NDArray_elementwise, Exp_INT32_Small_PromotesToF32) {
+	NDArray a({2}, INT32);
+	a.set({0}, 0);
+	a.set({1}, 2);
+	a.exp();
+	EXPECT_EQ(a.type, F32);
+	EXPECT_NEAR(a.get<float>({1}), std::exp(2.0f), 1e-5f);
+}
+
+TEST(NDArray_elementwise, Exp_INT32_Large_PromotesToF64) {
+	NDArray a({2}, INT32);
+	a.set({0}, 0);
+	a.set({1}, 16777217); // 2^24+1, not exact in F32
+	a.exp();
 	EXPECT_EQ(a.type, F64);
-	EXPECT_DOUBLE_EQ(a.get<double>({0}), 2.0);
-	EXPECT_DOUBLE_EQ(a.get<double>({1}), 3.0);
-	EXPECT_DOUBLE_EQ(a.get<double>({2}), 4.0);
+	EXPECT_DOUBLE_EQ(a.get<double>({0}), std::exp(0.0));
+}
+
+TEST(NDArray_elementwise, Exp_F16_StaysF16) {
+	NDArray a({3}, F16);
+	a.set({0}, 0.0f);
+	a.set({1}, 1.0f);
+	a.set({2}, -1.0f);
+	a.exp();
+	EXPECT_EQ(a.type, F16);
+	EXPECT_NEAR(a.get<float>({0}), std::exp(0.0f), 1e-3f);
+	EXPECT_NEAR(a.get<float>({1}), std::exp(1.0f), 1e-2f);
+	EXPECT_NEAR(a.get<float>({2}), std::exp(-1.0f), 1e-2f);
 }
 
 TEST(NDArray_elementwise, Floor_Ceil_Round) {
