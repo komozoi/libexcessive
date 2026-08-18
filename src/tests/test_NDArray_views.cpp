@@ -201,6 +201,118 @@ TEST(NDArray_views, ColumnSlice_NotContiguous) {
 	EXPECT_FLOAT_EQ(c.getFlat<float>(1), 5.0f);
 }
 
+TEST(NDArray_views, Reshape_OwnedSharesBuffer) {
+	NDArray a(ArrayList({1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}));
+	NDArray b = a.reshape(ArrayList<int>({2, 3}));
+	EXPECT_EQ(b.shape.get(0), 2);
+	EXPECT_EQ(b.shape.get(1), 3);
+	EXPECT_EQ(static_cast<const NDArray&>(b).data(),
+	          static_cast<const NDArray&>(a).data());
+	EXPECT_FLOAT_EQ(b.get<float>({1, 2}), 6.0f);
+	b.set({0, 0}, 99.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 1.0f);
+	EXPECT_THROW(a.reshape(ArrayList<int>({2, 2})), std::invalid_argument);
+}
+
+TEST(NDArray_views, ReshapeOwned_OffsetCopies) {
+	NDArray m({2, 3}, ArrayList({1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}));
+	NDArrayView row = m.row(1);
+	NDArray c = row.reshapeOwned(ArrayList<int>({3}));
+	EXPECT_TRUE(c.ownsStorage());
+	EXPECT_NE(c.data(), m.data());
+	EXPECT_FLOAT_EQ(c.get<float>({0}), 4.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({2}), 6.0f);
+	NDArray shared = m.view().reshapeOwned(ArrayList<int>({3, 2}));
+	EXPECT_EQ(static_cast<const NDArray&>(shared).data(),
+	          static_cast<const NDArray&>(m).data());
+}
+
+TEST(NDArray_views, Transpose_F32_And_INT3) {
+	NDArray a({2, 3}, ArrayList({1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}));
+	NDArrayView t = a.transpose();
+	EXPECT_EQ(t.getShape().get(0), 3);
+	EXPECT_EQ(t.getShape().get(1), 2);
+	EXPECT_FALSE(t.isContiguous());
+	EXPECT_FLOAT_EQ(t.get<float>(ArrayList<int>({0, 1})), 4.0f);
+	EXPECT_FLOAT_EQ(t.get<float>(ArrayList<int>({2, 0})), 3.0f);
+	EXPECT_FLOAT_EQ(t.get<float>(ArrayList<int>({2, 1})), 6.0f);
+
+	NDArray i3({2, 3}, INT3);
+	const int vals[6] = {-4, -1, 0, 1, 2, 3};
+	for (int k = 0; k < 6; ++k)
+		i3.setFlat((size_t)k, vals[k]);
+	NDArrayView it = i3.transpose();
+	EXPECT_EQ(it.get<int>(ArrayList<int>({0, 1})), 1);
+	EXPECT_EQ(it.get<int>(ArrayList<int>({2, 0})), 0);
+	EXPECT_EQ(it.get<int>(ArrayList<int>({2, 1})), 3);
+}
+
+TEST(NDArray_views, Swapaxes_And_Permute_Rank3) {
+	NDArray a({2, 3, 4}, F32);
+	float v = 0;
+	for (int i = 0; i < 2; ++i)
+		for (int j = 0; j < 3; ++j)
+			for (int k = 0; k < 4; ++k)
+				a.set({i, j, k}, v++);
+	NDArrayView s = a.swapaxes(0, 2);
+	EXPECT_EQ(s.getShape().get(0), 4);
+	EXPECT_EQ(s.getShape().get(2), 2);
+	EXPECT_FLOAT_EQ(s.get<float>(ArrayList<int>({3, 1, 0})), a.get<float>({0, 1, 3}));
+
+	ArrayList<int> axes;
+	axes.add(1);
+	axes.add(2);
+	axes.add(0);
+	NDArrayView p = a.permute(axes);
+	EXPECT_EQ(p.getShape().get(0), 3);
+	EXPECT_EQ(p.getShape().get(1), 4);
+	EXPECT_EQ(p.getShape().get(2), 2);
+	EXPECT_FLOAT_EQ(p.get<float>(ArrayList<int>({2, 3, 1})), a.get<float>({1, 2, 3}));
+
+	ArrayList<int> bad;
+	bad.add(0);
+	bad.add(0);
+	bad.add(1);
+	EXPECT_THROW(a.permute(bad), std::invalid_argument);
+}
+
+TEST(NDArray_views, RowColSlice_Rank2And3) {
+	NDArray m({2, 3}, ArrayList({1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}));
+	NDArrayView r1 = m.row(1);
+	EXPECT_EQ(r1.getShape().size(), 1);
+	EXPECT_EQ(r1.getShape().get(0), 3);
+	EXPECT_TRUE(r1.isContiguous());
+	EXPECT_FLOAT_EQ(r1.getFlat<float>(0), 4.0f);
+	EXPECT_FLOAT_EQ(r1.getFlat<float>(2), 6.0f);
+	alignas(4) float raw[6] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+	NDArray w = NDArray::wrap(raw, sizeof(raw), {2, 3}, F32);
+	NDArrayView wr = w.row(1);
+	w.set({1, 1}, 50.0f);
+	EXPECT_FLOAT_EQ(wr.getFlat<float>(1), 50.0f);
+
+	NDArrayView c0 = m.col(0);
+	EXPECT_EQ(c0.getShape().size(), 1);
+	EXPECT_EQ(c0.getShape().get(0), 2);
+	EXPECT_FALSE(c0.isContiguous());
+	EXPECT_FLOAT_EQ(c0.getFlat<float>(0), 1.0f);
+	EXPECT_FLOAT_EQ(c0.getFlat<float>(1), 4.0f);
+
+	NDArray t({2, 3, 4}, F32);
+	float x = 0;
+	for (int i = 0; i < 2; ++i)
+		for (int j = 0; j < 3; ++j)
+			for (int k = 0; k < 4; ++k)
+				t.set({i, j, k}, x++);
+	NDArrayView plane = t.row(1);
+	EXPECT_EQ(plane.getShape().size(), 2);
+	EXPECT_EQ(plane.getShape().get(0), 3);
+	EXPECT_EQ(plane.getShape().get(1), 4);
+	EXPECT_FLOAT_EQ(plane.get<float>(ArrayList<int>({0, 0})), t.get<float>({1, 0, 0}));
+	EXPECT_FLOAT_EQ(plane.get<float>(ArrayList<int>({2, 3})), t.get<float>({1, 2, 3}));
+	EXPECT_THROW(m.row(2), std::out_of_range);
+	EXPECT_THROW(m.slice(-1, 0), std::out_of_range);
+}
+
 TEST(NDArray_views, GetFlat_StridedNoHeapCoords) {
 	NDArray m({2, 3}, ArrayList({
 		1.0f, 2.0f, 3.0f,

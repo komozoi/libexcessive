@@ -878,6 +878,19 @@ NDArrayView NDArray::reshapeView(const ArrayList<int>& newShape) const {
 	return view().reshape(newShape);
 }
 
+NDArray NDArray::reshape(const ArrayList<int>& newShape) const {
+	if (shapeElementCount(newShape) != numElements())
+		throw std::invalid_argument("NDArray::reshape - element count mismatch");
+	return NDArray(newShape, type, buffer);
+}
+
+NDArrayView NDArray::transpose() const { return view().transpose(); }
+NDArrayView NDArray::swapaxes(int axisA, int axisB) const { return view().swapaxes(axisA, axisB); }
+NDArrayView NDArray::permute(const ArrayList<int>& axes) const { return view().permute(axes); }
+NDArrayView NDArray::slice(int axis, int index) const { return view().slice(axis, index); }
+NDArrayView NDArray::row(int i) const { return view().row(i); }
+NDArrayView NDArray::col(int j) const { return view().col(j); }
+
 NDArray::Ref NDArray::operator[](int i) {
 	return Ref(this, i);
 }
@@ -987,6 +1000,91 @@ NDArrayView NDArrayView::reshape(const ArrayList<int>& newShape) const {
 	if (oldN != newN)
 		throw std::invalid_argument("NDArrayView::reshape - element count mismatch");
 	return NDArrayView(buffer, newShape, NDArray::rowMajorStrides(newShape), offset, type);
+}
+
+NDArray NDArrayView::reshapeOwned(const ArrayList<int>& newShape) const {
+	if (shapeElementCount(newShape) != numElements())
+		throw std::invalid_argument("NDArrayView::reshapeOwned - element count mismatch");
+	if (isContiguous() && offset == 0)
+		return NDArray(newShape, type, buffer);
+	return copy().reshape(newShape);
+}
+
+NDArrayView NDArrayView::permute(const ArrayList<int>& axes) const {
+	const int r = shape.size();
+	if (axes.size() != r)
+		throw std::invalid_argument("NDArrayView::permute - axes rank mismatch");
+	ArrayList<int> used;
+	for (int i = 0; i < r; ++i)
+		used.add(0);
+	ArrayList<int> ns;
+	ArrayList<size_t> nst;
+	for (int i = 0; i < r; ++i) {
+		int ax = axes.get(i);
+		if (ax < 0 || ax >= r)
+			throw std::invalid_argument("NDArrayView::permute - axis out of range");
+		if (used.get(ax))
+			throw std::invalid_argument("NDArrayView::permute - duplicate axis");
+		used.set(ax, 1);
+		ns.add(shape.get(ax));
+		nst.add(ax < strides.size() ? strides.get(ax) : (size_t)0);
+	}
+	return NDArrayView(buffer, std::move(ns), std::move(nst), offset, type);
+}
+
+NDArrayView NDArrayView::transpose() const {
+	const int r = shape.size();
+	if (r < 2)
+		return *this;
+	ArrayList<int> axes;
+	for (int i = r - 1; i >= 0; --i)
+		axes.add(i);
+	return permute(axes);
+}
+
+NDArrayView NDArrayView::swapaxes(int axisA, int axisB) const {
+	const int r = shape.size();
+	if (axisA < 0 || axisA >= r || axisB < 0 || axisB >= r)
+		throw std::invalid_argument("NDArrayView::swapaxes - axis out of range");
+	if (axisA == axisB)
+		return *this;
+	ArrayList<int> axes;
+	for (int i = 0; i < r; ++i)
+		axes.add(i);
+	axes.set(axisA, axisB);
+	axes.set(axisB, axisA);
+	return permute(axes);
+}
+
+NDArrayView NDArrayView::slice(int axis, int index) const {
+	const int r = shape.size();
+	if (r == 0)
+		throw std::invalid_argument("NDArrayView::slice - cannot slice a scalar");
+	if (axis < 0 || axis >= r)
+		throw std::out_of_range("NDArrayView::slice - axis out of range");
+	if (index < 0 || index >= shape.get(axis))
+		throw std::out_of_range("NDArrayView::slice - index out of bounds");
+	size_t newOff = offset + (size_t)index * ((axis < strides.size()) ? strides.get(axis) : (size_t)0);
+	ArrayList<int> ns;
+	ArrayList<size_t> nst;
+	for (int d = 0; d < r; ++d) {
+		if (d == axis)
+			continue;
+		ns.add(shape.get(d));
+		nst.add(d < strides.size() ? strides.get(d) : (size_t)0);
+	}
+	return NDArrayView(buffer, std::move(ns), std::move(nst), newOff, type);
+}
+
+NDArrayView NDArrayView::row(int i) const {
+	return slice(0, i);
+}
+
+NDArrayView NDArrayView::col(int j) const {
+	const int r = shape.size();
+	if (r == 0)
+		throw std::invalid_argument("NDArrayView::col - cannot slice a scalar");
+	return slice(r - 1, j);
 }
 
 static size_t unpackedElemSize(NDArrayType t) {

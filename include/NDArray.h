@@ -142,8 +142,25 @@ public:
 	}
 	bool isBroadcastableTo(const ArrayList<int>& targetShape) const;
 	NDArrayView broadcastTo(const ArrayList<int>& targetShape) const;
-	/** Contiguous reshape when product matches; otherwise throws. */
+	/** Contiguous reshape when product matches; otherwise throws. Keeps offset. */
 	NDArrayView reshape(const ArrayList<int>& newShape) const;
+	/**
+	 * Owned reshape: shares the buffer when contiguous with offset 0,
+	 * otherwise copy() then reshape. Product must match.
+	 */
+	NDArray reshapeOwned(const ArrayList<int>& newShape) const;
+	/** Reverse axes (rank < 2 is a no-op). */
+	NDArrayView transpose() const;
+	NDArrayView swapaxes(int axisA, int axisB) const;
+	/** Permute axes (must be a permutation of 0..rank-1). */
+	NDArrayView permute(const ArrayList<int>& axes) const;
+	/**
+	 * Drop `axis` at `index`. `row(i)` is slice(0, i); `col(j)` is the last axis.
+	 * Views share storage (read). Writes go through the owner or wrap().
+	 */
+	NDArrayView slice(int axis, int index) const;
+	NDArrayView row(int i) const;
+	NDArrayView col(int j) const;
 	NDArray copy() const;
 
 	/**
@@ -366,6 +383,17 @@ public:
 	NDArrayView view() const;
 	NDArrayView broadcastTo(const ArrayList<int>& targetShape) const;
 	NDArrayView reshapeView(const ArrayList<int>& newShape) const;
+	/**
+	 * Owned reshape: shares this buffer (CoW). Product must match.
+	 * `[]` stays an element proxy; use row/slice for rank−1 views.
+	 */
+	NDArray reshape(const ArrayList<int>& newShape) const;
+	NDArrayView transpose() const;
+	NDArrayView swapaxes(int axisA, int axisB) const;
+	NDArrayView permute(const ArrayList<int>& axes) const;
+	NDArrayView slice(int axis, int index) const;
+	NDArrayView row(int i) const;
+	NDArrayView col(int j) const;
 
 	/** True if this array allocated (or CoW-copied) its storage. False for wrap(). */
 	bool ownsStorage() const;
