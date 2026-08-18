@@ -207,3 +207,54 @@ TEST(ThreadPoolTest, SubmitWithMultipleArguments) {
 	}
 	EXPECT_EQ(result.load(), 30);
 }
+
+TEST(ThreadPoolTest, Wait_BlocksUntilTaskFinishes) {
+	ThreadPool pool(1);
+	std::mutex block;
+	std::unique_lock<std::mutex> hold(block);
+	std::atomic<bool> started(false);
+	std::atomic<bool> finished(false);
+
+	sp<ThreadPoolTask> task = pool.submit([&block, &started, &finished]() {
+		started.store(true);
+		std::lock_guard<std::mutex> inner(block);
+		finished.store(true);
+	});
+
+	while (!started.load()) {
+		std::this_thread::yield();
+	}
+
+	std::atomic<bool> waiterReturned(false);
+	std::thread waiter([&task, &waiterReturned]() {
+		task->wait();
+		waiterReturned.store(true);
+	});
+
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+	EXPECT_FALSE(waiterReturned.load());
+	EXPECT_FALSE(finished.load());
+
+	hold.unlock();
+	waiter.join();
+	EXPECT_TRUE(finished.load());
+	EXPECT_TRUE(task->isDone());
+}
+
+TEST(ThreadPoolTest, WaitAll_SeesAllSideEffects) {
+	ThreadPool pool(4);
+	const int numTasks = 8;
+	std::atomic<int> counter(0);
+	ArrayList<sp<ThreadPoolTask>> tasks;
+	for (int i = 0; i < numTasks; ++i) {
+		tasks.add(pool.submit([&counter]() {
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			counter.fetch_add(1);
+		}));
+	}
+	ThreadPool::waitAll(tasks);
+	EXPECT_EQ(counter.load(), numTasks);
+	for (int i = 0; i < tasks.size(); ++i) {
+		EXPECT_TRUE(tasks.get(i)->isDone());
+	}
+}

@@ -23,6 +23,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <functional>
+#include <atomic>
 
 #include "alloc/pointer.h"
 #include "ds/ArrayList.h"
@@ -32,9 +33,20 @@
 class ThreadPoolTask {
 public:
 	virtual void run() = 0;
-	virtual bool isDone() const = 0;
+	bool isDone() const;
+	/** Block until this task has finished run(). */
+	void wait() const;
 
 	virtual ~ThreadPoolTask() = default;
+
+	friend class ThreadPool;
+
+private:
+	void markFinished();
+
+	mutable std::mutex doneMutex;
+	mutable std::condition_variable doneCv;
+	std::atomic<bool> finished{false};
 };
 
 
@@ -50,16 +62,10 @@ public:
 
 	void run() override {
 		task();
-		didRun = true;
-	}
-
-	bool isDone() const override {
-		return didRun;
 	}
 
 private:
 	std::function<void()> task;
-	bool didRun = false;
 };
 
 
@@ -133,6 +139,9 @@ public:
 	 * @return The number of tasks in the queue.
 	 */
 	int getQueueSize() const;
+
+	/** Block until every non-null task in `tasks` has finished. */
+	static void waitAll(const ArrayList<sp<ThreadPoolTask>>& tasks);
 
 private:
 	void workerLoop();

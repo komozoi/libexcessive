@@ -44,7 +44,13 @@ void ThreadPool::workerLoop() {
 
 			task = tasks.pop();
 		}
-		task.mut().run();
+		try {
+			task.mut().run();
+		} catch (...) {
+			task.mut().markFinished();
+			throw;
+		}
+		task.mut().markFinished();
 	}
 }
 
@@ -89,4 +95,32 @@ int ThreadPool::getPoolSize() const {
 int ThreadPool::getQueueSize() const {
 	std::lock_guard<std::mutex> lock(queueMutex);
 	return tasks.size();
+}
+
+bool ThreadPoolTask::isDone() const {
+	return finished.load(std::memory_order_acquire);
+}
+
+void ThreadPoolTask::markFinished() {
+	{
+		std::lock_guard<std::mutex> lock(doneMutex);
+		finished.store(true, std::memory_order_release);
+	}
+	doneCv.notify_all();
+}
+
+void ThreadPoolTask::wait() const {
+	if (finished.load(std::memory_order_acquire))
+		return;
+	std::unique_lock<std::mutex> lock(doneMutex);
+	while (!finished.load(std::memory_order_acquire))
+		doneCv.wait(lock);
+}
+
+void ThreadPool::waitAll(const ArrayList<sp<ThreadPoolTask>>& tasks) {
+	for (int i = 0; i < tasks.size(); ++i) {
+		const sp<ThreadPoolTask>& task = tasks.get(i);
+		if (task)
+			task->wait();
+	}
 }
