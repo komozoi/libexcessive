@@ -969,9 +969,9 @@ public:
 	NDArray& softmax();
 	/** In-place softmax over `axis`. */
 	NDArray& softmax(int axis);
-	/** Copy then softmax (last axis). */
+	/** Owned copy then softmax (last axis). Never aliases a wrap. */
 	NDArray softmaxed() const;
-	/** Copy then softmax over `axis`. */
+	/** Owned copy then softmax over `axis`. Never aliases a wrap. */
 	NDArray softmaxed(int axis) const;
 
 	/**
@@ -989,7 +989,7 @@ public:
 	 * `siluMul(other)` is fused `*this = silu(*this) * other`.
 	 */
 	NDArray& silu();
-	/** Copy then SiLU. */
+	/** Owned copy then SiLU. Never aliases a wrap. */
 	NDArray silued() const;
 	/** In-place fused SiLU(*this) * other. Returns *this. */
 	NDArray& siluMul(const NDArray& other);
@@ -1022,7 +1022,7 @@ public:
 	/** hypot against an int scalar. */
 	NDArray hypot(int x) const;
 
-	/** Unary minus — returns a new array (operators copy). */
+	/** Unary minus — new owned array. Never aliases a wrap. */
 	NDArray operator-() const;
 
 	/*

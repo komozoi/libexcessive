@@ -674,7 +674,7 @@ sp<NDArrayBuffer> NDArray::makeWrapBuffer(const void* data, size_t byteSize, con
 			throw std::invalid_argument("NDArray wrap: data is not aligned for element type");
 	}
 
-	// This cast is OK because the buffer is returned as COW, so attempts to mutate it will force a copy.
+	// Wraps never CoW-detach. Const memory is a view only (NDArrayView::wrap).
 	return sp<NDArrayBuffer>(COPY_ON_WRITE, (void*)data, byteSize, type);
 }
 
@@ -3484,26 +3484,32 @@ NDArray& NDArray::neg() {
 	return *this;
 }
 
+static NDArray ownedUnaryDest(const NDArray& src) {
+	if (src.ownsStorage())
+		return src.convert(src.type);
+	return src.view().copy();
+}
+
 NDArray NDArray::operator-() const {
-	NDArray out(*this);
+	NDArray out = ownedUnaryDest(*this);
 	out.neg();
 	return out;
 }
 
 NDArray NDArray::squared() const {
-	NDArray out(*this);
+	NDArray out = ownedUnaryDest(*this);
 	out.square();
 	return out;
 }
 
 NDArray NDArray::negated() const {
-	NDArray out(*this);
+	NDArray out = ownedUnaryDest(*this);
 	out.neg();
 	return out;
 }
 
 NDArray NDArray::absolute() const {
-	NDArray out(*this);
+	NDArray out = ownedUnaryDest(*this);
 	out.abs();
 	return out;
 }
@@ -3806,13 +3812,13 @@ NDArray& NDArray::softmax(int axis) {
 }
 
 NDArray NDArray::softmaxed() const {
-	NDArray out(*this);
+	NDArray out = ownedUnaryDest(*this);
 	out.softmax();
 	return out;
 }
 
 NDArray NDArray::softmaxed(int axis) const {
-	NDArray out(*this);
+	NDArray out = ownedUnaryDest(*this);
 	out.softmax(axis);
 	return out;
 }
@@ -3933,7 +3939,7 @@ NDArray& NDArray::silu() {
 }
 
 NDArray NDArray::silued() const {
-	NDArray out(*this);
+	NDArray out = ownedUnaryDest(*this);
 	out.silu();
 	return out;
 }
@@ -5827,9 +5833,7 @@ NDArray NDArray::asBinary() const {
 }
 
 NDArray NDArray::logicalNot() const {
-	NDArray out = asBinary();
-	// asBinary may share buffer when already BINARY — must detach before invert
-	out.ensureWritable();
+	NDArray out = (type == BINARY) ? ownedUnaryDest(*this) : asBinary();
 	binaryInvertInPlace(out.uint64, out.numElements());
 	return out;
 }

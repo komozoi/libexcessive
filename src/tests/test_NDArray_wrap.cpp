@@ -382,3 +382,62 @@ TEST(NDArray_wrap, OwnedCowStillDetaches) {
 	EXPECT_FLOAT_EQ(a.get<float>({0}), 99.0f);
 	EXPECT_FLOAT_EQ(b.get<float>({0}), 1.0f);
 }
+
+TEST(NDArray_wrap, OutOfPlaceUnary_DoesNotWriteThrough) {
+	float buf[4] = {1.0f, -2.0f, 3.0f, -4.0f};
+	const float orig[4] = {1.0f, -2.0f, 3.0f, -4.0f};
+	NDArray a = NDArray::wrap(buf, sizeof(buf), {4}, F32);
+	NDArray n = -a;
+	NDArray sq = a.squared();
+	NDArray ab = a.absolute();
+	NDArray ng = a.negated();
+	EXPECT_TRUE(n.ownsStorage());
+	EXPECT_TRUE(sq.ownsStorage());
+	EXPECT_TRUE(ab.ownsStorage());
+	EXPECT_TRUE(ng.ownsStorage());
+	EXPECT_FALSE(a.ownsStorage());
+	EXPECT_NE(n.data(), static_cast<const void*>(buf));
+	EXPECT_FLOAT_EQ(n.get<float>({0}), -1.0f);
+	EXPECT_FLOAT_EQ(n.get<float>({1}), 2.0f);
+	EXPECT_FLOAT_EQ(sq.get<float>({1}), 4.0f);
+	EXPECT_FLOAT_EQ(ab.get<float>({1}), 2.0f);
+	EXPECT_FLOAT_EQ(ng.get<float>({0}), -1.0f);
+	for (int i = 0; i < 4; ++i)
+		EXPECT_FLOAT_EQ(buf[i], orig[i]);
+}
+
+TEST(NDArray_wrap, SoftmaxedAndSilued_DoNotWriteThrough) {
+	float buf[2] = {0.0f, 0.0f};
+	NDArray a = NDArray::wrap(buf, sizeof(buf), {2}, F32);
+	NDArray s = a.softmaxed();
+	NDArray u = a.silued();
+	EXPECT_TRUE(s.ownsStorage());
+	EXPECT_TRUE(u.ownsStorage());
+	EXPECT_FLOAT_EQ(buf[0], 0.0f);
+	EXPECT_FLOAT_EQ(buf[1], 0.0f);
+	EXPECT_NEAR(s.get<float>({0}), 0.5f, 1e-5f);
+	EXPECT_NEAR(s.get<float>({1}), 0.5f, 1e-5f);
+}
+
+TEST(NDArray_wrap, LogicalNot_Binary_DoesNotWriteThrough) {
+	alignas(8) uint64_t words[1] = {1ull};
+	const uint64_t orig = words[0];
+	NDArray a = NDArray::wrap(words, sizeof(words), {8}, BINARY);
+	NDArray n = ~a;
+	EXPECT_TRUE(n.ownsStorage());
+	EXPECT_FALSE(a.ownsStorage());
+	EXPECT_EQ(words[0], orig);
+	EXPECT_EQ(a.get<int>({0}), 1);
+	EXPECT_EQ(n.get<int>({0}), 0);
+	EXPECT_EQ(n.get<int>({1}), 1);
+}
+
+TEST(NDArray_wrap, OwnedOutOfPlace_IsDistinctBuffer) {
+	NDArray a(ArrayList({1.0f, 2.0f}));
+	NDArray n = -a;
+	EXPECT_TRUE(n.ownsStorage());
+	EXPECT_TRUE(a.ownsStorage());
+	EXPECT_NE(n.data(), a.data());
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 1.0f);
+	EXPECT_FLOAT_EQ(n.get<float>({0}), -1.0f);
+}
