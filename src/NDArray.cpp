@@ -12,6 +12,7 @@
 #include "ndarray_int3.h"
 #include "ndarray_score.h"
 #include "ndarray_matmul.h"
+#include "ndarray_half_kernels.h"
 
 #include <atomic>
 #include <cmath>
@@ -46,11 +47,16 @@
 */
 
 static bool isFloatingPoint(NDArrayType type) {
-	return type == F32 || type == F64;
+	return type == F16 || type == BF16 || type == F32 || type == F64;
+}
+
+static bool isHalfFloat(NDArrayType type) {
+	return type == F16 || type == BF16;
 }
 
 static bool isSigned(NDArrayType type) {
-	return type == F32 || type == F64 || type == INT3 || type == INT8 || type == INT32 || type == INT64;
+	return type == F16 || type == BF16 || type == F32 || type == F64
+		|| type == INT3 || type == INT8 || type == INT32 || type == INT64;
 }
 
 static bool isSignedInteger(NDArrayType type) {
@@ -65,6 +71,8 @@ static int maxPowerOfTypeIntPrecision(NDArrayType type) {
 		case UINT8:   return 7;
 		case INT32:   return 31;
 		case INT64:   return 63;
+		case F16:     return 11;
+		case BF16:    return 8;
 		case F32:     return 24;
 		case F64:     return 53;
 		case UINT256: return 255;
@@ -81,6 +89,8 @@ static int maxPowerOfType(NDArrayType type) {
 		case UINT8:   return 7;
 		case INT32:   return 31;
 		case INT64:   return 63;
+		case F16:     return 16;
+		case BF16:    return 128;
 		case F32:     return 128;
 		case F64:     return 1024;
 		case UINT256: return 255;
@@ -98,6 +108,10 @@ static bool isLosslessConversion(NDArrayType from, NDArrayType to) {
 		return true;
 	// Float → integer always drops fractional information.
 	if (isFloatingPoint(from) && !isFloatingPoint(to))
+		return false;
+	// BF16 has F32's exponent; F16 does not. Mantissa bits alone lie.
+	if (isFloatingPoint(from) && isFloatingPoint(to)
+	    && maxPowerOfType(to) < maxPowerOfType(from))
 		return false;
 	if (maxPowerOfTypeIntPrecision(to) < maxPowerOfTypeIntPrecision(from))
 		return false;
@@ -143,29 +157,33 @@ static NDArrayType promoteTypes(NDArrayType a, NDArrayType b) {
 }
 
 static NDArrayType promoteWithFloatScalar(NDArrayType arrayType) {
+	if (isHalfFloat(arrayType))
+		return arrayType;
 	return promoteTypes(arrayType, F32);
 }
 
 static NDArrayType promoteWithDoubleScalar(NDArrayType arrayType) {
+	if (isHalfFloat(arrayType))
+		return arrayType;
 	return promoteTypes(arrayType, F64);
 }
 
 static NDArrayType promoteWithIntScalar(NDArrayType arrayType) {
-	if (arrayType == UINT256)
-		return UINT256;
+	if (arrayType == UINT256 || isHalfFloat(arrayType))
+		return arrayType;
 	return promoteTypes(arrayType, INT32);
 }
 
 static NDArrayType promoteWithInt64Scalar(NDArrayType arrayType) {
-	if (arrayType == UINT256)
-		return UINT256;
+	if (arrayType == UINT256 || isHalfFloat(arrayType))
+		return arrayType;
 	return promoteTypes(arrayType, INT64);
 }
 
 /** Real unary ops (log, sin, …): stay in current float width, else promote to F64. */
 static NDArrayType typeForRealUnary(NDArrayType t) {
-	if (t == F32)
-		return F32;
+	if (t == F16 || t == BF16 || t == F32)
+		return t;
 	if (t == F64)
 		return F64;
 	if (t == UINT256)
@@ -174,7 +192,7 @@ static NDArrayType typeForRealUnary(NDArrayType t) {
 }
 
 static NDArrayType typeForNeg(NDArrayType t) {
-	if (t == F32 || t == F64 || t == INT3 || t == INT8 || t == INT32 || t == INT64)
+	if (t == F16 || t == BF16 || t == F32 || t == F64 || t == INT3 || t == INT8 || t == INT32 || t == INT64)
 		return t; // INT3: wrap two's-complement (neg of -4 stays -4)
 	if (t == UINT256)
 		return UINT256; // two's complement
@@ -184,6 +202,8 @@ static NDArrayType typeForNeg(NDArrayType t) {
 
 static NDArrayType sumProdAccumulateType(NDArrayType t) {
 	switch (t) {
+		case F16:
+		case BF16:
 		case F32: return F32;
 		case F64: return F64;
 
@@ -201,7 +221,7 @@ static NDArrayType sumProdAccumulateType(NDArrayType t) {
 }
 
 static NDArrayType meanResultType(NDArrayType t) {
-	if (t == F32)
+	if (t == F32 || t == F16 || t == BF16)
 		return F32;
 	return F64;
 }
@@ -456,6 +476,9 @@ size_t NDArray::bufferBytesFor(NDArrayType t, size_t numElems) {
 		case INT8:
 		case UINT8:
 			return numElems;
+		case F16:
+		case BF16:
+			return mulOrThrow(numElems, 2);
 		case INT32:
 		case F32:
 			return mulOrThrow(numElems, 4);
@@ -480,6 +503,9 @@ static size_t wrapAlignment(NDArrayType t) {
 		case INT32:
 		case F32:
 			return 4;
+		case F16:
+		case BF16:
+			return 2;
 		case INT8:
 		case UINT8:
 		default:
@@ -1098,6 +1124,9 @@ static size_t unpackedElemSize(NDArrayType t) {
 		case UINT8:
 		case INT8:
 			return 1;
+		case F16:
+		case BF16:
+			return 2;
 		case UINT256:
 			return 32;
 		default:
@@ -1107,6 +1136,10 @@ static size_t unpackedElemSize(NDArrayType t) {
 
 static void viewStoreLane(NDArray& out, size_t dst, const void* data, NDArrayType t, size_t srcOff) {
 	switch (t) {
+		case F16:
+		case BF16:
+			out.setFlat(dst, ndarray_half::load(t, ((const uint16_t*)data)[srcOff]));
+			break;
 		case F32:
 			out.setFlat(dst, ((const float*)data)[srcOff]);
 			break;
@@ -1318,6 +1351,30 @@ static Acc scorePackedSameType(const NDArrayView& a, const NDArrayView* b, size_
 	const void* db = (kind == ScoreKind::L2Self) ? nullptr : b->sharedBuffer().get()->data;
 	const size_t ob = (kind == ScoreKind::L2Self) ? 0 : b->getOffset();
 	switch (t) {
+		case F16: {
+			const uint16_t* pa = (const uint16_t*)da + oa;
+			const uint16_t* pb = db ? (const uint16_t*)db + ob : pa;
+			float s;
+			if (kind == ScoreKind::Dot)
+				s = ndhalf_dot_f16(pa, pb, n);
+			else if (kind == ScoreKind::L2Self)
+				s = ndhalf_l2self_f16(pa, n);
+			else
+				s = ndhalf_l2pair_f16(pa, pb, n);
+			return accFromKernelF32<Acc>(s);
+		}
+		case BF16: {
+			const uint16_t* pa = (const uint16_t*)da + oa;
+			const uint16_t* pb = db ? (const uint16_t*)db + ob : pa;
+			float s;
+			if (kind == ScoreKind::Dot)
+				s = ndhalf_dot_bf16(pa, pb, n);
+			else if (kind == ScoreKind::L2Self)
+				s = ndhalf_l2self_bf16(pa, n);
+			else
+				s = ndhalf_l2pair_bf16(pa, pb, n);
+			return accFromKernelF32<Acc>(s);
+		}
 		case F32: {
 			const float* pa = (const float*)da + oa;
 			const float* pb = db ? (const float*)db + ob : pa;
@@ -1553,6 +1610,18 @@ static Acc packedSum(const NDArrayView& v, size_t n) {
 	const void* data = v.sharedBuffer().get()->data;
 	const size_t o = v.getOffset();
 	switch (v.getType()) {
+		case F16: {
+			const uint16_t* p = (const uint16_t*)data + o;
+			if constexpr (std::is_same_v<Acc, float>)
+				return ndhalf_sum_f16(p, n);
+			return Acc(ndhalf_sum_f16(p, n));
+		}
+		case BF16: {
+			const uint16_t* p = (const uint16_t*)data + o;
+			if constexpr (std::is_same_v<Acc, float>)
+				return ndhalf_sum_bf16(p, n);
+			return Acc(ndhalf_sum_bf16(p, n));
+		}
 		case F32: {
 			const float* p = (const float*)data + o;
 			if constexpr (std::is_same_v<Acc, float>)
@@ -1616,6 +1685,10 @@ static Acc packedProd(const NDArrayView& v, size_t n) {
 	const void* data = v.sharedBuffer().get()->data;
 	const size_t o = v.getOffset();
 	switch (v.getType()) {
+		case F16:
+			return Acc(ndhalf_prod_f16((const uint16_t*)data + o, n));
+		case BF16:
+			return Acc(ndhalf_prod_bf16((const uint16_t*)data + o, n));
 		case F32:
 			return denseProd<float, Acc>((const float*)data + o, n);
 		case F64:
@@ -1728,7 +1801,7 @@ template <typename Acc>
 Acc NDArrayView::meanAs() const {
 	const size_t n = numElements();
 	Acc s = reduceViewSum<Acc>(*this);
-	return s / Acc(n);
+	return s / Acc((uint64_t)n);
 }
 
 #define LIBEXCESSIVE_INSTANTIATE_REDUCE(Acc) \
@@ -1761,6 +1834,9 @@ namespace ndarray_detail {
 			case INT8: return (double)((const int8_t*)data)[elementOffset];
 			case INT32: return (double)((const int32_t*)data)[elementOffset];
 			case INT64: return (double)((const int64_t*)data)[elementOffset];
+			case F16:
+			case BF16:
+				return (double)ndarray_half::load(v.getType(), ((const uint16_t*)data)[elementOffset]);
 			case F32: return (double)((const float*)data)[elementOffset];
 			case F64: return ((const double*)data)[elementOffset];
 			case UINT256: return ((const uint256_t*)data)[elementOffset].toDouble();
@@ -1879,6 +1955,8 @@ double NDArray::loadAsDouble(size_t i) const {
 		case INT8:    return (double)int8[i];
 		case INT32:   return (double)int32[i];
 		case INT64:   return (double)int64[i];
+		case F16:
+		case BF16:    return (double)ndarray_half::load(type, u16[i]);
 		case F32:     return (double)float32[i];
 		case F64:     return float64[i];
 		case UINT256: return uint256[i].toDouble();
@@ -1894,6 +1972,8 @@ int64_t NDArray::loadAsI64(size_t i) const {
 		case INT8:    return (int64_t)int8[i];
 		case INT32:   return (int64_t)int32[i];
 		case INT64:   return int64[i];
+		case F16:
+		case BF16:    return (int64_t)ndarray_half::load(type, u16[i]);
 		case F32:     return (int64_t)float32[i];
 		case F64:     return (int64_t)float64[i];
 		case UINT256: return (int64_t)(uint64_t)uint256[i];
@@ -1909,6 +1989,8 @@ uint256_t NDArray::loadAsU256(size_t i) const {
 		case INT8:    return uint256_t((int)int8[i]);
 		case INT32:   return uint256_t((int)int32[i]);
 		case INT64:   return uint256_t((uint64_t)int64[i]); // truncates sign bit interpretation
+		case F16:
+		case BF16:    return uint256_t((double)ndarray_half::load(type, u16[i]));
 		case F32:     return uint256_t((double)float32[i]);
 		case F64:     return uint256_t(float64[i]);
 		case UINT256: return uint256[i];
@@ -1927,6 +2009,8 @@ void NDArray::storeFromDouble(size_t i, double v) {
 		case INT8:    int8[i] = (int8_t)v; break;
 		case INT32:   int32[i] = (int32_t)v; break;
 		case INT64:   int64[i] = (int64_t)v; break;
+		case F16:
+		case BF16:    u16[i] = ndarray_half::store(type, (float)v); break;
 		case F32:     float32[i] = (float)v; break;
 		case F64:     float64[i] = v; break;
 		case UINT256: uint256[i] = uint256_t(v); break;
@@ -1943,6 +2027,8 @@ void NDArray::storeFromI64(size_t i, int64_t v) {
 		case INT8:    int8[i] = (int8_t)v; break;
 		case INT32:   int32[i] = (int32_t)v; break;
 		case INT64:   int64[i] = v; break;
+		case F16:
+		case BF16:    u16[i] = ndarray_half::store(type, (float)v); break;
 		case F32:     float32[i] = (float)v; break;
 		case F64:     float64[i] = (double)v; break;
 		case UINT256:
@@ -1964,6 +2050,8 @@ void NDArray::storeFromU256(size_t i, const uint256_t& v) {
 		case INT8:    int8[i] = (int8_t)(uint64_t)v; break;
 		case INT32:   int32[i] = (int32_t)(uint64_t)v; break;
 		case INT64:   int64[i] = (int64_t)(uint64_t)v; break;
+		case F16:
+		case BF16:    u16[i] = ndarray_half::store(type, (float)v.toDouble()); break;
 		case F32:     float32[i] = (float)v.toDouble(); break;
 		case F64:     float64[i] = v.toDouble(); break;
 		case UINT256: uint256[i] = v; break;
@@ -1983,7 +2071,50 @@ NDArray NDArray::convert(NDArrayType newType) const {
 		return result;
 	}
 
-	if (isFloatingPoint(type) || isFloatingPoint(newType)) {
+	if ((type == F16 && newType == F32) || (type == F32 && newType == F16)
+	    || (type == BF16 && newType == F32) || (type == F32 && newType == BF16)
+	    || (type == F16 && newType == F64) || (type == F64 && newType == F16)
+	    || (type == BF16 && newType == F64) || (type == F64 && newType == BF16)
+	    || (type == F16 && newType == BF16) || (type == BF16 && newType == F16)) {
+		if (type == F16 && newType == F32)
+			ndhalf_f16_to_f32(result.float32, u16, n);
+		else if (type == F32 && newType == F16)
+			ndhalf_f32_to_f16(result.u16, float32, n);
+		else if (type == BF16 && newType == F32)
+			ndhalf_bf16_to_f32(result.float32, u16, n);
+		else if (type == F32 && newType == BF16)
+			ndhalf_f32_to_bf16(result.u16, float32, n);
+		else {
+			float tmp[64];
+			for (size_t i = 0; i < n; ) {
+				const size_t m = n - i < 64 ? n - i : 64;
+				if (type == F16 && newType == F64) {
+					ndhalf_f16_to_f32(tmp, u16 + i, m);
+					for (size_t j = 0; j < m; ++j)
+						result.float64[i + j] = (double)tmp[j];
+				} else if (type == F64 && newType == F16) {
+					for (size_t j = 0; j < m; ++j)
+						tmp[j] = (float)float64[i + j];
+					ndhalf_f32_to_f16(result.u16 + i, tmp, m);
+				} else if (type == BF16 && newType == F64) {
+					ndhalf_bf16_to_f32(tmp, u16 + i, m);
+					for (size_t j = 0; j < m; ++j)
+						result.float64[i + j] = (double)tmp[j];
+				} else if (type == F64 && newType == BF16) {
+					for (size_t j = 0; j < m; ++j)
+						tmp[j] = (float)float64[i + j];
+					ndhalf_f32_to_bf16(result.u16 + i, tmp, m);
+				} else if (type == F16 && newType == BF16) {
+					ndhalf_f16_to_f32(tmp, u16 + i, m);
+					ndhalf_f32_to_bf16(result.u16 + i, tmp, m);
+				} else {
+					ndhalf_bf16_to_f32(tmp, u16 + i, m);
+					ndhalf_f32_to_f16(result.u16 + i, tmp, m);
+				}
+				i += m;
+			}
+		}
+	} else if (isFloatingPoint(type) || isFloatingPoint(newType)) {
 		for (size_t i = 0; i < n; ++i)
 			result.storeFromDouble(i, loadAsDouble(i));
 	} else if (isSignedInteger(type) || isSignedInteger(newType)) {
@@ -2006,14 +2137,50 @@ void NDArray::promoteInPlace(NDArrayType newType) {
 
 // ---- in-place same-type kernels --------------------------------------------
 
+static float arithF32(float a, float b, NDArray::ArithOp op) {
+	switch (op) {
+		case NDArray::ArithOp::Add: return a + b;
+		case NDArray::ArithOp::Sub: return a - b;
+		case NDArray::ArithOp::Mul: return a * b;
+		case NDArray::ArithOp::Div: return a / b;
+	}
+	return 0.0f;
+}
+
+static NDHalfArith toHalfArith(NDArray::ArithOp op) {
+	switch (op) {
+		case NDArray::ArithOp::Add: return NDHalfArith::Add;
+		case NDArray::ArithOp::Sub: return NDHalfArith::Sub;
+		case NDArray::ArithOp::Mul: return NDHalfArith::Mul;
+		case NDArray::ArithOp::Div: return NDHalfArith::Div;
+	}
+	return NDHalfArith::Add;
+}
+
+static void halfBinaryInPlace(uint16_t* dst, const uint16_t* src, size_t n,
+                              NDArrayType t, NDArray::ArithOp op) {
+	if (t == F16)
+		ndhalf_arith_f16(dst, dst, src, n, toHalfArith(op));
+	else
+		ndhalf_arith_bf16(dst, dst, src, n, toHalfArith(op));
+}
+
+static void halfBinaryInto(uint16_t* dst, const uint16_t* a, const uint16_t* b, size_t n,
+                           NDArrayType t, NDArray::ArithOp op) {
+	if (t == F16)
+		ndhalf_arith_f16(dst, a, b, n, toHalfArith(op));
+	else
+		ndhalf_arith_bf16(dst, a, b, n, toHalfArith(op));
+}
+
 void NDArray::applyBinaryInPlace(const NDArray& src, ArithOp op) {
 	ensureWritable();
 	const size_t n = numElements();
-	// If src shares our buffer, rebind after ensureWritable; re-read src data pointer via const access.
-	// Self-aliasing (src is *this) is fine — same buffer after single detach.
-	const NDArray* srcPtr = &src;
-	(void)srcPtr;
 	switch (type) {
+		case F16:
+		case BF16:
+			halfBinaryInPlace(u16, src.u16, n, type, op);
+			break;
 		case F32:
 			switch (op) {
 				case ArithOp::Add: addBasic(float32, src.float32, n); break;
@@ -2111,6 +2278,10 @@ void NDArray::applyBinaryInto(const NDArray& a, const NDArray& b, ArithOp op) {
 	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
+		case F16:
+		case BF16:
+			halfBinaryInto(u16, a.u16, b.u16, n, type, op);
+			break;
 		case F32:
 			switch (op) {
 				case ArithOp::Add: addInto(float32, a.float32, b.float32, n); break;
@@ -2223,6 +2394,15 @@ void NDArray::applyDoubleScalarInPlace(double scalar, ArithOp op) {
 	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
+		case F16:
+		case BF16: {
+			float s = (float)scalar;
+			if (type == F16)
+				ndhalf_arith_f16_scalar(u16, u16, s, n, toHalfArith(op));
+			else
+				ndhalf_arith_bf16_scalar(u16, u16, s, n, toHalfArith(op));
+			break;
+		}
 		case F32: {
 			float s = (float)scalar;
 			switch (op) {
@@ -2335,6 +2515,8 @@ void NDArray::applyIntScalarInPlace(int scalar, ArithOp op) {
 	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
+		case F16:
+		case BF16:
 		case F32:
 		case F64:
 			applyDoubleScalarInPlace((double)scalar, op);
@@ -2433,6 +2615,8 @@ void NDArray::applyInt64ScalarInPlace(int64_t scalar, ArithOp op) {
 	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
+		case F16:
+		case BF16:
 		case F32:
 		case F64:
 			applyDoubleScalarInPlace((double)scalar, op);
@@ -2558,7 +2742,7 @@ NDArray& NDArray::scalarDoubleOpInPlace(double other, ArithOp op) {
 
 NDArray& NDArray::scalarIntOpInPlace(int other, ArithOp op) {
 	promoteInPlace(promoteWithIntScalar(type));
-	if (type == F32 || type == F64)
+	if (isFloatingPoint(type))
 		applyDoubleScalarInPlace((double)other, op);
 	else
 		applyIntScalarInPlace(other, op);
@@ -2567,7 +2751,7 @@ NDArray& NDArray::scalarIntOpInPlace(int other, ArithOp op) {
 
 NDArray& NDArray::scalarInt64OpInPlace(int64_t other, ArithOp op) {
 	promoteInPlace(promoteWithInt64Scalar(type));
-	if (type == F32 || type == F64)
+	if (isFloatingPoint(type))
 		applyDoubleScalarInPlace((double)other, op);
 	else
 		applyInt64ScalarInPlace(other, op);
@@ -2583,6 +2767,14 @@ void NDArray::applyBroadcastInPlace(const NDArrayView& src, ArithOp op) {
 	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
+		case F16:
+		case BF16:
+			for (size_t i = 0; i < n; ++i) {
+				float av = ndarray_half::load(type, u16[i]);
+				float bv = (float)ndarray_detail::viewLoadDouble(src, viewElemOffset(src, i));
+				u16[i] = ndarray_half::store(type, arithF32(av, bv, op));
+			}
+			break;
 		case F32:
 			for (size_t i = 0; i < n; ++i) {
 				float b = (float)ndarray_detail::viewLoadDouble(src, viewElemOffset(src, i));
@@ -2767,7 +2959,7 @@ NDArray NDArray::scalarDoubleOp(double other, ArithOp op) const {
 NDArray NDArray::scalarIntOp(int other, ArithOp op) const {
 	NDArrayType rt = promoteWithIntScalar(type);
 	NDArray result = convert(rt);
-	if (rt == F32 || rt == F64)
+	if (isFloatingPoint(rt))
 		result.applyDoubleScalarInPlace((double)other, op);
 	else
 		result.applyIntScalarInPlace(other, op);
@@ -2777,7 +2969,7 @@ NDArray NDArray::scalarIntOp(int other, ArithOp op) const {
 NDArray NDArray::scalarInt64Op(int64_t other, ArithOp op) const {
 	NDArrayType rt = promoteWithInt64Scalar(type);
 	NDArray result = convert(rt);
-	if (rt == F32 || rt == F64)
+	if (isFloatingPoint(rt))
 		result.applyDoubleScalarInPlace((double)other, op);
 	else
 		result.applyInt64ScalarInPlace(other, op);
@@ -2874,8 +3066,10 @@ NDArray& NDArray::mapRealUnary(double (*fn)(double)) {
 	if (type == F64) {
 		for (size_t i = 0; i < n; ++i)
 			float64[i] = fn(float64[i]);
+	} else if (type == F16 || type == BF16) {
+		for (size_t i = 0; i < n; ++i)
+			u16[i] = ndarray_half::store(type, (float)fn((double)ndarray_half::load(type, u16[i])));
 	} else {
-		// F32
 		for (size_t i = 0; i < n; ++i)
 			float32[i] = (float)fn((double)float32[i]);
 	}
@@ -2887,6 +3081,10 @@ NDArray& NDArray::neg() {
 	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
+		case F16:
+		case BF16:
+			for (size_t i = 0; i < n; ++i) u16[i] = (uint16_t)(u16[i] ^ 0x8000u);
+			break;
 		case F32:
 			for (size_t i = 0; i < n; ++i) float32[i] = -float32[i];
 			break;
@@ -2946,6 +3144,10 @@ NDArray& NDArray::abs() {
 	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
+		case F16:
+		case BF16:
+			for (size_t i = 0; i < n; ++i) u16[i] = (uint16_t)(u16[i] & 0x7fffu);
+			break;
 		case F32:
 			for (size_t i = 0; i < n; ++i) float32[i] = std::fabs(float32[i]);
 			break;
@@ -2988,6 +3190,14 @@ NDArray& NDArray::sign() {
 	ensureWritable();
 	const size_t n = numElements();
 	switch (type) {
+		case F16:
+		case BF16:
+			for (size_t i = 0; i < n; ++i) {
+				float v = ndarray_half::load(type, u16[i]);
+				float s = (v > 0.0f) ? 1.0f : ((v < 0.0f) ? -1.0f : 0.0f);
+				u16[i] = ndarray_half::store(type, s);
+			}
+			break;
 		case F32:
 			for (size_t i = 0; i < n; ++i) {
 				float v = float32[i];
@@ -3107,42 +3317,63 @@ NDArray& NDArray::round() {
 
 // ---- binary real functions (return new arrays) -----------------------------
 
+static void mapRealBinary(NDArray& a, const NDArray& b, double (*fn)(double, double)) {
+	const size_t n = a.numElements();
+	if (a.type == F16 || a.type == BF16) {
+		uint16_t* dst = a.data<uint16_t>();
+		const uint16_t* src = b.data<uint16_t>();
+		for (size_t i = 0; i < n; ++i) {
+			double av = ndarray_half::load(a.type, dst[i]);
+			double bv = ndarray_half::load(b.type, src[i]);
+			dst[i] = ndarray_half::store(a.type, (float)fn(av, bv));
+		}
+	} else if (a.type == F32) {
+		float* dst = a.data<float>();
+		const float* src = b.data<float>();
+		for (size_t i = 0; i < n; ++i)
+			dst[i] = (float)fn((double)dst[i], (double)src[i]);
+	} else {
+		double* dst = a.data<double>();
+		const double* src = b.data<double>();
+		for (size_t i = 0; i < n; ++i)
+			dst[i] = fn(dst[i], src[i]);
+	}
+}
+
+static void mapRealBinaryScalar(NDArray& a, double x, double (*fn)(double, double)) {
+	const size_t n = a.numElements();
+	if (a.type == F16 || a.type == BF16) {
+		uint16_t* dst = a.data<uint16_t>();
+		for (size_t i = 0; i < n; ++i) {
+			double av = ndarray_half::load(a.type, dst[i]);
+			dst[i] = ndarray_half::store(a.type, (float)fn(av, x));
+		}
+	} else if (a.type == F32) {
+		float* dst = a.data<float>();
+		for (size_t i = 0; i < n; ++i)
+			dst[i] = (float)fn((double)dst[i], x);
+	} else {
+		double* dst = a.data<double>();
+		for (size_t i = 0; i < n; ++i)
+			dst[i] = fn(dst[i], x);
+	}
+}
+
 NDArray NDArray::atan2(const NDArray& x) const {
 	requireSameShape(*this, x);
-	// Result is real-valued; promote both to a common float type
-	NDArrayType rt = promoteTypes(typeForRealUnary(type), typeForRealUnary(x.type));
-	// typeForRealUnary may throw on UINT256; if both are already F32 keep F32
-	if (type == F32 && x.type == F32)
-		rt = F32;
-	else if (isFloatingPoint(type) && isFloatingPoint(x.type))
-		rt = promoteTypes(type, x.type);
-	else
-		rt = F64;
-
+	NDArrayType rt = (isFloatingPoint(type) && isFloatingPoint(x.type))
+		? promoteTypes(type, x.type)
+		: F64;
 	NDArray y = convert(rt);
 	NDArray xx = x.convert(rt);
-	const size_t n = y.numElements();
-	if (rt == F32) {
-		for (size_t i = 0; i < n; ++i)
-			y.float32[i] = (float)std::atan2((double)y.float32[i], (double)xx.float32[i]);
-	} else {
-		for (size_t i = 0; i < n; ++i)
-			y.float64[i] = std::atan2(y.float64[i], xx.float64[i]);
-	}
+	mapRealBinary(y, xx, std::atan2);
 	return y;
 }
 
 NDArray NDArray::atan2(double x) const {
-	NDArrayType rt = (type == F32) ? F32 : typeForRealUnary(type);
+	NDArrayType rt = isFloatingPoint(type) ? type : typeForRealUnary(type);
 	NDArray y = convert(rt);
-	const size_t n = y.numElements();
-	if (rt == F32) {
-		for (size_t i = 0; i < n; ++i)
-			y.float32[i] = (float)std::atan2((double)y.float32[i], x);
-	} else {
-		for (size_t i = 0; i < n; ++i)
-			y.float64[i] = std::atan2(y.float64[i], x);
-	}
+	mapRealBinaryScalar(y, x, std::atan2);
 	return y;
 }
 
@@ -3151,38 +3382,19 @@ NDArray NDArray::atan2(int x) const { return atan2((double)x); }
 
 NDArray NDArray::hypot(const NDArray& x) const {
 	requireSameShape(*this, x);
-	NDArrayType rt;
-	if (type == F32 && x.type == F32)
-		rt = F32;
-	else if (isFloatingPoint(type) && isFloatingPoint(x.type))
-		rt = promoteTypes(type, x.type);
-	else
-		rt = F64;
-
+	NDArrayType rt = (isFloatingPoint(type) && isFloatingPoint(x.type))
+		? promoteTypes(type, x.type)
+		: F64;
 	NDArray a = convert(rt);
 	NDArray b = x.convert(rt);
-	const size_t n = a.numElements();
-	if (rt == F32) {
-		for (size_t i = 0; i < n; ++i)
-			a.float32[i] = (float)std::hypot((double)a.float32[i], (double)b.float32[i]);
-	} else {
-		for (size_t i = 0; i < n; ++i)
-			a.float64[i] = std::hypot(a.float64[i], b.float64[i]);
-	}
+	mapRealBinary(a, b, std::hypot);
 	return a;
 }
 
 NDArray NDArray::hypot(double x) const {
-	NDArrayType rt = (type == F32) ? F32 : typeForRealUnary(type);
+	NDArrayType rt = isFloatingPoint(type) ? type : typeForRealUnary(type);
 	NDArray a = convert(rt);
-	const size_t n = a.numElements();
-	if (rt == F32) {
-		for (size_t i = 0; i < n; ++i)
-			a.float32[i] = (float)std::hypot((double)a.float32[i], x);
-	} else {
-		for (size_t i = 0; i < n; ++i)
-			a.float64[i] = std::hypot(a.float64[i], x);
-	}
+	mapRealBinaryScalar(a, x, std::hypot);
 	return a;
 }
 
@@ -3341,6 +3553,26 @@ struct NDArray::Impl {
 	static void applyElemBin(NDArray& left, const NDArray& right, ElemBinOp op) {
 		const size_t n = left.numElements();
 		switch (left.type) {
+			case F16:
+			case BF16:
+				if (op == ElemBinOp::Min) {
+					if (left.type == F16)
+						ndhalf_min_f16(left.u16, left.u16, right.u16, n);
+					else
+						ndhalf_min_bf16(left.u16, left.u16, right.u16, n);
+				} else if (op == ElemBinOp::Max) {
+					if (left.type == F16)
+						ndhalf_max_f16(left.u16, left.u16, right.u16, n);
+					else
+						ndhalf_max_bf16(left.u16, left.u16, right.u16, n);
+				} else {
+					for (size_t i = 0; i < n; ++i) {
+						double av = ndarray_half::load(left.type, left.u16[i]);
+						double bv = ndarray_half::load(right.type, right.u16[i]);
+						left.u16[i] = ndarray_half::store(left.type, (float)elemBinDouble(av, bv, op));
+					}
+				}
+				break;
 			case F32:
 				for (size_t i = 0; i < n; ++i)
 					left.float32[i] = (float)elemBinDouble(left.float32[i], right.float32[i], op);
@@ -3396,7 +3628,12 @@ struct NDArray::Impl {
 			rt = promoteTypes(a.type, F64);
 		NDArray left = a.convert(rt);
 		const size_t n = left.numElements();
-		if (left.type == F64) {
+		if (left.type == F16 || left.type == BF16) {
+			for (size_t i = 0; i < n; ++i) {
+				float av = ndarray_half::load(left.type, left.u16[i]);
+				left.u16[i] = ndarray_half::store(left.type, (float)elemBinDouble(av, s, op));
+			}
+		} else if (left.type == F64) {
 			for (size_t i = 0; i < n; ++i)
 				left.float64[i] = elemBinDouble(left.float64[i], s, op);
 		} else if (left.type == F32) {
@@ -3433,7 +3670,12 @@ struct NDArray::Impl {
 		NDArrayType rt = promoteWithFloatScalar(a.type);
 		NDArray left = a.convert(rt);
 		const size_t n = left.numElements();
-		if (left.type == F32) {
+		if (left.type == F16 || left.type == BF16) {
+			for (size_t i = 0; i < n; ++i) {
+				float av = ndarray_half::load(left.type, left.u16[i]);
+				left.u16[i] = ndarray_half::store(left.type, (float)elemBinDouble(av, s, op));
+			}
+		} else if (left.type == F32) {
 			for (size_t i = 0; i < n; ++i)
 				left.float32[i] = (float)elemBinDouble(left.float32[i], s, op);
 		} else {
@@ -3452,13 +3694,14 @@ struct NDArray::Impl {
 			else if (a.type == INT64) rt = INT64;
 			else if (a.type == UINT256 && s >= 0) rt = UINT256;
 			else if (a.type == BINARY && (s == 0 || s == 1)) rt = BINARY;
+			else if (a.type == F16 || a.type == BF16) rt = a.type;
 			else if (a.type == F32) rt = F32;
 			else if (a.type == F64) rt = F64;
 			else rt = promoteWithIntScalar(a.type);
 		}
 		NDArray left = a.convert(rt);
 		const size_t n = left.numElements();
-		if (left.type == F32 || left.type == F64)
+		if (isFloatingPoint(left.type))
 			return elemBinDoubleScalar(left, (double)s, op);
 		if (left.type == INT32) {
 			for (size_t i = 0; i < n; ++i)
@@ -3505,6 +3748,11 @@ struct NDArray::Impl {
 		for (size_t i = 0; i < n; ++i) {
 			bool r = false;
 			switch (ct) {
+				case F16:
+				case BF16:
+					r = cmpDouble(ndarray_half::load(ct, left.u16[i]),
+					              ndarray_half::load(ct, right.u16[i]), op);
+					break;
 				case F32: r = cmpDouble(left.float32[i], right.float32[i], op); break;
 				case F64: r = cmpDouble(left.float64[i], right.float64[i], op); break;
 				case UINT8: r = cmpI64(left.uint8[i], right.uint8[i], op); break;
@@ -3523,17 +3771,9 @@ struct NDArray::Impl {
 
 	static NDArray compareDoubleScalar(const NDArray& a, double s, CmpOp op) {
 		NDArrayType ct;
-		if (isLosslessConversion(a.type, F64) || a.type == F64)
-			ct = (a.type == F32) ? F32 : F64;
-		else if (a.type == F32)
-			ct = F32;
-		else
-			throw std::invalid_argument("NDArray: cannot compare this type with float scalar");
-
-		// Prefer F32 when comparing F32 arrays to float-compatible scalars that fit
 		if (a.type == F32)
 			ct = F32;
-		else if (isLosslessConversion(a.type, F64))
+		else if (a.type == F64 || isLosslessConversion(a.type, F64))
 			ct = F64;
 		else
 			throw std::invalid_argument("NDArray: cannot compare this type with float scalar");
@@ -3591,6 +3831,11 @@ struct NDArray::Impl {
 		for (size_t i = 0; i < n; ++i) {
 			int8_t r = 0;
 			switch (ct) {
+				case F16:
+				case BF16:
+					r = threeWayDouble(ndarray_half::load(ct, left.u16[i]),
+					                   ndarray_half::load(ct, right.u16[i]));
+					break;
 				case F32: r = threeWayDouble(left.float32[i], right.float32[i]); break;
 				case F64: r = threeWayDouble(left.float64[i], right.float64[i]); break;
 				case UINT8: r = threeWayI64(left.uint8[i], right.uint8[i]); break;
@@ -3638,7 +3883,7 @@ struct NDArray::Impl {
 				int3_setSigned(out.uint64, i, threeWayU256(a.uint256[i], su));
 			return out;
 		}
-		if (a.type == F32 || a.type == F64) {
+		if (isFloatingPoint(a.type)) {
 			for (size_t i = 0; i < n; ++i)
 				int3_setSigned(out.uint64, i, threeWayDouble(a.loadAsDouble(i), (double)s));
 			return out;
@@ -3657,7 +3902,7 @@ struct NDArray::Impl {
 			return out;
 		}
 		// Promote left to UINT256 for integer-like types; floats via double.
-		if (a.type == F32 || a.type == F64) {
+		if (isFloatingPoint(a.type)) {
 			double sd = s.toDouble();
 			for (size_t i = 0; i < n; ++i)
 				int3_setSigned(out.uint64, i, threeWayDouble(a.loadAsDouble(i), sd));
@@ -3687,6 +3932,8 @@ struct NDArray::Impl {
 
 	static void copyElement(NDArray& out, size_t oi, const NDArray& src, size_t si) {
 		switch (out.type) {
+			case F16:
+			case BF16: out.u16[oi] = src.u16[si]; break;
 			case F32: out.float32[oi] = src.float32[si]; break;
 			case F64: out.float64[oi] = src.float64[si]; break;
 			case UINT8: out.uint8[oi] = src.uint8[si]; break;
@@ -3704,6 +3951,13 @@ struct NDArray::Impl {
 
 	static void divElement(NDArray& out, size_t i, const NDArray& num, const NDArray& den) {
 		switch (out.type) {
+			case F16:
+			case BF16:
+				out.u16[i] = ndarray_half::store(out.type, arithF32(
+					ndarray_half::load(num.type, num.u16[i]),
+					ndarray_half::load(den.type, den.u16[i]),
+					NDArray::ArithOp::Div));
+				break;
 			case F32: out.float32[i] = num.float32[i] / den.float32[i]; break;
 			case F64: out.float64[i] = num.float64[i] / den.float64[i]; break;
 			case UINT8: out.uint8[i] = (uint8_t)(num.uint8[i] / den.uint8[i]); break;
@@ -3938,6 +4192,8 @@ struct NDArray::Impl {
 template <typename Acc>
 static Acc laneToAcc(const NDArray& a, size_t i) {
 	switch (a.type) {
+		case F16:
+		case BF16:    return Acc(ndarray_half::load(a.type, a.data<uint16_t>()[i]));
 		case F32:     return accFromLane<float, Acc>(a.data<float>()[i]);
 		case F64:     return accFromLane<double, Acc>(a.data<double>()[i]);
 		case UINT8:   return accFromLane<uint8_t, Acc>(a.data<uint8_t>()[i]);
@@ -3956,6 +4212,14 @@ template <typename Acc>
 static Acc sumRange(const NDArray& a, size_t first, size_t count, size_t stride) {
 	if (stride == 1) {
 		switch (a.type) {
+			case F16:
+				if constexpr (std::is_same_v<Acc, float>)
+					return ndhalf_sum_f16(a.data<uint16_t>() + first, count);
+				return Acc(ndhalf_sum_f16(a.data<uint16_t>() + first, count));
+			case BF16:
+				if constexpr (std::is_same_v<Acc, float>)
+					return ndhalf_sum_bf16(a.data<uint16_t>() + first, count);
+				return Acc(ndhalf_sum_bf16(a.data<uint16_t>() + first, count));
 			case F32:
 				if constexpr (std::is_same_v<Acc, float>)
 					return ndreduce_sum_f32(a.data<float>() + first, count);
@@ -4006,6 +4270,8 @@ template <typename Acc>
 static Acc prodRange(const NDArray& a, size_t first, size_t count, size_t stride) {
 	if (stride == 1) {
 		switch (a.type) {
+			case F16:   return Acc(ndhalf_prod_f16(a.data<uint16_t>() + first, count));
+			case BF16:  return Acc(ndhalf_prod_bf16(a.data<uint16_t>() + first, count));
 			case F32:   return denseProd<float, Acc>(a.data<float>() + first, count);
 			case F64:   return denseProd<double, Acc>(a.data<double>() + first, count);
 			case UINT8: return denseProd<uint8_t, Acc>(a.data<uint8_t>() + first, count);
@@ -4051,6 +4317,16 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 		NDArray out({}, a.type);
 		// seed from first element via convert of a single value
 		switch (a.type) {
+			case F16:
+			case BF16: {
+				float acc = ndarray_half::load(a.type, a.u16[0]);
+				for (size_t i = 1; i < n; ++i) {
+					float v = ndarray_half::load(a.type, a.u16[i]);
+					acc = (op == ReduceOp::Min) ? std::fmin(acc, v) : std::fmax(acc, v);
+				}
+				out.u16[0] = ndarray_half::store(a.type, acc);
+				break;
+			}
 			case F32: {
 				float acc = a.float32[0];
 				for (size_t i = 1; i < n; ++i)
@@ -4196,6 +4472,16 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 		for (size_t oi = 0; oi < outN; ++oi) {
 			size_t first = flatIndexWithAxis(a.shape, axis, oi, 0);
 			switch (a.type) {
+				case F16:
+				case BF16: {
+					float acc = ndarray_half::load(a.type, a.u16[first]);
+					for (size_t r = 1; r < reduced; ++r) {
+						float v = ndarray_half::load(a.type, a.u16[flatIndexWithAxis(a.shape, axis, oi, r)]);
+						acc = (op == ReduceOp::Min) ? std::fmin(acc, v) : std::fmax(acc, v);
+					}
+					out.u16[oi] = ndarray_half::store(a.type, acc);
+					break;
+				}
 				case F32: {
 					float acc = a.float32[first];
 					for (size_t r = 1; r < reduced; ++r) {
@@ -4348,7 +4634,7 @@ NDArray NDArray::mod(int other) const { return Impl::elemBinIntScalar(*this, oth
 // int64 scalar min/max/pow/mod: promote to INT64 then run integer kernel
 NDArray NDArray::minimum(int64_t other) const {
 	NDArrayType rt = promoteWithInt64Scalar(type);
-	if (rt == F32 || rt == F64)
+	if (isFloatingPoint(rt))
 		return minimum((double)other);
 	NDArray left = convert(rt);
 	const size_t n = left.numElements();
@@ -4366,7 +4652,7 @@ NDArray NDArray::minimum(int64_t other) const {
 }
 NDArray NDArray::maximum(int64_t other) const {
 	NDArrayType rt = promoteWithInt64Scalar(type);
-	if (rt == F32 || rt == F64)
+	if (isFloatingPoint(rt))
 		return maximum((double)other);
 	NDArray left = convert(rt);
 	const size_t n = left.numElements();
@@ -4384,7 +4670,7 @@ NDArray NDArray::maximum(int64_t other) const {
 }
 NDArray NDArray::pow(int64_t other) const {
 	NDArrayType rt = promoteWithInt64Scalar(type);
-	if (rt == F32 || rt == F64)
+	if (isFloatingPoint(rt))
 		return pow((double)other);
 	NDArray left = convert(rt);
 	const size_t n = left.numElements();
@@ -4406,7 +4692,7 @@ NDArray NDArray::pow(int64_t other) const {
 }
 NDArray NDArray::mod(int64_t other) const {
 	NDArrayType rt = promoteWithInt64Scalar(type);
-	if (rt == F32 || rt == F64)
+	if (isFloatingPoint(rt))
 		return mod((double)other);
 	if (other == 0)
 		throw std::invalid_argument("NDArray::mod: division by zero");
@@ -4660,6 +4946,35 @@ static inline bool f64_match(uint64_t u, FloatClass cls) {
 	return false;
 }
 
+// F16 inf/nan threshold 0x7c00; BF16 uses F32's top 16 bits (0x7f80).
+static inline bool half_match(uint16_t h, NDArrayType t, FloatClass cls) {
+	const uint16_t absv = (uint16_t)(h & 0x7fffu);
+	const uint16_t infb = (t == F16) ? (uint16_t)0x7c00u : (uint16_t)0x7f80u;
+	switch (cls) {
+		case FloatClass::Finite: return absv < infb;
+		case FloatClass::Infinite: return absv == infb;
+		case FloatClass::NaN: return absv > infb;
+	}
+	return false;
+}
+
+static void classifyHalfToBinary(uint64_t* outWords, const uint16_t* src, size_t n,
+                                 NDArrayType t, FloatClass cls) {
+	size_t i = 0;
+	for (; i < n; ) {
+		const size_t wordIndex = i / 64;
+		const size_t base = wordIndex * 64;
+		const size_t count = n - base < 64 ? n - base : 64;
+		uint64_t word = 0;
+		for (size_t j = 0; j < count; ++j) {
+			if (half_match(src[base + j], t, cls))
+				word |= uint64_t(1) << j;
+		}
+		outWords[wordIndex] = word;
+		i = base + count;
+	}
+}
+
 /** Classify F32 → BINARY: one output word at a time (64 lanes). Portable path. */
 static void classifyF32ToBinary(uint64_t* outWords, const float* src, size_t n, FloatClass cls) {
 	size_t i = 0;
@@ -4756,7 +5071,9 @@ static void classifyF64ToBinary(uint64_t* outWords, const double* src, size_t n,
 NDArray NDArray::isFinite() const {
 	const size_t n = numElements();
 	NDArray out(shape, BINARY); // zero-filled
-	if (type == F32) {
+	if (type == F16 || type == BF16) {
+		classifyHalfToBinary(out.uint64, u16, n, type, FloatClass::Finite);
+	} else if (type == F32) {
 		classifyF32ToBinary(out.uint64, float32, n, FloatClass::Finite);
 	} else if (type == F64) {
 		classifyF64ToBinary(out.uint64, float64, n, FloatClass::Finite);
@@ -4770,7 +5087,9 @@ NDArray NDArray::isFinite() const {
 NDArray NDArray::isInfinite() const {
 	const size_t n = numElements();
 	NDArray out(shape, BINARY); // already all-zero from ctor
-	if (type == F32)
+	if (type == F16 || type == BF16)
+		classifyHalfToBinary(out.uint64, u16, n, type, FloatClass::Infinite);
+	else if (type == F32)
 		classifyF32ToBinary(out.uint64, float32, n, FloatClass::Infinite);
 	else if (type == F64)
 		classifyF64ToBinary(out.uint64, float64, n, FloatClass::Infinite);
@@ -4781,7 +5100,9 @@ NDArray NDArray::isInfinite() const {
 NDArray NDArray::isNaN() const {
 	const size_t n = numElements();
 	NDArray out(shape, BINARY); // already all-zero from ctor
-	if (type == F32)
+	if (type == F16 || type == BF16)
+		classifyHalfToBinary(out.uint64, u16, n, type, FloatClass::NaN);
+	else if (type == F32)
 		classifyF32ToBinary(out.uint64, float32, n, FloatClass::NaN);
 	else if (type == F64)
 		classifyF64ToBinary(out.uint64, float64, n, FloatClass::NaN);
@@ -4795,6 +5116,12 @@ NDArray NDArray::asBinary() const {
 	const size_t n = numElements();
 	NDArray out(shape, BINARY);
 	switch (type) {
+		case F16:
+		case BF16:
+			for (size_t i = 0; i < n; ++i)
+				if (ndarray_half::load(type, u16[i]) != 0.0f)
+					binarySet(out.uint64, i, 1);
+			break;
 		case F32:
 			nonzeroF32ToBinary(out.uint64, float32, n);
 			break;
@@ -5182,6 +5509,12 @@ bool NDArray::any() const {
 					return true;
 			return false;
 		}
+		case F16:
+		case BF16:
+			for (size_t i = 0; i < n; ++i)
+				if ((u16[i] & 0x7fffu) != 0)
+					return true;
+			return false;
 		case F32: {
 			size_t i = 0;
 #if LIBEXCESSIVE_NDARRAY_AVX512
@@ -5304,6 +5637,12 @@ bool NDArray::all() const {
 					return false;
 			return true;
 		}
+		case F16:
+		case BF16:
+			for (size_t i = 0; i < n; ++i)
+				if ((u16[i] & 0x7fffu) == 0)
+					return false;
+			return true;
 		case F32: {
 			size_t i = 0;
 #if LIBEXCESSIVE_NDARRAY_AVX512
@@ -5383,6 +5722,9 @@ int NDArray::countNonzero() const {
 	else if (type == INT64)
 		for (size_t i = 0; i < memorySize / 8; i++)
 			total += int64[i] != 0 ? 1 : 0;
+	else if (type == F16 || type == BF16)
+		for (size_t i = 0; i < numElements(); i++)
+			total += (u16[i] & 0x7fffu) != 0 ? 1 : 0;
 	else if (type == F32)
 		for (size_t i = 0; i < memorySize / 4; i++)
 			total += float32[i] != 0 ? 1 : 0;
@@ -5412,6 +5754,12 @@ static int cmpViewOffsets(const NDArrayView& v, size_t ea, size_t eb) {
 	if (!d)
 		throw std::invalid_argument("NDArray: cannot argmin/argmax an empty array");
 	switch (v.getType()) {
+		case F16:
+		case BF16: {
+			float x = ndarray_half::load(v.getType(), ((const uint16_t*)d)[ea]);
+			float y = ndarray_half::load(v.getType(), ((const uint16_t*)d)[eb]);
+			return (x < y) ? -1 : (y < x) ? 1 : 0;
+		}
 		case F32: {
 			float x = ((const float*)d)[ea], y = ((const float*)d)[eb];
 			return (x < y) ? -1 : (y < x) ? 1 : 0;

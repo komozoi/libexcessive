@@ -46,6 +46,21 @@ static void expectEqualPacked(const NDArrayView& v, const NDArray& owned) {
 }
 
 
+TEST(NDArray_wrap, F16_BitsRoundTrip) {
+	alignas(2) uint16_t bits[3] = {
+		ndarray_half::f32ToF16(1.0f),
+		ndarray_half::f32ToF16(-2.0f),
+		ndarray_half::f32ToF16(0.5f)
+	};
+	NDArray w = NDArray::wrap(bits, sizeof(bits), {3}, F16);
+	EXPECT_EQ(w.data(), (void*)bits);
+	EXPECT_FLOAT_EQ(w.get<float>({0}), 1.0f);
+	EXPECT_FLOAT_EQ(w.get<float>({1}), -2.0f);
+	EXPECT_FLOAT_EQ(w.get<float>({2}), 0.5f);
+	w.set({0}, 4.0f);
+	EXPECT_EQ(bits[0], ndarray_half::f32ToF16(4.0f));
+}
+
 TEST(NDArray_wrap, DataReturnsCallerPointer) {
 	float buf[4] = {1.0f, 2.0f, 3.0f, 4.0f};
 	NDArray w = NDArray::wrap(buf, sizeof(buf), {4}, F32);

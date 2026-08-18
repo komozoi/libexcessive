@@ -20,6 +20,7 @@
 
 #include "bigint.h"
 #include "stdint.h"
+#include <cstring>
 #include <stdexcept>
 #include <type_traits>
 
@@ -47,7 +48,10 @@ enum NDArrayType {
 	// Float types
 	//F4 = 0x44,
 	//F8 = 0x48,
-	//F16 = 0x4A,
+	/** IEEE binary16 (1-5-10). Same-type arithmetic stays F16 (compute via F32). */
+	F16 = 0x4A,
+	/** bfloat16 (F32 exponent, 7-bit mantissa). Same-type arithmetic stays BF16. */
+	BF16 = 0x4B,
 	F32 = 0x4C,
 	F64 = 0x4E,
 
@@ -55,6 +59,87 @@ enum NDArrayType {
 	UINT256 = 0x88
 };
 
+namespace ndarray_half {
+	inline float f16ToF32(uint16_t h) {
+		const uint32_t sign = (uint32_t)(h & 0x8000u) << 16;
+		const uint32_t exp = (h >> 10) & 0x1fu;
+		uint32_t man = h & 0x3ffu;
+		uint32_t bits;
+		if (exp == 0) {
+			if (man == 0) {
+				bits = sign;
+			} else {
+				int32_t e = 127 - 14;
+				while ((man & 0x400u) == 0) {
+					man <<= 1;
+					--e;
+				}
+				man &= 0x3ffu;
+				bits = sign | ((uint32_t)e << 23) | (man << 13);
+			}
+		} else if (exp == 31) {
+			bits = sign | 0x7f800000u | (man << 13);
+		} else {
+			bits = sign | ((exp + (127u - 15u)) << 23) | (man << 13);
+		}
+		float f;
+		std::memcpy(&f, &bits, 4);
+		return f;
+	}
+
+	inline uint16_t f32ToF16(float f) {
+		uint32_t bits;
+		std::memcpy(&bits, &f, 4);
+		const uint32_t sign = (bits >> 16) & 0x8000u;
+		const int32_t exp = (int32_t)((bits >> 23) & 0xff) - 127 + 15;
+		const uint32_t man = bits & 0x7fffffu;
+		if ((bits & 0x7fffffffu) > 0x7f800000u)
+			return (uint16_t)(sign | 0x7e00u | (man >> 13));
+		if (exp >= 31)
+			return (uint16_t)(sign | 0x7c00u);
+		if (exp <= 0) {
+			if (exp < -10)
+				return (uint16_t)sign;
+			const uint32_t m = man | 0x800000u;
+			const uint32_t shift = (uint32_t)(1 - exp);
+			uint32_t half = m >> (13 + shift);
+			const uint32_t rem = m & ((1u << (13 + shift)) - 1u);
+			const uint32_t mid = 1u << (12 + shift);
+			if (rem > mid || (rem == mid && (half & 1u)))
+				++half;
+			return (uint16_t)(sign | half);
+		}
+		uint32_t half = ((uint32_t)exp << 10) | (man >> 13);
+		const uint32_t rem = man & 0x1fffu;
+		if (rem > 0x1000u || (rem == 0x1000u && (half & 1u)))
+			++half;
+		return (uint16_t)(sign | half);
+	}
+
+	inline float bf16ToF32(uint16_t h) {
+		const uint32_t bits = (uint32_t)h << 16;
+		float f;
+		std::memcpy(&f, &bits, 4);
+		return f;
+	}
+
+	inline uint16_t f32ToBf16(float f) {
+		uint32_t bits;
+		std::memcpy(&bits, &f, 4);
+		if ((bits & 0x7fffffffu) > 0x7f800000u)
+			return (uint16_t)((bits >> 16) | 0x0040u);
+		const uint32_t lsb = (bits >> 16) & 1u;
+		bits += 0x7fffu + lsb;
+		return (uint16_t)(bits >> 16);
+	}
+
+	inline float load(NDArrayType t, uint16_t bits) {
+		return t == F16 ? f16ToF32(bits) : bf16ToF32(bits);
+	}
+	inline uint16_t store(NDArrayType t, float v) {
+		return t == F16 ? f32ToF16(v) : f32ToBf16(v);
+	}
+}
 
 /**
  * Shared contiguous buffer for NDArray / NDArrayView (managed via sp<> CoW).
@@ -668,7 +753,7 @@ public:
 	NDArray& log2();
 	NDArray& log10();
 	NDArray& log1p();
-	// Trigonometric (radians), inverse, hyperbolic — in place; promote to F32/F64 as needed
+	// Trigonometric (radians), inverse, hyperbolic — in place; stay in current float width
 	NDArray& sin();
 	NDArray& cos();
 	NDArray& tan();
@@ -1207,6 +1292,9 @@ private:
 						: uint256_t((uint64_t)int64[offset]);
 				else
 					return static_cast<T>(int64[offset]);
+			case F16:
+			case BF16:
+				return static_cast<T>(ndarray_half::load(type, u16[offset]));
 			case F32:
 				return static_cast<T>(float32[offset]);
 			case F64:
@@ -1268,6 +1356,10 @@ private:
 				case INT64:
 					int64[offset] = (int64_t)(uint64_t)value;
 					break;
+				case F16:
+				case BF16:
+					u16[offset] = ndarray_half::store(type, (float)value.toDouble());
+					break;
 				case F32:
 					float32[offset] = (float)value.toDouble();
 					break;
@@ -1305,6 +1397,10 @@ private:
 					break;
 				case INT64:
 					int64[offset] = static_cast<int64_t>(value);
+					break;
+				case F16:
+				case BF16:
+					u16[offset] = ndarray_half::store(type, static_cast<float>(value));
 					break;
 				case F32:
 					float32[offset] = static_cast<float>(value);
@@ -1426,6 +1522,7 @@ private:
 		// Used for uint64 *and* binary encoding
 		uint64_t* uint64;
 
+		uint16_t* u16;
 		float* float32;
 		double* float64;
 
@@ -1453,6 +1550,8 @@ static bool ndarrayDataTypeMatches(NDArrayType t) {
 		return t == INT64;
 	else if constexpr (std::is_same_v<T, uint256_t>)
 		return t == UINT256;
+	else if constexpr (std::is_same_v<T, uint16_t>)
+		return t == F16 || t == BF16;
 	else if constexpr (std::is_same_v<T, uint64_t>)
 		return t == BINARY || t == INT3;
 	else

@@ -10,12 +10,59 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
+
 #include "NDArray.h"
 
 
 // ============================================================
 // Explicit convert() — the only API that may drop precision
 // ============================================================
+
+TEST(NDArray_conversions, F16_RoundTrip_F32) {
+	NDArray a(ArrayList({1.0f, -2.5f, 0.0f, 0.5f, 1024.0f}));
+	NDArray h = a.convert(F16);
+	EXPECT_EQ(h.type, F16);
+	EXPECT_EQ(h.byteSize(), 5 * 2);
+	NDArray back = h.convert(F32);
+	EXPECT_FLOAT_EQ(back.get<float>({0}), 1.0f);
+	EXPECT_FLOAT_EQ(back.get<float>({1}), -2.5f);
+	EXPECT_FLOAT_EQ(back.get<float>({2}), 0.0f);
+	EXPECT_FLOAT_EQ(back.get<float>({3}), 0.5f);
+	EXPECT_FLOAT_EQ(back.get<float>({4}), 1024.0f);
+	EXPECT_EQ(h.data<uint16_t>()[0], ndarray_half::f32ToF16(1.0f));
+}
+
+TEST(NDArray_conversions, BF16_RoundTrip_F32) {
+	NDArray a(ArrayList({1.0f, -2.0f, 3.5f, 256.0f}));
+	NDArray h = a.convert(BF16);
+	EXPECT_EQ(h.type, BF16);
+	NDArray back = h.convert(F32);
+	EXPECT_FLOAT_EQ(back.get<float>({0}), 1.0f);
+	EXPECT_FLOAT_EQ(back.get<float>({1}), -2.0f);
+	EXPECT_FLOAT_EQ(back.get<float>({2}), 3.5f);
+	EXPECT_FLOAT_EQ(back.get<float>({3}), 256.0f);
+}
+
+TEST(NDArray_conversions, F16_ClassifyAndCount) {
+	NDArray a({4}, F16);
+	a.set({0}, 1.0f);
+	a.set({1}, 0.0f);
+	a.set({2}, std::numeric_limits<float>::infinity());
+	a.set({3}, std::numeric_limits<float>::quiet_NaN());
+	NDArray fin = a.isFinite();
+	EXPECT_EQ(fin.get<int>({0}), 1);
+	EXPECT_EQ(fin.get<int>({1}), 1);
+	EXPECT_EQ(fin.get<int>({2}), 0);
+	EXPECT_EQ(fin.get<int>({3}), 0);
+	NDArray inf = a.isInfinite();
+	EXPECT_EQ(inf.get<int>({2}), 1);
+	EXPECT_EQ(inf.get<int>({0}), 0);
+	NDArray nan = a.isNaN();
+	EXPECT_EQ(nan.get<int>({3}), 1);
+	EXPECT_EQ(nan.get<int>({0}), 0);
+	EXPECT_EQ(a.countNonzero(), 3);
+}
 
 TEST(NDArray_conversions, SameType_IsCopy) {
 	NDArray a(ArrayList({1.0f, 2.0f, 3.0f}));

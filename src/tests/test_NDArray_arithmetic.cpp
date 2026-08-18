@@ -83,6 +83,97 @@ TEST(NDArray_arithmetic, UINT256_AddMul) {
 // Type promotion — never lose precision unless convert() was used
 // ============================================================
 
+TEST(NDArray_arithmetic, F16_Add_StaysF16) {
+	NDArray a({3}, F16);
+	NDArray b({3}, F16);
+	a.set({0}, 1.0f);
+	a.set({1}, 2.0f);
+	a.set({2}, 0.5f);
+	b.set({0}, 3.0f);
+	b.set({1}, 4.0f);
+	b.set({2}, 0.5f);
+	NDArray c = a + b;
+	EXPECT_EQ(c.type, F16);
+	EXPECT_FLOAT_EQ(c.get<float>({0}), 4.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({1}), 6.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({2}), 1.0f);
+	EXPECT_EQ(a.type, F16);
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 1.0f);
+
+	a += b;
+	EXPECT_EQ(a.type, F16);
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 4.0f);
+
+	NDArray d = a + 1.0f;
+	EXPECT_EQ(d.type, F16);
+	EXPECT_FLOAT_EQ(d.get<float>({0}), 5.0f);
+	a += 1;
+	EXPECT_EQ(a.type, F16);
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 5.0f);
+}
+
+TEST(NDArray_arithmetic, BF16_Add_StaysBF16) {
+	NDArray a({2}, BF16);
+	NDArray b({2}, BF16);
+	a.set({0}, 1.5f);
+	a.set({1}, -0.5f);
+	b.set({0}, 2.5f);
+	b.set({1}, 0.5f);
+	NDArray c = a + b;
+	EXPECT_EQ(c.type, BF16);
+	EXPECT_FLOAT_EQ(c.get<float>({0}), 4.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({1}), 0.0f);
+}
+
+TEST(NDArray_arithmetic, BF16_Add_F32) {
+	NDArray a({2}, BF16);
+	a.set({0}, 1.5f);
+	a.set({1}, -0.5f);
+	NDArray b(ArrayList({2.5f, 0.5f}));
+	NDArray c = a + b;
+	EXPECT_EQ(c.type, F32);
+	EXPECT_FLOAT_EQ(c.get<float>({0}), 4.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({1}), 0.0f);
+}
+
+TEST(NDArray_arithmetic, F16_UnaryAndCompare_StayHalf) {
+	NDArray a({3}, F16);
+	a.set({0}, -2.0f);
+	a.set({1}, 0.0f);
+	a.set({2}, 1.0f);
+	NDArray n = a.negated();
+	EXPECT_EQ(n.type, F16);
+	EXPECT_FLOAT_EQ(n.get<float>({0}), 2.0f);
+	EXPECT_FLOAT_EQ(n.get<float>({2}), -1.0f);
+
+	NDArray s = a;
+	s.sin();
+	EXPECT_EQ(s.type, F16);
+
+	NDArray b({3}, F16);
+	b.set({0}, -2.0f);
+	b.set({1}, 1.0f);
+	b.set({2}, 1.0f);
+	NDArray eq = a.equal(b);
+	EXPECT_EQ(eq.type, BINARY);
+	EXPECT_EQ(eq.get<int>({0}), 1);
+	EXPECT_EQ(eq.get<int>({1}), 0);
+	EXPECT_EQ(eq.get<int>({2}), 1);
+
+	NDArray cmp = a.compare(b);
+	EXPECT_EQ(cmp.type, INT3);
+	EXPECT_EQ(cmp.get<int>({0}), 0);
+	EXPECT_EQ(cmp.get<int>({1}), -1);
+
+	NDArray m = a.minimum(b);
+	EXPECT_EQ(m.type, F16);
+	EXPECT_FLOAT_EQ(m.get<float>({1}), 0.0f);
+	NDArray m1 = a.minimum(1.0f);
+	EXPECT_EQ(m1.type, F16);
+	EXPECT_FLOAT_EQ(m1.get<float>({0}), -2.0f);
+	EXPECT_FLOAT_EQ(m1.get<float>({2}), 1.0f);
+}
+
 TEST(NDArray_arithmetic, INT8_Add_StaysINT8) {
 	NDArray a({3}, INT8);
 	NDArray b({3}, INT8);

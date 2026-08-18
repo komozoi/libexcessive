@@ -6,6 +6,7 @@
 #include "NDArray.h"
 #include "fs/FdHandle.h"
 #include "ndarray_int3.h"
+#include "ndarray_half_kernels.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -91,6 +92,9 @@ static NDArrayType matmulResultType(NDArrayType t) {
 		case F64:
 		case UINT256:
 			return t;
+		case F16:
+		case BF16:
+			return F32;
 		default:
 			throw std::invalid_argument("NDArray::matmul - unsupported type");
 	}
@@ -107,6 +111,9 @@ static size_t denseElemSize(NDArrayType t) {
 		case INT8:
 		case UINT8:
 			return 1;
+		case F16:
+		case BF16:
+			return 2;
 		case UINT256:
 			return 32;
 		default:
@@ -553,6 +560,137 @@ static void gemmF32(const float* A, int lda, const float* B, int ldb,
 	job.wrapA = wrapA;
 	job.wrapB = wrapB;
 	ndmRunNStrips(N, kNR, (size_t)M * (size_t)N * (size_t)K, gemmF32Strip, &job);
+}
+
+enum class NdmHalf { F16, BF16 };
+
+static void packA_half(NdmHalf h, const uint16_t* A, int lda, int i0, int mb, int k0, int kb, float* Ap) {
+	for (int i = 0; i < mb; ++i) {
+		const uint16_t* row = A + (size_t)(i0 + i) * (size_t)lda + (size_t)k0;
+		if (h == NdmHalf::F16)
+			ndhalf_f16_to_f32(Ap + (size_t)i * (size_t)kb, row, (size_t)kb);
+		else
+			ndhalf_bf16_to_f32(Ap + (size_t)i * (size_t)kb, row, (size_t)kb);
+	}
+}
+
+static void packB_half(NdmHalf h, const uint16_t* B, int ldb, int k0, int kb, int j0, int nb, float* Bp) {
+	float tmp[16];
+	for (int k = 0; k < kb; ++k) {
+		const uint16_t* row = B + (size_t)(k0 + k) * (size_t)ldb + (size_t)j0;
+		if (h == NdmHalf::F16)
+			ndhalf_f16_to_f32(tmp, row, (size_t)nb);
+		else
+			ndhalf_bf16_to_f32(tmp, row, (size_t)nb);
+		memcpy(Bp + (size_t)k * (size_t)kNR, tmp, (size_t)nb * sizeof(float));
+		if (nb < kNR)
+			memset(Bp + (size_t)k * (size_t)kNR + (size_t)nb, 0, (size_t)(kNR - nb) * sizeof(float));
+	}
+}
+
+struct HalfJob {
+	NdmHalf half;
+	const uint16_t* A;
+	const uint16_t* B;
+	float* C;
+	int lda, ldb, ldc, M, N, K;
+	bool wrapA, wrapB;
+};
+
+static void gemmHalfStrip(void* ctx, int j0, int j1) {
+	const HalfJob* job = (const HalfJob*)ctx;
+	const uint16_t* A = job->A;
+	const uint16_t* B = job->B;
+	float* C = job->C;
+	int lda = job->lda;
+	int ldb = job->ldb;
+	int ldc = job->ldc;
+	int M = job->M;
+	int K = job->K;
+	NdmHalf h = job->half;
+	bool wrapA = job->wrapA;
+	bool wrapB = job->wrapB;
+	float* Bp = (float*)alloc64((size_t)kKC * (size_t)kNR * sizeof(float));
+	float* Ap = (float*)alloc64((size_t)kMC * (size_t)kKC * sizeof(float));
+
+	for (int kc = 0; kc < K; kc += kKC) {
+		int kb = K - kc;
+		if (kb > kKC)
+			kb = kKC;
+		advisePanel(B, 2, ldb, kc, kb, j0, j1 - j0, wrapB);
+		for (int ic = 0; ic < M; ic += kMC) {
+			int mb = M - ic;
+			if (mb > kMC)
+				mb = kMC;
+			advisePanel(A, 2, lda, ic, mb, kc, kb, wrapA);
+			packA_half(h, A, lda, ic, mb, kc, kb, Ap);
+			for (int jc = j0; jc < j1; jc += kNR) {
+				int nb = j1 - jc;
+				if (nb > kNR)
+					nb = kNR;
+				packB_half(h, B, ldb, kc, kb, jc, nb, Bp);
+				for (int ir = 0; ir < mb; ) {
+					int mr = mb - ir;
+					if (mr > kMR)
+						mr = kMR;
+					float* Cp = C + (size_t)(ic + ir) * (size_t)ldc + (size_t)jc;
+					const float* Apanel = Ap + (size_t)ir * (size_t)kb;
+#if NDM_AVX512
+					if (nb == 16 && mr == 8)
+						kernelF32_8x16(Apanel, kb, Bp, Cp, ldc, kb);
+					else if (nb == 16)
+						kernelF32_mx16(Apanel, kb, Bp, Cp, ldc, kb, mr);
+					else if (mr == 8)
+						kernelF32_8x16m(Apanel, kb, Bp, Cp, ldc, kb, nb);
+					else
+						kernelF32_mx16m(Apanel, kb, Bp, Cp, ldc, kb, mr, nb);
+#else
+#if NDM_AVX2
+					if (nb == 8 && mr == 8)
+						kernelF32_8x8(Apanel, kb, Bp, Cp, ldc, kb);
+					else
+#endif
+#if NDM_NEON
+					if (nb == 8 && mr == 8)
+						kernelF32_8x8_neon(Apanel, kb, Bp, Cp, ldc, kb);
+					else
+#endif
+						kernelF32_scalar(Apanel, kb, Bp, Cp, ldc, kb, mr, nb);
+#endif
+					ir += mr;
+				}
+			}
+		}
+	}
+	free64(Ap);
+	free64(Bp);
+}
+
+static void gemmHalf(NdmHalf h, const uint16_t* A, int lda, const uint16_t* B, int ldb,
+                     float* C, int ldc, int M, int N, int K, bool wrapA, bool wrapB) {
+	memset(C, 0, (size_t)M * (size_t)ldc * sizeof(float));
+	HalfJob job;
+	job.half = h;
+	job.A = A;
+	job.B = B;
+	job.C = C;
+	job.lda = lda;
+	job.ldb = ldb;
+	job.ldc = ldc;
+	job.M = M;
+	job.N = N;
+	job.K = K;
+	job.wrapA = wrapA;
+	job.wrapB = wrapB;
+	ndmRunNStrips(N, kNR, (size_t)M * (size_t)N * (size_t)K, gemmHalfStrip, &job);
+}
+
+static void gemvHalf(NdmHalf h, const uint16_t* A, int lda, const uint16_t* x, float* y, int M, int K) {
+	for (int i = 0; i < M; ++i) {
+		const uint16_t* row = A + (size_t)i * (size_t)lda;
+		y[i] = (h == NdmHalf::F16) ? ndhalf_dot_f16(row, x, (size_t)K)
+		                           : ndhalf_dot_bf16(row, x, (size_t)K);
+	}
 }
 
 
@@ -1743,6 +1881,10 @@ static NDArray dense2d(const NDArrayView& v, int rows, int cols, int batch, int 
 			else
 				e += (size_t)b * st.get(0) + (size_t)i * st.get(1) + (size_t)j * st.get(2);
 			switch (v.getType()) {
+				case F16:
+				case BF16:
+					out.set({i, j}, ndarray_half::load(v.getType(), ((const uint16_t*)v.data())[e]));
+					break;
 				case F32: out.set({i, j}, ((const float*)v.data())[e]); break;
 				case F64: out.set({i, j}, ((const double*)v.data())[e]); break;
 				case UINT256: out.set({i, j}, ((const uint256_t*)v.data())[e]); break;
@@ -1811,6 +1953,12 @@ static NDArray gemmRaw(NDArrayType type, const void* ap, int lda, const void* bp
 
 	if (N == 1) {
 		switch (type) {
+			case F16:
+				gemvHalf(NdmHalf::F16, (const uint16_t*)ap, lda, (const uint16_t*)bp, (float*)cp, M, K);
+				return c;
+			case BF16:
+				gemvHalf(NdmHalf::BF16, (const uint16_t*)ap, lda, (const uint16_t*)bp, (float*)cp, M, K);
+				return c;
 			case F32:
 				gemvDense<float, float, float>((const float*)ap, lda, (const float*)bp, (float*)cp, M, K);
 				return c;
@@ -1835,6 +1983,14 @@ static NDArray gemmRaw(NDArrayType type, const void* ap, int lda, const void* bp
 	}
 
 	switch (type) {
+		case F16:
+			gemmHalf(NdmHalf::F16, (const uint16_t*)ap, lda, (const uint16_t*)bp, ldb,
+			         (float*)cp, N, M, N, K, wrapA, wrapB);
+			break;
+		case BF16:
+			gemmHalf(NdmHalf::BF16, (const uint16_t*)ap, lda, (const uint16_t*)bp, ldb,
+			         (float*)cp, N, M, N, K, wrapA, wrapB);
+			break;
 		case F32:
 			gemmF32((const float*)ap, lda, (const float*)bp, ldb, (float*)cp, N, M, N, K, wrapA, wrapB);
 			break;
