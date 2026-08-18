@@ -325,6 +325,12 @@ public:
 	bool ownsStorage() const;
 
 	/**
+	 * Number of owned packed-buffer allocations (malloc of NDArrayBuffer data).
+	 * Wraps do not increment. CoW snapshots do. For tests / instrumentation.
+	 */
+	static size_t ownedBufferAllocCount();
+
+	/**
 	 * Packed storage base, or nullptr if empty.
 	 * Invalid after destroy, CoW detach, or any buffer replacement.
 	 */
@@ -417,7 +423,26 @@ public:
 
 	/*
 	** Mathematical operations (operator overloads also present, these are the basic forms)
+	**
+	** add/sub/mul/div and += mutate *this (CoW-detach if the buffer is shared).
+	** Operators and binaryOp allocate one result and do not convert() a side
+	** that already has the promoted type. binaryOpInto writes a caller-owned dest.
 	*/
+
+	enum class ArithOp { Add, Sub, Mul, Div };
+
+	/**
+	 * dst[i] = a[i] ⊕ b[i]. dst must already have the promoted result type
+	 * and the same shape as a and b. Does not allocate dst's buffer.
+	 * Converts a and/or b only when that side is not already resultType.
+	 */
+	static void binaryOpInto(NDArray& dst, const NDArray& a, const NDArray& b, ArithOp op);
+
+	/**
+	 * Element-wise a ⊕ other into a new owned array (same shape).
+	 * Same-type operands skip convert(); only a mismatched side is converted.
+	 */
+	NDArray binaryOp(const NDArray& other, ArithOp op) const;
 
 	/**
 	 * Adds two NDArrays of the same shape element-wise.
@@ -1018,8 +1043,6 @@ public:
 	NDArrayType type;
 
 private:
-	enum class ArithOp { Add, Sub, Mul, Div };
-
 	/** .cpp-only helpers that need access to storage pointers. */
 	struct Impl;
 	friend struct Impl;
@@ -1207,6 +1230,8 @@ private:
 	void promoteInPlace(NDArrayType newType);
 
 	void applyBinaryInPlace(const NDArray& src, ArithOp op);
+	/** *this[i] = a[i] ⊕ b[i]. a and b must already match this->type. */
+	void applyBinaryInto(const NDArray& a, const NDArray& b, ArithOp op);
 	void applyFloatScalarInPlace(float scalar, ArithOp op);
 	void applyDoubleScalarInPlace(double scalar, ArithOp op);
 	void applyIntScalarInPlace(int scalar, ArithOp op);
@@ -1230,7 +1255,6 @@ private:
 	/** Apply broadcast op; requires same type and prefix shape. */
 	void applyBroadcastInPlace(const NDArrayView& src, ArithOp op);
 
-	NDArray binaryOp(const NDArray& other, ArithOp op) const;
 	NDArray scalarFloatOp(float other, ArithOp op) const;
 	NDArray scalarDoubleOp(double other, ArithOp op) const;
 	NDArray scalarIntOp(int other, ArithOp op) const;

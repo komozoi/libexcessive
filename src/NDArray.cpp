@@ -13,6 +13,7 @@
 #include "ndarray_score.h"
 #include "ndarray_matmul.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -39,6 +40,9 @@
 ** may request a potentially lossy cast.
 **
 ** Unary *methods* mutate in place.  Operators return new arrays (copy).
+** Same-type a+b allocates one result and writes into it (no convert() of
+** either side). Mixed-type converts only the side that is not resultType.
+** binaryOpInto never allocates dest; add/+= remain the in-place API.
 */
 
 static bool isFloatingPoint(NDArrayType type) {
@@ -223,6 +227,26 @@ static void divBasic(A* a, B* b, size_t size) {
 	for (size_t i = 0; i < size; ++i)
 		a[i] /= (A)b[i];
 }
+template<typename T>
+static void addInto(T* dst, const T* a, const T* b, size_t n) {
+	for (size_t i = 0; i < n; ++i)
+		dst[i] = (T)(a[i] + b[i]);
+}
+template<typename T>
+static void subInto(T* dst, const T* a, const T* b, size_t n) {
+	for (size_t i = 0; i < n; ++i)
+		dst[i] = (T)(a[i] - b[i]);
+}
+template<typename T>
+static void mulInto(T* dst, const T* a, const T* b, size_t n) {
+	for (size_t i = 0; i < n; ++i)
+		dst[i] = (T)(a[i] * b[i]);
+}
+template<typename T>
+static void divInto(T* dst, const T* a, const T* b, size_t n) {
+	for (size_t i = 0; i < n; ++i)
+		dst[i] = (T)(a[i] / b[i]);
+}
 template<typename A, typename B>
 static void addBasic(A* a, B b, size_t size) {
 	for (size_t i = 0; i < size; ++i)
@@ -289,15 +313,29 @@ static void requireSameShape(const NDArray& a, const NDArray& b) {
 			throw std::invalid_argument("NDArray: shape mismatch");
 }
 
+static const NDArray& maybeConvert(const NDArray& src, NDArrayType resultType, NDArray& storage) {
+	if (src.type == resultType)
+		return src;
+	storage = src.convert(resultType);
+	return storage;
+}
+
 
 
 
 // ---- NDArrayBuffer ---------------------------------------------------------
 
+static std::atomic<size_t> gOwnedBufferAllocs{0};
+
+static void noteOwnedBufferAlloc() {
+	gOwnedBufferAllocs.fetch_add(1, std::memory_order_relaxed);
+}
+
 NDArrayBuffer::NDArrayBuffer(size_t bytes, NDArrayType t) : byteSize(bytes), elementType(t) {
 	data = malloc(bytes ? bytes : 1);
 	if (bytes)
 		bzero(data, bytes);
+	noteOwnedBufferAlloc();
 }
 
 NDArrayBuffer::NDArrayBuffer(void* external, size_t bytes, NDArrayType t)
@@ -308,6 +346,7 @@ NDArrayBuffer::NDArrayBuffer(const NDArrayBuffer& other)
 	data = malloc(byteSize ? byteSize : 1);
 	if (byteSize && other.data)
 		memcpy(data, other.data, byteSize);
+	noteOwnedBufferAlloc();
 }
 
 NDArrayBuffer::NDArrayBuffer(NDArrayBuffer&& other) noexcept
@@ -328,6 +367,7 @@ NDArrayBuffer& NDArrayBuffer::operator=(const NDArrayBuffer& other) {
 		data = malloc(byteSize ? byteSize : 1);
 		if (byteSize && other.data)
 			memcpy(data, other.data, byteSize);
+		noteOwnedBufferAlloc();
 	}
 	return *this;
 }
@@ -491,6 +531,10 @@ NDArray NDArray::wrap(void* data, size_t byteSize, ArrayList<int> shape, NDArray
 
 bool NDArray::ownsStorage() const {
 	return buffer && buffer.get() && buffer.get()->ownsData;
+}
+
+size_t NDArray::ownedBufferAllocCount() {
+	return gOwnedBufferAllocs.load(std::memory_order_relaxed);
 }
 
 ArrayList<size_t> NDArray::rowMajorStrides(const ArrayList<int>& shape) {
@@ -1650,6 +1694,114 @@ void NDArray::applyBinaryInPlace(const NDArray& src, ArithOp op) {
 	}
 }
 
+void NDArray::applyBinaryInto(const NDArray& a, const NDArray& b, ArithOp op) {
+	ensureWritable();
+	const size_t n = numElements();
+	switch (type) {
+		case F32:
+			switch (op) {
+				case ArithOp::Add: addInto(float32, a.float32, b.float32, n); break;
+				case ArithOp::Sub: subInto(float32, a.float32, b.float32, n); break;
+				case ArithOp::Mul: mulInto(float32, a.float32, b.float32, n); break;
+				case ArithOp::Div: divInto(float32, a.float32, b.float32, n); break;
+			}
+			break;
+		case F64:
+			switch (op) {
+				case ArithOp::Add: addInto(float64, a.float64, b.float64, n); break;
+				case ArithOp::Sub: subInto(float64, a.float64, b.float64, n); break;
+				case ArithOp::Mul: mulInto(float64, a.float64, b.float64, n); break;
+				case ArithOp::Div: divInto(float64, a.float64, b.float64, n); break;
+			}
+			break;
+		case UINT8:
+			switch (op) {
+				case ArithOp::Add: addInto(uint8, a.uint8, b.uint8, n); break;
+				case ArithOp::Sub: subInto(uint8, a.uint8, b.uint8, n); break;
+				case ArithOp::Mul: mulInto(uint8, a.uint8, b.uint8, n); break;
+				case ArithOp::Div: divInto(uint8, a.uint8, b.uint8, n); break;
+			}
+			break;
+		case INT8:
+			switch (op) {
+				case ArithOp::Add: addInto(int8, a.int8, b.int8, n); break;
+				case ArithOp::Sub: subInto(int8, a.int8, b.int8, n); break;
+				case ArithOp::Mul: mulInto(int8, a.int8, b.int8, n); break;
+				case ArithOp::Div: divInto(int8, a.int8, b.int8, n); break;
+			}
+			break;
+		case INT32:
+			switch (op) {
+				case ArithOp::Add: addInto(int32, a.int32, b.int32, n); break;
+				case ArithOp::Sub: subInto(int32, a.int32, b.int32, n); break;
+				case ArithOp::Mul: mulInto(int32, a.int32, b.int32, n); break;
+				case ArithOp::Div: divInto(int32, a.int32, b.int32, n); break;
+			}
+			break;
+		case INT64:
+			switch (op) {
+				case ArithOp::Add: addInto(int64, a.int64, b.int64, n); break;
+				case ArithOp::Sub: subInto(int64, a.int64, b.int64, n); break;
+				case ArithOp::Mul: mulInto(int64, a.int64, b.int64, n); break;
+				case ArithOp::Div: divInto(int64, a.int64, b.int64, n); break;
+			}
+			break;
+		case UINT256:
+			switch (op) {
+				case ArithOp::Add: addInto(uint256, a.uint256, b.uint256, n); break;
+				case ArithOp::Sub: subInto(uint256, a.uint256, b.uint256, n); break;
+				case ArithOp::Mul:
+					for (size_t i = 0; i < n; ++i)
+						uint256[i] = a.uint256[i] * b.uint256[i];
+					break;
+				case ArithOp::Div:
+					for (size_t i = 0; i < n; ++i)
+						uint256[i] = a.uint256[i] / b.uint256[i];
+					break;
+			}
+			break;
+		case BINARY:
+			for (size_t i = 0; i < n; ++i) {
+				uint8_t av = binaryGet(a.uint64, i);
+				uint8_t bv = binaryGet(b.uint64, i);
+				uint8_t r = 0;
+				switch (op) {
+					case ArithOp::Add: r = (uint8_t)((av + bv) & 1); break;
+					case ArithOp::Sub: r = (uint8_t)((av - bv) & 1); break;
+					case ArithOp::Mul: r = (uint8_t)(av & bv); break;
+					case ArithOp::Div:
+						if (bv == 0)
+							throw std::invalid_argument("NDArray: division by zero");
+						r = av;
+						break;
+				}
+				binarySet(uint64, i, r);
+			}
+			break;
+		case INT3:
+			for (size_t i = 0; i < n; ++i) {
+				int av = int3_getSigned(a.uint64, i);
+				int bv = int3_getSigned(b.uint64, i);
+				int r = 0;
+				switch (op) {
+					case ArithOp::Add: r = av + bv; break;
+					case ArithOp::Sub: r = av - bv; break;
+					case ArithOp::Mul: r = av * bv; break;
+					case ArithOp::Div:
+						if (bv == 0)
+							throw std::invalid_argument("NDArray: division by zero");
+						r = av / bv;
+						break;
+				}
+				int3_setSigned(uint64, i, r);
+			}
+			int3_clearPadding(uint64, n);
+			break;
+		default:
+			throw std::runtime_error("NDArray: invalid type in arithmetic");
+	}
+}
+
 void NDArray::applyFloatScalarInPlace(float scalar, ArithOp op) {
 	applyDoubleScalarInPlace((double)scalar, op);
 }
@@ -2158,13 +2310,33 @@ NDArray& NDArray::broadcastDiv(const NDArray& other) { return broadcastOpInPlace
 
 // ---- binary operators (copy) -----------------------------------------------
 
+void NDArray::binaryOpInto(NDArray& dst, const NDArray& a, const NDArray& b, ArithOp op) {
+	requireSameShape(a, b);
+	requireSameShape(dst, a);
+	NDArrayType resultType = promoteTypes(a.type, b.type);
+	if (dst.type != resultType)
+		throw std::invalid_argument("NDArray: binaryOpInto dest type must be the promoted result type");
+	NDArray aTmp, bTmp;
+	const NDArray& lhs = maybeConvert(a, resultType, aTmp);
+	const NDArray& rhs = maybeConvert(b, resultType, bTmp);
+	dst.applyBinaryInto(lhs, rhs, op);
+}
+
 NDArray NDArray::binaryOp(const NDArray& other, ArithOp op) const {
 	requireSameShape(*this, other);
 	NDArrayType resultType = promoteTypes(type, other.type);
-	NDArray left = convert(resultType);
-	NDArray right = other.convert(resultType);
-	left.applyBinaryInPlace(right, op);
-	return left;
+	NDArray leftTmp, rightTmp;
+	const NDArray& left = maybeConvert(*this, resultType, leftTmp);
+	const NDArray& right = maybeConvert(other, resultType, rightTmp);
+	if (type == resultType) {
+		// Left already matches: do not CoW-share *this (wrap would be mutated).
+		NDArray result(shape, resultType);
+		result.applyBinaryInto(left, right, op);
+		return result;
+	}
+	// leftTmp is a unique converted buffer; reuse it as the result.
+	leftTmp.applyBinaryInPlace(right, op);
+	return leftTmp;
 }
 
 NDArray NDArray::scalarFloatOp(float other, ArithOp op) const {

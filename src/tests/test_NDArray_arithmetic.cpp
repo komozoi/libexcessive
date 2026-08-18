@@ -659,3 +659,152 @@ TEST(NDArray_arithmetic, LeftScalar_DoesNotMutateRhs) {
 	EXPECT_FLOAT_EQ(a.get<float>({1}), 4.0f);
 	EXPECT_FLOAT_EQ(b.get<float>({0}), 5.0f);
 }
+
+
+// ============================================================
+// Same-type binaryOp skips convert(); binaryOpInto uses caller dest
+//
+// CoW / convert rules:
+//   convert(same type) always materializes a unique owned snapshot.
+//   a+b / binaryOp never convert() a side that already matches the
+//   promoted type. Same-type a+b allocates one result buffer.
+//   Result is never a CoW alias of either operand (wrap-safe).
+//   add / += remain the in-place mutation API.
+// ============================================================
+
+TEST(NDArray_arithmetic, SameTypeAdd_AllocatesOnlyResult) {
+	alignas(4) float av[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+	alignas(4) float bv[4] = {10.0f, 20.0f, 30.0f, 40.0f};
+	NDArray a = NDArray::wrap(av, sizeof(av), {4}, F32);
+	NDArray b = NDArray::wrap(bv, sizeof(bv), {4}, F32);
+	const size_t before = NDArray::ownedBufferAllocCount();
+	NDArray c = a + b;
+	EXPECT_EQ(NDArray::ownedBufferAllocCount() - before, 1u);
+	EXPECT_TRUE(c.ownsStorage());
+	EXPECT_NE(c.data(), static_cast<const void*>(av));
+	EXPECT_NE(c.data(), static_cast<const void*>(bv));
+	EXPECT_FLOAT_EQ(c.get<float>({0}), 11.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({3}), 44.0f);
+	// wrap operands were only read
+	EXPECT_EQ(a.data(), static_cast<const void*>(av));
+	EXPECT_EQ(b.data(), static_cast<const void*>(bv));
+	EXPECT_FLOAT_EQ(av[0], 1.0f);
+	EXPECT_FLOAT_EQ(bv[0], 10.0f);
+}
+
+TEST(NDArray_arithmetic, SameTypeMul_AllocatesOnlyResult) {
+	NDArray a(ArrayList({2.0f, 3.0f, 4.0f}));
+	NDArray b(ArrayList({5.0f, 6.0f, 7.0f}));
+	const size_t before = NDArray::ownedBufferAllocCount();
+	NDArray c = a.binaryOp(b, NDArray::ArithOp::Mul);
+	EXPECT_EQ(NDArray::ownedBufferAllocCount() - before, 1u);
+	EXPECT_FLOAT_EQ(c.get<float>({0}), 10.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({1}), 18.0f);
+	EXPECT_FLOAT_EQ(c.get<float>({2}), 28.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 2.0f);
+}
+
+TEST(NDArray_arithmetic, ConvertSameType_StillAllocatesSnapshot) {
+	NDArray a(ArrayList({1.0f, 2.0f}));
+	const size_t before = NDArray::ownedBufferAllocCount();
+	NDArray b = a.convert(F32);
+	EXPECT_EQ(NDArray::ownedBufferAllocCount() - before, 1u);
+	EXPECT_NE(b.data(), a.data());
+	b.set({0}, 9.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 1.0f);
+}
+
+TEST(NDArray_arithmetic, BinaryOpInto_WritesCallerBuffer) {
+	alignas(4) float out[4] = {0, 0, 0, 0};
+	alignas(4) float av[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+	alignas(4) float bv[4] = {10.0f, 20.0f, 30.0f, 40.0f};
+	NDArray dst = NDArray::wrap(out, sizeof(out), {4}, F32);
+	NDArray a = NDArray::wrap(av, sizeof(av), {4}, F32);
+	NDArray b = NDArray::wrap(bv, sizeof(bv), {4}, F32);
+	const void* p = dst.data();
+	const size_t before = NDArray::ownedBufferAllocCount();
+	NDArray::binaryOpInto(dst, a, b, NDArray::ArithOp::Add);
+	EXPECT_EQ(NDArray::ownedBufferAllocCount(), before);
+	EXPECT_EQ(dst.data(), p);
+	EXPECT_FALSE(dst.ownsStorage());
+	EXPECT_FLOAT_EQ(out[0], 11.0f);
+	EXPECT_FLOAT_EQ(out[1], 22.0f);
+	EXPECT_FLOAT_EQ(out[2], 33.0f);
+	EXPECT_FLOAT_EQ(out[3], 44.0f);
+	EXPECT_FLOAT_EQ(av[0], 1.0f);
+	EXPECT_FLOAT_EQ(bv[0], 10.0f);
+}
+
+TEST(NDArray_arithmetic, BinaryOpInto_SubMulDiv) {
+	NDArray a(ArrayList({10.0f, 20.0f}));
+	NDArray b(ArrayList({2.0f, 4.0f}));
+	NDArray dst({2}, F32);
+	const void* p = dst.data();
+	NDArray::binaryOpInto(dst, a, b, NDArray::ArithOp::Sub);
+	EXPECT_EQ(dst.data(), p);
+	EXPECT_FLOAT_EQ(dst.get<float>({0}), 8.0f);
+	EXPECT_FLOAT_EQ(dst.get<float>({1}), 16.0f);
+	NDArray::binaryOpInto(dst, a, b, NDArray::ArithOp::Mul);
+	EXPECT_FLOAT_EQ(dst.get<float>({0}), 20.0f);
+	EXPECT_FLOAT_EQ(dst.get<float>({1}), 80.0f);
+	NDArray::binaryOpInto(dst, a, b, NDArray::ArithOp::Div);
+	EXPECT_FLOAT_EQ(dst.get<float>({0}), 5.0f);
+	EXPECT_FLOAT_EQ(dst.get<float>({1}), 5.0f);
+}
+
+TEST(NDArray_arithmetic, BinaryOpInto_PromotesIntoMatchingDest) {
+	NDArray a({2}, INT8);
+	NDArray b(ArrayList({0.5f, 1.5f}));
+	a.set({0}, -1);
+	a.set({1}, 3);
+	NDArray dst({2}, F32);
+	const size_t before = NDArray::ownedBufferAllocCount();
+	NDArray::binaryOpInto(dst, a, b, NDArray::ArithOp::Add);
+	// only the INT8 side is converted; dest is reused
+	EXPECT_EQ(NDArray::ownedBufferAllocCount() - before, 1u);
+	EXPECT_EQ(dst.type, F32);
+	EXPECT_FLOAT_EQ(dst.get<float>({0}), -0.5f);
+	EXPECT_FLOAT_EQ(dst.get<float>({1}), 4.5f);
+	EXPECT_EQ(a.type, INT8);
+	EXPECT_EQ(a.get<int>({0}), -1);
+}
+
+TEST(NDArray_arithmetic, BinaryOpInto_WrongDestTypeThrows) {
+	NDArray a(ArrayList({1.0f, 2.0f}));
+	NDArray b(ArrayList({3.0f, 4.0f}));
+	NDArray dst({2}, F64);
+	EXPECT_THROW(NDArray::binaryOpInto(dst, a, b, NDArray::ArithOp::Add), std::invalid_argument);
+}
+
+TEST(NDArray_arithmetic, BinaryOpInto_AliasingDestIsA) {
+	NDArray a(ArrayList({1.0f, 2.0f, 3.0f}));
+	NDArray b(ArrayList({4.0f, 5.0f, 6.0f}));
+	NDArray::binaryOpInto(a, a, b, NDArray::ArithOp::Add);
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 5.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1}), 7.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({2}), 9.0f);
+}
+
+TEST(NDArray_arithmetic, BinaryOpInto_AliasingDestIsB_NonCommutative) {
+	NDArray a(ArrayList({10.0f, 20.0f}));
+	NDArray b(ArrayList({3.0f, 5.0f}));
+	NDArray::binaryOpInto(b, a, b, NDArray::ArithOp::Sub);
+	EXPECT_FLOAT_EQ(b.get<float>({0}), 7.0f);
+	EXPECT_FLOAT_EQ(b.get<float>({1}), 15.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 10.0f);
+}
+
+TEST(NDArray_arithmetic, MixedTypeAdd_StillPromotes) {
+	NDArray a({2}, INT8);
+	a.set({0}, -1);
+	a.set({1}, 2);
+	NDArray b({2}, INT32);
+	b.set({0}, 10);
+	b.set({1}, 20);
+	NDArray c = a + b;
+	EXPECT_EQ(c.type, INT32);
+	EXPECT_EQ(c.get<int32_t>({0}), 9);
+	EXPECT_EQ(c.get<int32_t>({1}), 22);
+	EXPECT_EQ(a.type, INT8);
+	EXPECT_EQ(a.get<int>({0}), -1);
+}
