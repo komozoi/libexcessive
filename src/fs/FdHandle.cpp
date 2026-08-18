@@ -99,6 +99,8 @@ public:
 	}
 
 	void queueWrite(const void* value, size_t size, off_t where) {
+		std::lock_guard<std::recursive_mutex> _(mutex);
+
 		queued_write_t* last = writeQueue.empty() ? nullptr : writeQueue.peekLast();
 
 		if (last && last->size + last->where == where) {
@@ -134,24 +136,30 @@ public:
 	}
 
 	void flushWrites() {
+		std::lock_guard<std::recursive_mutex> _(mutex);
+
 		while (!writeQueue.empty()) {
 			queued_write_t* op = writeQueue.pop();
-			lseek(fd, op->where, SEEK_SET);
-			write(op->content, op->size);
+			const char* buf = op->content;
+			size_t done = 0;
+			while (done < op->size) {
+				ssize_t n = ::pwrite(fd, buf + done, op->size - done, op->where + (off_t)done);
+				if (n <= 0)
+					break;
+				done += (size_t)n;
+			}
 			free(op);
 		}
 	}
 
 	virtual ssize_t read(void* value, size_t size) {
+		// Drain under the handle mutex, then drop it before read(2) so a
+		// blocking socket/pipe read does not stall other users of this fd.
+		flushWrites();
+
 		char* buffer = (char*)value;
 		int totalRead = 0;
 		int remaining = (int)size;
-
-		if (!writeQueue.empty()) {
-			off_t offset = lseek(fd, 0, SEEK_CUR);
-			flushWrites();
-			lseek(fd, offset, SEEK_SET);
-		}
 
 		while (totalRead < (int)size) {
 			int res = (int)::read(fd, &buffer[totalRead], remaining);

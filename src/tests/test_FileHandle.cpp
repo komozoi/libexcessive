@@ -630,6 +630,71 @@ TEST_F(FdHandleTest, PreadPwriteSharedHandleCopies) {
 	EXPECT_EQ(bad.load(), 0);
 }
 
+// Each writer owns disjoint slots and only queueWrites to them.  Concurrent
+// pread/pwrite/read drain the same queue.  After a final flush, every slot
+// must hold that writer's last value — a lost queue node fails this.
+TEST_F(FdHandleTest, QueuedWritesSurviveConcurrentDrain) {
+	const int kThreads = 4;
+	const int kSlotsPerThread = 64;
+	const int kIters = 1500;
+	const int kSlots = kThreads * kSlotsPerThread;
+	const off_t scratch = (off_t)(kSlots * sizeof(uint32_t));
+
+	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	std::vector<uint32_t> zeros(kSlots + 1, 0);
+	ASSERT_EQ(h.write(zeros.data(), zeros.size() * sizeof(uint32_t)),
+			(ssize_t)(zeros.size() * sizeof(uint32_t)));
+	h.flush();
+
+	std::vector<std::thread> threads;
+	for (int t = 0; t < kThreads; ++t) {
+		threads.emplace_back([&, t]() {
+			for (int i = 1; i <= kIters; ++i) {
+				for (int s = 0; s < kSlotsPerThread; ++s) {
+					int slot = t * kSlotsPerThread + s;
+					uint32_t v = ((uint32_t)t << 24) | (uint32_t)i;
+					h.queueWrite(v, (off_t)(slot * sizeof(uint32_t)));
+				}
+			}
+		});
+	}
+	std::atomic<bool> stop(false);
+	threads.emplace_back([&]() {
+		while (!stop.load(std::memory_order_acquire)) {
+			uint32_t got = 0;
+			h.pread(got, 0);
+		}
+	});
+	threads.emplace_back([&]() {
+		uint32_t v = 0xFFFFFFFFu;
+		while (!stop.load(std::memory_order_acquire))
+			h.pwrite(v, scratch);
+	});
+	threads.emplace_back([&]() {
+		while (!stop.load(std::memory_order_acquire)) {
+			h.seek(0, SEEK_SET);
+			uint32_t got = 0;
+			h.read(got);
+		}
+	});
+
+	for (int t = 0; t < kThreads; ++t)
+		threads[t].join();
+	// Drain remaining queued writes while readers are still running.
+	h.flush();
+	stop.store(true, std::memory_order_release);
+	for (size_t i = kThreads; i < threads.size(); ++i)
+		threads[i].join();
+
+	for (int slot = 0; slot < kSlots; ++slot) {
+		int t = slot / kSlotsPerThread;
+		uint32_t expected = ((uint32_t)t << 24) | (uint32_t)kIters;
+		uint32_t got = 0;
+		ASSERT_EQ(h.pread(got, (off_t)(slot * sizeof(uint32_t))), (ssize_t)sizeof(got));
+		EXPECT_EQ(got, expected) << "slot=" << slot;
+	}
+}
+
 
 TEST_F(FdHandleTest, MultiQueueWriteMmapReadback) {
 	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
