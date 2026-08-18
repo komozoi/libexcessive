@@ -463,7 +463,7 @@ static size_t shapeElementCount(const ArrayList<int>& shape) {
 	return n;
 }
 
-size_t NDArray::bufferBytesFor(NDArrayType t, size_t numElems) {
+static size_t packedBufferBytes(NDArrayType t, size_t numElems) {
 	switch (t) {
 		case BINARY:
 			if (numElems > SIZE_MAX - 63)
@@ -490,6 +490,10 @@ size_t NDArray::bufferBytesFor(NDArrayType t, size_t numElems) {
 		default:
 			return numElems;
 	}
+}
+
+size_t NDArray::bufferBytesFor(NDArrayType t, size_t numElems) {
+	return packedBufferBytes(t, numElems);
 }
 
 static size_t wrapAlignment(NDArrayType t) {
@@ -555,6 +559,106 @@ NDArray NDArray::wrap(void* data, size_t byteSize, ArrayList<int> shape, NDArray
 	return NDArray(std::move(shape), type, std::move(buf));
 }
 
+static size_t elementsForPackedBytes(NDArrayType t, size_t bytes) {
+	const size_t align = wrapAlignment(t);
+	if (align != 0 && (bytes % align) != 0)
+		throw std::invalid_argument("NDArray wrap: row stride is not aligned for element type");
+	switch (t) {
+		case BINARY:
+			return mulOrThrow(bytes / 8, 64);
+		case INT3:
+			return mulOrThrow(bytes / 8, 16);
+		case INT8:
+		case UINT8:
+			return bytes;
+		case F16:
+		case BF16:
+			return bytes / 2;
+		case INT32:
+		case F32:
+			return bytes / 4;
+		case INT64:
+		case F64:
+			return bytes / 8;
+		case UINT256:
+			return bytes / 32;
+		default:
+			return bytes;
+	}
+}
+
+static size_t tailElementCount(const ArrayList<int>& shape) {
+	ArrayList<int> tail;
+	for (int i = 1; i < shape.size(); ++i)
+		tail.add(shape.get(i));
+	return shapeElementCount(tail);
+}
+
+static ArrayList<size_t> denseRowMajorStrides(const ArrayList<int>& shape);
+
+static size_t paddedWrapNeed(const ArrayList<int>& shape, NDArrayType type, size_t rowStrideBytes) {
+	const size_t nRows = (size_t)shape.get(0);
+	const size_t rowPacked = packedBufferBytes(type, tailElementCount(shape));
+	if (rowStrideBytes < rowPacked)
+		throw std::invalid_argument("NDArray wrap: row stride smaller than packed row");
+	if (nRows == 0)
+		return 0;
+	const size_t prefix = mulOrThrow(nRows - 1, rowStrideBytes);
+	if (rowPacked > SIZE_MAX - prefix)
+		throw std::invalid_argument("NDArray: size overflow");
+	return prefix + rowPacked;
+}
+
+static ArrayList<size_t> paddedWrapStrides(const ArrayList<int>& shape, NDArrayType type,
+                                           size_t rowStrideBytes) {
+	ArrayList<size_t> st = denseRowMajorStrides(shape);
+	st.set(0, elementsForPackedBytes(type, rowStrideBytes));
+	return st;
+}
+
+static void checkWrapPointer(const void* data, size_t byteSize, size_t need, NDArrayType type) {
+	if (need > 0 && data == nullptr)
+		throw std::invalid_argument("NDArray wrap: null data");
+	if (byteSize < need)
+		throw std::invalid_argument("NDArray wrap: buffer smaller than required packed size");
+	if (data && need > 0) {
+		const size_t align = wrapAlignment(type);
+		if ((reinterpret_cast<std::uintptr_t>(data) % align) != 0)
+			throw std::invalid_argument("NDArray wrap: data is not aligned for element type");
+	}
+}
+
+NDArrayView NDArrayView::wrap(const void* data, size_t byteSize, ArrayList<int> shape,
+                              NDArrayType type, size_t rowStrideBytes) {
+	const size_t n = shapeElementCount(shape);
+	const size_t dense = packedBufferBytes(type, n);
+	if (shape.size() < 2) {
+		if (rowStrideBytes != dense)
+			throw std::invalid_argument("NDArray wrap: row stride requires rank >= 2");
+		return NDArrayView::wrap(data, byteSize, std::move(shape), type);
+	}
+	const size_t need = paddedWrapNeed(shape, type, rowStrideBytes);
+	checkWrapPointer(data, byteSize, need, type);
+	ArrayList<size_t> st = paddedWrapStrides(shape, type, rowStrideBytes);
+	sp<NDArrayBuffer> buf(COPY_ON_WRITE, (void*)data, byteSize, type);
+	return NDArrayView(std::move(buf), std::move(shape), std::move(st), 0, type);
+}
+
+NDArray NDArray::wrap(void* data, size_t byteSize, ArrayList<int> shape,
+                      NDArrayType type, size_t rowStrideBytes) {
+	const size_t n = shapeElementCount(shape);
+	const size_t dense = packedBufferBytes(type, n);
+	if (shape.size() < 2) {
+		if (rowStrideBytes != dense)
+			throw std::invalid_argument("NDArray wrap: row stride requires rank >= 2");
+		return NDArray::wrap(data, byteSize, std::move(shape), type);
+	}
+	const size_t rowPacked = packedBufferBytes(type, tailElementCount(shape));
+	if (rowStrideBytes != rowPacked)
+		throw std::invalid_argument("NDArray wrap: padded row stride requires NDArrayView::wrap");
+	return NDArray::wrap(data, byteSize, std::move(shape), type);
+}
+
 bool NDArray::ownsStorage() const {
 	return buffer && buffer.get() && buffer.get()->ownsData;
 }
@@ -563,7 +667,7 @@ size_t NDArray::ownedBufferAllocCount() {
 	return gOwnedBufferAllocs.load(std::memory_order_relaxed);
 }
 
-ArrayList<size_t> NDArray::rowMajorStrides(const ArrayList<int>& shape) {
+static ArrayList<size_t> denseRowMajorStrides(const ArrayList<int>& shape) {
 	ArrayList<size_t> st;
 	for (int i = 0; i < shape.size(); ++i)
 		st.add((size_t)0);
@@ -574,6 +678,10 @@ ArrayList<size_t> NDArray::rowMajorStrides(const ArrayList<int>& shape) {
 		stride *= (size_t)(dim > 0 ? dim : 1);
 	}
 	return st;
+}
+
+ArrayList<size_t> NDArray::rowMajorStrides(const ArrayList<int>& shape) {
+	return denseRowMajorStrides(shape);
 }
 
 NDArray::NDArray() : shape({0}), type(F32), memory(nullptr) {
@@ -810,7 +918,7 @@ size_t NDArray::computeOffset(const int* indices, int rank) const {
 size_t NDArray::computeOffset(const ArrayList<int>& indices) const {
 	const int r = indices.size();
 	if (r <= NDArray::kMaxRank) {
-		int tmp[NDArray::kMaxRank];
+		int tmp[NDArray::kMaxRank] = {};
 		for (int i = 0; i < r; ++i)
 			tmp[i] = indices.get(i);
 		return computeOffset(tmp, r);

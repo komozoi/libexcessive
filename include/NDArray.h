@@ -210,6 +210,12 @@ public:
 	 * Packed types (BINARY, INT3, UINT256) require 8-byte alignment.
 	 */
 	static NDArrayView wrap(const void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type);
+	/**
+	 * Same as wrap, with byte distance from row i to row i+1 (rank >= 2).
+	 * Must be >= packed size of one row and aligned for `type`.
+	 */
+	static NDArrayView wrap(const void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type,
+	                        size_t rowStrideBytes);
 
 	/** Product of shape (1 for a rank-0 scalar). Throws on a negative axis or overflow. */
 	size_t numElements() const;
@@ -503,6 +509,12 @@ public:
 	 * Axes must be >= 0; the packed size must fit in size_t.
 	 */
 	static NDArray wrap(void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type);
+	/**
+	 * Dense wrap when `rowStrideBytes` equals the packed row size.
+	 * A padded stride throws; use NDArrayView::wrap.
+	 */
+	static NDArray wrap(void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type,
+	                    size_t rowStrideBytes);
 
 	/** Empty 1-D array (shape {0}), no heap buffer. Type F32 if omitted. */
 	static NDArray empty();
@@ -698,7 +710,7 @@ public:
 		const int r = (int)indices.size();
 		if (r > kMaxRank)
 			throw std::out_of_range("NDArray::get - rank exceeds kMaxRank");
-		int tmp[kMaxRank];
+		int tmp[kMaxRank] = {};
 		int n = 0;
 		for (int x : indices)
 			tmp[n++] = x;
@@ -711,7 +723,7 @@ public:
 		const int r = (int)indices.size();
 		if (r > kMaxRank)
 			throw std::out_of_range("NDArray::set - rank exceeds kMaxRank");
-		int tmp[kMaxRank];
+		int tmp[kMaxRank] = {};
 		int n = 0;
 		for (int x : indices)
 			tmp[n++] = x;

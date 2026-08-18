@@ -243,6 +243,126 @@ TEST(NDArray_wrap, ViewOutlivesWrapHandle) {
 	EXPECT_FALSE(v.sharedBuffer().get()->ownsData);
 }
 
+TEST(NDArray_wrap, RowStride_F32_GetFlatAndRow) {
+	const int nRows = 3;
+	const int dims = 10;
+	const size_t stride = 64;
+	alignas(4) uint8_t buf[3 * 64];
+	memset(buf, 0, sizeof(buf));
+	for (int i = 0; i < nRows; ++i) {
+		NDArray row = NDArray::wrap(buf + (size_t)i * stride, (size_t)dims * sizeof(float),
+		                            {dims}, F32);
+		for (int j = 0; j < dims; ++j)
+			row.set({j}, (float)(i * 100 + j));
+	}
+
+	NDArrayView v = NDArrayView::wrap(buf, sizeof(buf), {nRows, dims}, F32, stride);
+	EXPECT_FALSE(v.isContiguous());
+	EXPECT_EQ(v.numElements(), (size_t)(nRows * dims));
+	EXPECT_FLOAT_EQ(v.getFlat<float>(0), 0.0f);
+	EXPECT_FLOAT_EQ(v.getFlat<float>(9), 9.0f);
+	EXPECT_FLOAT_EQ(v.getFlat<float>(10), 100.0f);
+	EXPECT_FLOAT_EQ(v.getFlat<float>(29), 209.0f);
+
+	NDArrayView r1 = v.row(1);
+	EXPECT_TRUE(r1.isContiguous());
+	EXPECT_EQ(r1.numElements(), (size_t)dims);
+	EXPECT_FLOAT_EQ(r1.getFlat<float>(0), 100.0f);
+	EXPECT_FLOAT_EQ(r1.getFlat<float>(9), 109.0f);
+
+	NDArray q({dims}, F32);
+	for (int j = 0; j < dims; ++j)
+		q.set({j}, 1.0f);
+	float naive = 0;
+	for (int j = 0; j < dims; ++j)
+		naive += 100.0f + (float)j;
+	EXPECT_NEAR(r1.dot<float>(q.view()), naive, 1e-4f);
+}
+
+TEST(NDArray_wrap, RowStride_LastRowNoTrailingPad) {
+	const size_t stride = 64;
+	const int dims = 10;
+	const size_t need = stride + (size_t)dims * sizeof(float);
+	alignas(4) uint8_t buf[64 + 40];
+	memset(buf, 0, sizeof(buf));
+	float* r0 = (float*)buf;
+	float* r1 = (float*)(buf + stride);
+	r0[0] = 1.0f;
+	r1[9] = 2.0f;
+	NDArrayView v = NDArrayView::wrap(buf, need, {2, dims}, F32, stride);
+	EXPECT_FLOAT_EQ(v.row(0).getFlat<float>(0), 1.0f);
+	EXPECT_FLOAT_EQ(v.row(1).getFlat<float>(9), 2.0f);
+}
+
+TEST(NDArray_wrap, RowStride_INT8) {
+	const size_t stride = 64;
+	alignas(1) uint8_t buf[2 * 64];
+	memset(buf, 0, sizeof(buf));
+	int8_t* r0 = (int8_t*)buf;
+	int8_t* r1 = (int8_t*)(buf + stride);
+	r0[0] = -5;
+	r1[3] = 7;
+	NDArrayView v = NDArrayView::wrap(buf, sizeof(buf), {2, 4}, INT8, stride);
+	EXPECT_EQ(v.row(0).getFlat<int>(0), -5);
+	EXPECT_EQ(v.row(1).getFlat<int>(3), 7);
+}
+
+TEST(NDArray_wrap, RowStride_INT3) {
+	const size_t stride = 64;
+	alignas(8) uint8_t buf[2 * 64];
+	memset(buf, 0, sizeof(buf));
+	NDArray a = NDArray::wrap(buf, 8, {16}, INT3);
+	NDArray b = NDArray::wrap(buf + stride, 8, {16}, INT3);
+	a.set({0}, -4);
+	a.set({15}, 3);
+	b.set({1}, -1);
+	NDArrayView v = NDArrayView::wrap(buf, sizeof(buf), {2, 16}, INT3, stride);
+	EXPECT_EQ(v.row(0).getFlat<int>(0), -4);
+	EXPECT_EQ(v.row(0).getFlat<int>(15), 3);
+	EXPECT_EQ(v.row(1).getFlat<int>(1), -1);
+}
+
+TEST(NDArray_wrap, RowStride_BINARY) {
+	const size_t stride = 64;
+	alignas(8) uint8_t buf[2 * 64];
+	memset(buf, 0, sizeof(buf));
+	NDArray a = NDArray::wrap(buf, 8, {16}, BINARY);
+	NDArray b = NDArray::wrap(buf + stride, 8, {16}, BINARY);
+	a.set({0}, 1);
+	a.set({7}, 1);
+	b.set({3}, 1);
+	NDArrayView v = NDArrayView::wrap(buf, sizeof(buf), {2, 16}, BINARY, stride);
+	EXPECT_EQ(v.row(0).getFlat<int>(0), 1);
+	EXPECT_EQ(v.row(0).getFlat<int>(7), 1);
+	EXPECT_EQ(v.row(1).getFlat<int>(3), 1);
+}
+
+TEST(NDArray_wrap, RowStride_UndersizedStrideThrows) {
+	alignas(4) float buf[32] = {};
+	EXPECT_THROW(NDArrayView::wrap(buf, sizeof(buf), {2, 10}, F32, 36), std::invalid_argument);
+}
+
+TEST(NDArray_wrap, RowStride_UnalignedStrideThrows) {
+	alignas(4) uint8_t buf[128] = {};
+	EXPECT_THROW(NDArrayView::wrap(buf, sizeof(buf), {2, 10}, F32, 63), std::invalid_argument);
+}
+
+TEST(NDArray_wrap, RowStride_ShortBufferThrows) {
+	alignas(4) uint8_t buf[64 + 39] = {};
+	EXPECT_THROW(NDArrayView::wrap(buf, sizeof(buf), {2, 10}, F32, 64), std::invalid_argument);
+}
+
+TEST(NDArray_wrap, RowStride_DenseArrayWrapOk) {
+	float buf[6] = {1, 2, 3, 4, 5, 6};
+	NDArray a = NDArray::wrap(buf, sizeof(buf), {2, 3}, F32, 12);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 2}), 6.0f);
+}
+
+TEST(NDArray_wrap, RowStride_PaddedArrayWrapThrows) {
+	alignas(4) uint8_t buf[128] = {};
+	EXPECT_THROW(NDArray::wrap(buf, sizeof(buf), {2, 10}, F32, 64), std::invalid_argument);
+}
+
 TEST(NDArray_wrap, OwnedCowStillDetaches) {
 	NDArray a(ArrayList({1.0f, 2.0f, 3.0f}));
 	NDArray b = a;
