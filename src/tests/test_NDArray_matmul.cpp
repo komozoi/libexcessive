@@ -757,3 +757,138 @@ TEST(NDArray_matmul, AdviseOnHeapAndMmap) {
 	memoryAdviseWillNeed(p, page);
 	munmap(p, page);
 }
+
+static float refScaledGemv(const NDArray& w, const NDArray& x, const NDArray& scales, int groupSize,
+                           int i) {
+	const int M = w.shape.get(0);
+	const int K = w.shape.get(1);
+	(void)M;
+	const int nGroups = (K + groupSize - 1) / groupSize;
+	double acc = 0;
+	for (int g = 0; g < nGroups; ++g) {
+		const int k0 = g * groupSize;
+		const int k1 = (k0 + groupSize < K) ? (k0 + groupSize) : K;
+		int64_t dot = 0;
+		for (int k = k0; k < k1; ++k)
+			dot += (int64_t)w.get<int>({i, k}) * (int64_t)x.get<int>({k});
+		float sc = (scales.shape.size() == 1)
+			? scales.get<float>({i})
+			: scales.get<float>({i, g});
+		acc += (double)sc * (double)dot;
+	}
+	return (float)acc;
+}
+
+TEST(NDArray_matmul, GemvScaled_Group64_INT3) {
+	const int M = 3;
+	const int K = 128;
+	const int gs = 64;
+	NDArray w({M, K}, INT3);
+	NDArray x({K}, INT3);
+	NDArray scales({M, 2}, F32);
+	for (int i = 0; i < M; ++i)
+		for (int k = 0; k < K; ++k)
+			w.set({i, k}, (k + i) % 7 - 3);
+	for (int k = 0; k < K; ++k)
+		x.set({k}, k % 5 - 2);
+	scales.set({0, 0}, 0.5f);
+	scales.set({0, 1}, 2.0f);
+	scales.set({1, 0}, 1.0f);
+	scales.set({1, 1}, -1.0f);
+	scales.set({2, 0}, 0.25f);
+	scales.set({2, 1}, 4.0f);
+
+	NDArray y = w.gemv(x, scales, gs);
+	EXPECT_EQ(y.type, F32);
+	ASSERT_EQ(y.numElements(), (size_t)M);
+	for (int i = 0; i < M; ++i)
+		EXPECT_FLOAT_EQ(y.getFlat<float>((size_t)i), refScaledGemv(w, x, scales, gs, i));
+}
+
+TEST(NDArray_matmul, GemvScaled_PerRow_MatchesGemvThenMul) {
+	NDArray w({4, 8}, UINT8);
+	NDArray x({8}, UINT8);
+	NDArray scales({4}, F32);
+	for (int i = 0; i < 4; ++i)
+		for (int k = 0; k < 8; ++k)
+			w.set({i, k}, 10 + i + k);
+	for (int k = 0; k < 8; ++k)
+		x.set({k}, 1 + k);
+	scales.set({0}, 0.5f);
+	scales.set({1}, 1.0f);
+	scales.set({2}, 2.0f);
+	scales.set({3}, 0.25f);
+
+	NDArray y = w.gemv(x, scales, 8);
+	NDArray raw = w.gemv(x).convert(F32);
+	for (int i = 0; i < 4; ++i)
+		EXPECT_FLOAT_EQ(y.getFlat<float>((size_t)i),
+		                raw.getFlat<float>((size_t)i) * scales.get<float>({i}));
+}
+
+TEST(NDArray_matmul, GemvScaled_UnscaledUnchanged) {
+	NDArray a({4, 3}, F32);
+	NDArray x({3}, F32);
+	fillSeq(a, 1);
+	x.set({0}, 1.f); x.set({1}, 2.f); x.set({2}, 3.f);
+	NDArray y = a.gemv(x);
+	EXPECT_EQ(y.type, F32);
+	EXPECT_FLOAT_EQ(y.getFlat<float>(0), 1.f*1.f + 2.f*2.f + 3.f*3.f);
+}
+
+TEST(NDArray_matmul, GemvScaled_F32_Group) {
+	NDArray w({2, 8}, F32);
+	NDArray x({8}, F32);
+	NDArray sc({2, 2}, F32);
+	fillSeq(w, 1);
+	fillSeq(x, 1);
+	sc.set({0, 0}, 2.0f);
+	sc.set({0, 1}, 0.5f);
+	sc.set({1, 0}, 1.0f);
+	sc.set({1, 1}, 3.0f);
+	NDArray y = w.gemv(x, sc, 4);
+	for (int i = 0; i < 2; ++i) {
+		double acc = 0;
+		for (int g = 0; g < 2; ++g) {
+			double dot = 0;
+			for (int k = g * 4; k < (g + 1) * 4; ++k)
+				dot += (double)w.get<float>({i, k}) * (double)x.get<float>({k});
+			acc += (double)sc.get<float>({i, g}) * dot;
+		}
+		EXPECT_FLOAT_EQ(y.getFlat<float>((size_t)i), (float)acc);
+	}
+}
+
+TEST(NDArray_matmul, GemvScaled_LongK_INT3) {
+	const int M = 4;
+	const int K = 1024;
+	const int gs = 64;
+	NDArray w({M, K}, INT3);
+	NDArray x({K}, INT3);
+	NDArray sc({M, K / gs}, F32);
+	for (int i = 0; i < M; ++i)
+		for (int k = 0; k < K; ++k)
+			w.set({i, k}, (k + i) % 7 - 3);
+	for (int k = 0; k < K; ++k)
+		x.set({k}, k % 5 - 2);
+	for (int i = 0; i < M; ++i)
+		for (int g = 0; g < K / gs; ++g)
+			sc.set({i, g}, 0.25f * (float)(i + 1) * (g % 3 == 0 ? -1.f : 1.f));
+	NDArray y = w.gemv(x, sc, gs);
+	for (int i = 0; i < M; ++i)
+		EXPECT_FLOAT_EQ(y.getFlat<float>((size_t)i), refScaledGemv(w, x, sc, gs, i));
+}
+
+TEST(NDArray_matmul, GemvScaled_Throws) {
+	NDArray w({2, 8}, INT3);
+	NDArray x({8}, INT3);
+	NDArray sc({2, 1}, F32);
+	EXPECT_THROW(w.gemv(x, sc, 0), std::invalid_argument);
+	NDArray scBad({2, 3}, F32);
+	EXPECT_THROW(w.gemv(x, scBad, 4), std::invalid_argument);
+	NDArray scRow({2}, F32);
+	EXPECT_THROW(w.gemv(x, scRow, 4), std::invalid_argument);
+	NDArray xBad({7}, INT3);
+	NDArray scOk({2, 2}, F32);
+	EXPECT_THROW(w.gemv(xBad, scOk, 4), std::invalid_argument);
+}

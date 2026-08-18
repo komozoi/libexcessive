@@ -1004,6 +1004,22 @@ NDArray NDArrayView::gemv(const NDArrayView& x) const {
 	return matmul(x);
 }
 
+NDArray NDArrayView::gemv(const NDArrayView& x, const NDArrayView& scales, int groupSize) const {
+	return ndgemvScaled(*this, x, scales, groupSize);
+}
+
+NDArray NDArrayView::gemv(const NDArray& x, const NDArray& scales, int groupSize) const {
+	return gemv(x.view(), scales.view(), groupSize);
+}
+
+NDArray NDArray::gemv(const NDArray& x, const NDArray& scales, int groupSize) const {
+	return view().gemv(x.view(), scales.view(), groupSize);
+}
+
+NDArray NDArray::gemv(const NDArrayView& x, const NDArrayView& scales, int groupSize) const {
+	return view().gemv(x, scales, groupSize);
+}
+
 NDArrayView NDArray::broadcastTo(const ArrayList<int>& targetShape) const {
 	return view().broadcastTo(targetShape);
 }

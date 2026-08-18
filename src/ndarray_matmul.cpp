@@ -67,6 +67,22 @@
 #define NDM_NEON 0
 #endif
 
+#if defined(__SSE2__) || defined(_M_X64) || defined(_M_AMD64)
+#define NDM_SSE2 1
+#if !NDM_AVX2 && !NDM_AVX512
+#include <emmintrin.h>
+#endif
+#if defined(__SSE4_1__)
+#define NDM_SSE41 1
+#include <smmintrin.h>
+#else
+#define NDM_SSE41 0
+#endif
+#else
+#define NDM_SSE2 0
+#define NDM_SSE41 0
+#endif
+
 #if NDM_AVX512
 static const int kNR = 16;
 static const int kMR = 8;
@@ -1834,6 +1850,59 @@ static void gemvDense(const Lane* A, int lda, const Lane* x, Out* y, int M, int 
 			continue;
 		}
 #endif
+#if NDM_NEON
+		if (sizeof(Lane) == 4 && sizeof(Out) == 4) {
+			float32x4_t v0 = vdupq_n_f32(0.f);
+			float32x4_t v1 = vdupq_n_f32(0.f);
+			int k = 0;
+			for (; k + 8 <= K; k += 8) {
+#if defined(__ARM_FEATURE_FMA) || defined(__aarch64__)
+				v0 = vfmaq_f32(v0, vld1q_f32((const float*)(arow + k)),
+				               vld1q_f32((const float*)(x + k)));
+				v1 = vfmaq_f32(v1, vld1q_f32((const float*)(arow + k + 4)),
+				               vld1q_f32((const float*)(x + k + 4)));
+#else
+				v0 = vmlaq_f32(v0, vld1q_f32((const float*)(arow + k)),
+				               vld1q_f32((const float*)(x + k)));
+				v1 = vmlaq_f32(v1, vld1q_f32((const float*)(arow + k + 4)),
+				               vld1q_f32((const float*)(x + k + 4)));
+#endif
+			}
+			float32x4_t vs = vaddq_f32(v0, v1);
+#if defined(__aarch64__)
+			float s = vaddvq_f32(vs);
+#else
+			float32x2_t p = vadd_f32(vget_low_f32(vs), vget_high_f32(vs));
+			p = vpadd_f32(p, p);
+			float s = vget_lane_f32(p, 0);
+#endif
+			for (; k < K; ++k)
+				s += (float)arow[k] * (float)x[k];
+			y[i] = (Out)s;
+			continue;
+		}
+#endif
+#if NDM_SSE2 && !NDM_AVX2
+		if (sizeof(Lane) == 4 && sizeof(Out) == 4) {
+			__m128 v0 = _mm_setzero_ps();
+			__m128 v1 = _mm_setzero_ps();
+			int k = 0;
+			for (; k + 8 <= K; k += 8) {
+				v0 = _mm_add_ps(v0, _mm_mul_ps(_mm_loadu_ps((const float*)(arow + k)),
+				                               _mm_loadu_ps((const float*)(x + k))));
+				v1 = _mm_add_ps(v1, _mm_mul_ps(_mm_loadu_ps((const float*)(arow + k + 4)),
+				                               _mm_loadu_ps((const float*)(x + k + 4))));
+			}
+			__m128 vs = _mm_add_ps(v0, v1);
+			vs = _mm_add_ps(vs, _mm_movehl_ps(vs, vs));
+			vs = _mm_add_ss(vs, _mm_shuffle_ps(vs, vs, 1));
+			float s = _mm_cvtss_f32(vs);
+			for (; k < K; ++k)
+				s += (float)arow[k] * (float)x[k];
+			y[i] = (Out)s;
+			continue;
+		}
+#endif
 #if defined(__SIZEOF_INT128__)
 		if (sizeof(Lane) == 8 && sizeof(Acc) == 8 && sizeof(Out) == 8) {
 			__int128 acc128 = 0;
@@ -2252,4 +2321,385 @@ NDArray ndmatmul(const NDArrayView& a, const NDArrayView& b) {
 		storePlane(acc, plane, g.batch, bi);
 	}
 	return acc;
+}
+
+static int gemvXLength(const NDArrayView& x) {
+	const int r = x.getShape().size();
+	if (r == 1)
+		return x.getShape().get(0);
+	if (r == 2 && x.getShape().get(1) == 1)
+		return x.getShape().get(0);
+	throw std::invalid_argument("NDArray::gemv - x must be rank 1 of length K");
+}
+
+static bool packedRows2d(const NDArrayView& v, int rows, int cols, size_t* ldaOut) {
+	if (!v.data() || v.getShape().size() != 2)
+		return false;
+	if (v.getShape().get(0) != rows || v.getShape().get(1) != cols)
+		return false;
+	const ArrayList<size_t>& st = v.getStrides();
+	if (st.size() < 2)
+		return false;
+	if (cols > 1 && st.get(1) != 1)
+		return false;
+	size_t lda = st.get(0);
+	if (rows > 1 && lda == 0)
+		return false;
+	*ldaOut = lda;
+	return true;
+}
+
+static bool xIsPackedVec(const NDArrayView& x, int K) {
+	if (!x.data() || gemvXLength(x) != K)
+		return false;
+	return x.isContiguous();
+}
+
+static void fillScalesF32(const NDArrayView& scales, float* out, int M, int nGroups) {
+	const int sr = scales.getShape().size();
+	const int gdim = (sr == 1) ? 1 : nGroups;
+	if (scales.getType() == F32 && scales.isContiguous() && scales.data()) {
+		const float* p = (const float*)scales.data() + scales.getOffset();
+		memcpy(out, p, (size_t)M * (size_t)gdim * sizeof(float));
+		return;
+	}
+	for (int i = 0; i < M; ++i) {
+		if (sr == 1)
+			out[i] = scales.getFlat<float>((size_t)i);
+		else {
+			for (int g = 0; g < nGroups; ++g)
+				out[(size_t)i * (size_t)nGroups + (size_t)g] =
+					scales.getFlat<float>((size_t)i * (size_t)nGroups + (size_t)g);
+		}
+	}
+}
+
+template <typename Lane, typename Acc>
+static Acc dotRange4(const Lane* NDM_RESTRICT a, const Lane* NDM_RESTRICT x, int n) {
+	Acc s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+	int k = 0;
+	for (; k + 4 <= n; k += 4) {
+		s0 += (Acc)a[k] * (Acc)x[k];
+		s1 += (Acc)a[k + 1] * (Acc)x[k + 1];
+		s2 += (Acc)a[k + 2] * (Acc)x[k + 2];
+		s3 += (Acc)a[k + 3] * (Acc)x[k + 3];
+	}
+	Acc s = (s0 + s1) + (s2 + s3);
+	for (; k < n; ++k)
+		s += (Acc)a[k] * (Acc)x[k];
+	return s;
+}
+
+static int32_t int3WordDot(uint64_t packed, const int32_t* NDM_RESTRICT x) {
+#if NDM_AVX512
+	__m512i av = ndmNibbleWordToEpi32(packed);
+	__m512i xv = _mm512_loadu_si512(x);
+	return (int32_t)_mm512_reduce_add_epi32(_mm512_mullo_epi32(av, xv));
+#else
+	int32_t v[16];
+	for (int t = 0; t < 16; ++t) {
+		int p = (int)((packed >> (unsigned)(t * 4)) & 7u);
+		v[t] = (p >= 4) ? p - 8 : p;
+	}
+	return dotRange4<int32_t, int32_t>(v, x, 16);
+#endif
+}
+
+static int32_t int3RangeDot(const uint64_t* Aw, size_t aOff, const int32_t* NDM_RESTRICT x,
+                            int k0, int k1) {
+	int32_t acc = 0;
+	int k = k0;
+	while (k < k1 && ((aOff + (size_t)k) & 15u) != 0) {
+		acc += int3_getSigned(Aw, aOff + (size_t)k) * x[k];
+		++k;
+	}
+	while (k + 16 <= k1) {
+		acc += int3WordDot(Aw[(aOff + (size_t)k) / 16], x + k);
+		k += 16;
+	}
+	for (; k < k1; ++k)
+		acc += int3_getSigned(Aw, aOff + (size_t)k) * x[k];
+	return acc;
+}
+
+static int32_t binaryBit(const uint64_t* w, size_t e) {
+	return (int32_t)((w[e >> 6] >> (e & 63u)) & 1u);
+}
+
+static int32_t binaryRangeDot(const uint64_t* A, size_t a0, const uint64_t* X, size_t x0,
+                              int k0, int k1) {
+	int32_t acc = 0;
+	int k = k0;
+	while (k < k1 && (((a0 + (size_t)k) | (x0 + (size_t)k)) & 63u) != 0) {
+		acc += binaryBit(A, a0 + (size_t)k) & binaryBit(X, x0 + (size_t)k);
+		++k;
+	}
+	while (k + 64 <= k1) {
+		acc += (int32_t)popcnt64(A[(a0 + (size_t)k) >> 6] & X[(x0 + (size_t)k) >> 6]);
+		k += 64;
+	}
+	for (; k < k1; ++k)
+		acc += binaryBit(A, a0 + (size_t)k) & binaryBit(X, x0 + (size_t)k);
+	return acc;
+}
+
+template <typename Lane, typename Acc>
+static void gemvScaledDense(const Lane* NDM_RESTRICT A, int lda, const Lane* NDM_RESTRICT x,
+                            float* NDM_RESTRICT y, int M, int K,
+                            const float* NDM_RESTRICT sc, int nGroups, int groupSize) {
+	for (int i = 0; i < M; ++i) {
+		const Lane* arow = A + (size_t)i * (size_t)lda;
+		float acc = 0.f;
+		for (int g = 0; g < nGroups; ++g) {
+			const int k0 = g * groupSize;
+			const int n = ((k0 + groupSize < K) ? (k0 + groupSize) : K) - k0;
+			Acc dot = dotRange4<Lane, Acc>(arow + k0, x + k0, n);
+			acc += sc[(size_t)i * (size_t)nGroups + (size_t)g] * (float)dot;
+		}
+		y[i] = acc;
+	}
+}
+
+#if defined(__SIZEOF_INT128__)
+static void gemvScaledI64(const int64_t* NDM_RESTRICT A, int lda, const int64_t* NDM_RESTRICT x,
+                          float* NDM_RESTRICT y, int M, int K,
+                          const float* NDM_RESTRICT sc, int nGroups, int groupSize) {
+	for (int i = 0; i < M; ++i) {
+		const int64_t* arow = A + (size_t)i * (size_t)lda;
+		float acc = 0.f;
+		for (int g = 0; g < nGroups; ++g) {
+			const int k0 = g * groupSize;
+			const int k1 = (k0 + groupSize < K) ? (k0 + groupSize) : K;
+			__int128 s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+			int k = k0;
+			for (; k + 4 <= k1; k += 4) {
+				s0 += (__int128)arow[k] * (__int128)x[k];
+				s1 += (__int128)arow[k + 1] * (__int128)x[k + 1];
+				s2 += (__int128)arow[k + 2] * (__int128)x[k + 2];
+				s3 += (__int128)arow[k + 3] * (__int128)x[k + 3];
+			}
+			__int128 s = (s0 + s1) + (s2 + s3);
+			for (; k < k1; ++k)
+				s += (__int128)arow[k] * (__int128)x[k];
+			acc += sc[(size_t)i * (size_t)nGroups + (size_t)g] * (float)(int64_t)s;
+		}
+		y[i] = acc;
+	}
+}
+#endif
+
+static void gemvScaledInt3(const uint64_t* Aw, size_t aOff, size_t lda, const int32_t* NDM_RESTRICT x,
+                           float* NDM_RESTRICT y, int M, int K,
+                           const float* NDM_RESTRICT sc, int nGroups, int groupSize) {
+	for (int i = 0; i < M; ++i) {
+		const size_t row = aOff + (size_t)i * lda;
+		float acc = 0.f;
+		for (int g = 0; g < nGroups; ++g) {
+			const int k0 = g * groupSize;
+			const int k1 = (k0 + groupSize < K) ? (k0 + groupSize) : K;
+			int32_t dot = int3RangeDot(Aw, row, x, k0, k1);
+			acc += sc[(size_t)i * (size_t)nGroups + (size_t)g] * (float)dot;
+		}
+		y[i] = acc;
+	}
+}
+
+static void gemvScaledBinary(const uint64_t* A, size_t aOff, size_t lda,
+                             const uint64_t* X, size_t xOff,
+                             float* NDM_RESTRICT y, int M, int K,
+                             const float* NDM_RESTRICT sc, int nGroups, int groupSize) {
+	for (int i = 0; i < M; ++i) {
+		const size_t row = aOff + (size_t)i * lda;
+		float acc = 0.f;
+		for (int g = 0; g < nGroups; ++g) {
+			const int k0 = g * groupSize;
+			const int k1 = (k0 + groupSize < K) ? (k0 + groupSize) : K;
+			int32_t dot = binaryRangeDot(A, row, X, xOff, k0, k1);
+			acc += sc[(size_t)i * (size_t)nGroups + (size_t)g] * (float)dot;
+		}
+		y[i] = acc;
+	}
+}
+
+static void applyRowScales(const NDArray& raw, const float* sc, float* y, int M) {
+	for (int i = 0; i < M; ++i)
+		y[i] = (float)raw.getFlat<double>((size_t)i) * sc[i];
+}
+
+NDArray ndgemvScaled(const NDArrayView& w, const NDArrayView& x,
+                     const NDArrayView& scales, int groupSize) {
+	if (groupSize <= 0)
+		throw std::invalid_argument("NDArray::gemv - groupSize must be > 0");
+	if (w.getShape().size() != 2)
+		throw std::invalid_argument("NDArray::gemv - W must be rank 2 [M,K]");
+	if (w.getType() != x.getType())
+		throw std::invalid_argument("NDArray::gemv - type mismatch");
+
+	const int M = w.getShape().get(0);
+	const int K = w.getShape().get(1);
+	if (gemvXLength(x) != K)
+		throw std::invalid_argument("NDArray::gemv - inner dimension mismatch");
+
+	const int nGroups = (K == 0) ? 0 : (K + groupSize - 1) / groupSize;
+	const int sr = scales.getShape().size();
+	if (sr == 1) {
+		if (scales.getShape().get(0) != M)
+			throw std::invalid_argument("NDArray::gemv - scales shape must be [M]");
+		if (nGroups > 1)
+			throw std::invalid_argument("NDArray::gemv - per-row scales require groupSize == K");
+	} else if (sr == 2) {
+		if (scales.getShape().get(0) != M || scales.getShape().get(1) != nGroups)
+			throw std::invalid_argument("NDArray::gemv - scales shape must be [M, nGroups]");
+	} else {
+		throw std::invalid_argument("NDArray::gemv - scales must be rank 1 or 2");
+	}
+
+	ArrayList<int> outShape;
+	outShape.add(M);
+	NDArray y(outShape, F32);
+	if (M <= 0 || K <= 0)
+		return y;
+
+	const int scN = (sr == 1) ? 1 : nGroups;
+	const size_t scCount = (size_t)M * (size_t)scN;
+	float scStack[256];
+	float* sc = scStack;
+	if (scCount > 256)
+		sc = (float*)alloc64(scCount * sizeof(float));
+	fillScalesF32(scales, sc, M, nGroups);
+
+	if (nGroups <= 1) {
+		NDArray raw = w.gemv(x);
+		applyRowScales(raw, sc, (float*)y.data(), M);
+		if (sc != scStack)
+			free64(sc);
+		return y;
+	}
+
+	size_t lda = 0;
+	const bool wRows = packedRows2d(w, M, K, &lda);
+	const bool xOk = xIsPackedVec(x, K);
+	NDArray wOwn;
+	NDArray xOwn;
+	const NDArrayView* ww = &w;
+	const NDArrayView* xx = &x;
+	if (!wRows) {
+		wOwn = dense2d(w, M, K, 1, 0);
+		ww = nullptr;
+		lda = (size_t)K;
+	}
+	if (!xOk) {
+		xOwn = x.copy();
+		xx = nullptr;
+	}
+
+	const NDArrayType t = w.getType();
+	float* yp = (float*)y.data();
+
+	if (t == INT3) {
+		const uint64_t* Aw = (const uint64_t*)(ww ? ww->data() : wOwn.data());
+		const size_t aOff = ww ? ww->getOffset() : 0;
+		int32_t* xi = (int32_t*)alloc64((size_t)K * sizeof(int32_t));
+		const uint64_t* Xw = (const uint64_t*)(xx ? xx->data() : xOwn.data());
+		const size_t xOff = xx ? xx->getOffset() : 0;
+		unpackInt3SignedI32(xi, Xw + (xOff / 16), (size_t)K);
+		if ((xOff & 15u) != 0) {
+			for (int k = 0; k < K; ++k)
+				xi[k] = int3_getSigned(Xw, xOff + (size_t)k);
+		}
+		gemvScaledInt3(Aw, aOff, lda, xi, yp, M, K, sc, nGroups, groupSize);
+		free64(xi);
+	} else if (t == BINARY) {
+		const uint64_t* A = (const uint64_t*)(ww ? ww->data() : wOwn.data());
+		const uint64_t* X = (const uint64_t*)(xx ? xx->data() : xOwn.data());
+		const size_t aOff = ww ? ww->getOffset() : 0;
+		const size_t xOff = xx ? xx->getOffset() : 0;
+		gemvScaledBinary(A, aOff, lda, X, xOff, yp, M, K, sc, nGroups, groupSize);
+	} else if (t == F16 || t == BF16) {
+		float* xf = (float*)alloc64((size_t)K * sizeof(float));
+		float* af = (float*)alloc64((size_t)K * sizeof(float));
+		const uint16_t* xp = (const uint16_t*)(xx ? xx->data() : xOwn.data())
+			+ (xx ? xx->getOffset() : 0);
+		const uint16_t* Ap = (const uint16_t*)(ww ? ww->data() : wOwn.data())
+			+ (ww ? ww->getOffset() : 0);
+		for (int k = 0; k < K; ++k)
+			xf[k] = ndarray_half::load(t, xp[k]);
+		for (int i = 0; i < M; ++i) {
+			const uint16_t* arow = Ap + (size_t)i * lda;
+			for (int k = 0; k < K; ++k)
+				af[k] = ndarray_half::load(t, arow[k]);
+			float acc = 0.f;
+			for (int g = 0; g < nGroups; ++g) {
+				const int k0 = g * groupSize;
+				const int n = ((k0 + groupSize < K) ? (k0 + groupSize) : K) - k0;
+				acc += sc[(size_t)i * (size_t)nGroups + (size_t)g]
+					* dotRange4<float, float>(af + k0, xf + k0, n);
+			}
+			yp[i] = acc;
+		}
+		free64(xf);
+		free64(af);
+	} else {
+		const void* Ap = ww ? (const char*)ww->data() + ww->getOffset() * denseElemSize(t)
+		                    : wOwn.data();
+		const void* xp = xx ? (const char*)xx->data() + xx->getOffset() * denseElemSize(t)
+		                    : xOwn.data();
+		const int ilda = (int)lda;
+		switch (t) {
+			case F32:
+				gemvScaledDense<float, float>((const float*)Ap, ilda, (const float*)xp,
+				                              yp, M, K, sc, nGroups, groupSize);
+				break;
+			case F64:
+				gemvScaledDense<double, double>((const double*)Ap, ilda, (const double*)xp,
+				                                yp, M, K, sc, nGroups, groupSize);
+				break;
+			case INT8:
+				gemvScaledDense<int8_t, int32_t>((const int8_t*)Ap, ilda, (const int8_t*)xp,
+				                                 yp, M, K, sc, nGroups, groupSize);
+				break;
+			case UINT8:
+				gemvScaledDense<uint8_t, int32_t>((const uint8_t*)Ap, ilda, (const uint8_t*)xp,
+				                                  yp, M, K, sc, nGroups, groupSize);
+				break;
+			case INT32:
+				gemvScaledDense<int32_t, int64_t>((const int32_t*)Ap, ilda, (const int32_t*)xp,
+				                                  yp, M, K, sc, nGroups, groupSize);
+				break;
+			case INT64:
+#if defined(__SIZEOF_INT128__)
+				gemvScaledI64((const int64_t*)Ap, ilda, (const int64_t*)xp,
+				              yp, M, K, sc, nGroups, groupSize);
+#else
+				gemvScaledDense<int64_t, int64_t>((const int64_t*)Ap, ilda, (const int64_t*)xp,
+				                                  yp, M, K, sc, nGroups, groupSize);
+#endif
+				break;
+			case UINT256: {
+				const uint256_t* A256 = (const uint256_t*)Ap;
+				const uint256_t* x256 = (const uint256_t*)xp;
+				for (int i = 0; i < M; ++i) {
+					float acc = 0.f;
+					for (int g = 0; g < nGroups; ++g) {
+						const int k0 = g * groupSize;
+						const int k1 = (k0 + groupSize < K) ? (k0 + groupSize) : K;
+						uint256_t dot(0);
+						for (int k = k0; k < k1; ++k)
+							dot = dot + A256[(size_t)i * (size_t)ilda + (size_t)k] * x256[k];
+						acc += sc[(size_t)i * (size_t)nGroups + (size_t)g] * (float)dot.toDouble();
+					}
+					yp[i] = acc;
+				}
+				break;
+			}
+			default:
+				if (sc != scStack)
+					free64(sc);
+				throw std::invalid_argument("NDArray::gemv - unsupported type");
+		}
+	}
+
+	if (sc != scStack)
+		free64(sc);
+	return y;
 }

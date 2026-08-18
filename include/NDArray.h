@@ -354,6 +354,14 @@ public:
 	NDArray gemv(const NDArrayView& x) const;
 	/** gemv against an NDArray (uses `x.view()`). */
 	NDArray gemv(const NDArray& x) const;
+	/**
+	 * Group-scaled GEMV: y[i] = sum_g scale[i,g] * (W[i,g] · x[g]).
+	 * W is [M,K], x is [K] (same type as W). groupSize > 0;
+	 * nGroups = ceil(K / groupSize). scales is [M] when groupSize == K,
+	 * else [M, nGroups]. Result is F32 [M]. UINT8 is 0..255 (no -128).
+	 */
+	NDArray gemv(const NDArrayView& x, const NDArrayView& scales, int groupSize) const;
+	NDArray gemv(const NDArray& x, const NDArray& scales, int groupSize) const;
 
 	template <typename T>
 	/** Element at `indices` (rank must match). */
@@ -682,6 +690,9 @@ public:
 	NDArray gemv(const NDArray& x) const;
 	/** gemv against a view. */
 	NDArray gemv(const NDArrayView& x) const;
+	/** Group-scaled GEMV. See NDArrayView::gemv(x, scales, groupSize). */
+	NDArray gemv(const NDArray& x, const NDArray& scales, int groupSize) const;
+	NDArray gemv(const NDArrayView& x, const NDArrayView& scales, int groupSize) const;
 
 	/** Start a chained index proxy (`a[i][j]`). Full rank required to read/write. */
 	Ref operator[](int i);

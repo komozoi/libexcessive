@@ -7,5 +7,7 @@ class NDArray;
 class NDArrayView;
 
 NDArray ndmatmul(const NDArrayView& a, const NDArrayView& b);
+NDArray ndgemvScaled(const NDArrayView& w, const NDArrayView& x,
+                     const NDArrayView& scales, int groupSize);
 
 #endif
