@@ -4429,19 +4429,32 @@ bool NDArray::all() const {
 	}
 }
 
+static int popcnt64(uint64_t x) {
+#if defined(__GNUC__) || defined(__clang__)
+	return __builtin_popcountll(x);
+#else
+	int n = 0;
+	while (x) {
+		n += (int)(x & 1u);
+		x >>= 1;
+	}
+	return n;
+#endif
+}
+
 int NDArray::countNonzero() const {
 	int total = 0;
 
 	if (type == BINARY) {
 		for (size_t i = 0; i < memorySize / 8; i++)
-			total += _popcnt64(uint64[i]);
+			total += popcnt64(uint64[i]);
 		return total;
 	} else if (type == INT3 /* || type == INT4 || type == UINT3 || type == UINT4*/) {
 		for (size_t i = 0; i < memorySize / 8; i++) {
 			uint64_t tmp = uint64[i];
 			tmp = (tmp & 0x3333333333333333) | ((tmp >> 2) & 0x3333333333333333);
 			tmp = (tmp & 0x1111111111111111) | ((tmp >> 1) & 0x1111111111111111);
-			total += _popcnt64(tmp);
+			total += popcnt64(tmp);
 		}
 	} else if (type == UINT8)
 		for (size_t i = 0; i < memorySize; i++)
