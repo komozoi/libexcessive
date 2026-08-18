@@ -7,12 +7,10 @@
 #include "fs/FdHandle.h"
 #include "ndarray_int3.h"
 #include "ndarray_half_kernels.h"
+#include "parallel/ThreadPool.h"
 
 #include <cstring>
-#include <cstdlib>
-#include <cstdint>
 #include <stdexcept>
-#include <thread>
 
 #if defined(_MSC_VER)
 #define NDM_RESTRICT __restrict
@@ -160,18 +158,23 @@ static void free64(void* p) {
 #endif
 }
 
-// Spawn only when the GEMM is large enough to hide thread create/join.
-static int ndmChooseThreads(size_t work) {
-	// std::thread create/join is tens of microseconds; only pay it on huge GEMMs.
-	if (work < 80000000ULL)
-		return 1;
-	unsigned hc = std::thread::hardware_concurrency();
-	int n = (int)hc;
-	if (n > 8)
-		n = 8;
-	if (n < 1)
-		n = 1;
-	return n;
+struct NdmStripJob {
+	void (*fn)(void*, int, int);
+	void* ctx;
+	int N;
+	int nc;
+};
+
+static void ndmStripWorker(int worker, int nWorkers, void* raw) {
+	(void)nWorkers;
+	NdmStripJob* job = (NdmStripJob*)raw;
+	int ja = worker * job->nc;
+	if (ja >= job->N)
+		return;
+	int jb = ja + job->nc;
+	if (jb > job->N)
+		jb = job->N;
+	job->fn(job->ctx, ja, jb);
 }
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -179,33 +182,32 @@ __attribute__((unused))
 #endif
 static void ndmRunNStrips(int N, int nrAlign, size_t work,
                           void (*fn)(void*, int, int), void* ctx) {
-	int nt = ndmChooseThreads(work);
-	int nc = N;
-	if (nt > 1) {
-		nc = (N + nt - 1) / nt;
-		nc = (nc + nrAlign - 1) / nrAlign * nrAlign;
-		if (nc < nrAlign)
-			nc = nrAlign;
-		nt = (N + nc - 1) / nc;
-	}
-	if (nt <= 1) {
+	if (work < 80000000ULL || N <= 0) {
 		fn(ctx, 0, N);
 		return;
 	}
-	std::thread* th = new std::thread[nt];
-	int t;
-	for (t = 0; t < nt; ++t) {
-		int ja = t * nc;
-		int jb = ja + nc;
-		if (ja > N)
-			ja = N;
-		if (jb > N)
-			jb = N;
-		th[t] = std::thread(fn, ctx, ja, jb);
+	ThreadPool& pool = ThreadPool::getDefault();
+	int nWorkers = pool.getPoolSize() + 1;
+	if (nWorkers < 2) {
+		fn(ctx, 0, N);
+		return;
 	}
-	for (t = 0; t < nt; ++t)
-		th[t].join();
-	delete[] th;
+	int nc = (N + nWorkers - 1) / nWorkers;
+	if (nrAlign > 1) {
+		nc = (nc + nrAlign - 1) / nrAlign * nrAlign;
+		if (nc < nrAlign)
+			nc = nrAlign;
+	}
+	if (nc >= N) {
+		fn(ctx, 0, N);
+		return;
+	}
+	NdmStripJob job;
+	job.fn = fn;
+	job.ctx = ctx;
+	job.N = N;
+	job.nc = nc;
+	pool.parallelFor(ndmStripWorker, &job);
 }
 
 static size_t popcnt64(uint64_t x) {

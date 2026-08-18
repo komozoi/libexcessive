@@ -324,6 +324,17 @@ TEST(NDArray_matmul, F32_TiledBeatsNaive) {
 		<< "tiled=" << tiledUs << "us naive=" << naiveUs << "us";
 }
 
+// 448³ > 80e6, so ndmRunNStrips uses the default ThreadPool.
+TEST(NDArray_matmul, F32_ParallelStripsMatchIdentity) {
+	const int n = 448;
+	NDArray a({n, n}, F32);
+	for (int i = 0; i < n; ++i)
+		for (int j = 0; j < n; ++j)
+			a.set({i, j}, (float)((i * 17 + j) % 13) * 0.1f);
+	NDArray I = identitySquare(n, F32);
+	expectClose(a.matmul(I), a);
+}
+
 TEST(NDArray_matmul, OddSizesMatchNaive) {
 	NDArray a({17, 19}, F32);
 	NDArray b({19, 23}, F32);
