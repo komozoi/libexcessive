@@ -291,8 +291,61 @@ TEST(NDArray_matmul, F32_TiledBeatsNaive) {
 	int64_t tiledUs = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
 	int64_t naiveUs = std::chrono::duration_cast<std::chrono::microseconds>(n1 - n0).count();
 	delete[] C;
-	// Tiling should not be slower than ~2x naive on this size (usually much faster).
-	EXPECT_LT(tiledUs, naiveUs * 2 + 5000);
+	// AVX-512 8×16 pack should beat a naive ijk by a wide margin on 192³.
+	EXPECT_LT(tiledUs * 4, naiveUs + 2000)
+		<< "tiled=" << tiledUs << "us naive=" << naiveUs << "us";
+}
+
+TEST(NDArray_matmul, OddSizesMatchNaive) {
+	NDArray a({17, 19}, F32);
+	NDArray b({19, 23}, F32);
+	fillSeq(a, 1);
+	fillSeq(b, 2);
+	expectClose(a.matmul(b), naiveMatmulI64(a, b));
+
+	NDArray a8({15, 17}, INT8);
+	NDArray b8({17, 13}, INT8);
+	for (int i = 0; i < 15 * 17; ++i)
+		a8.setFlat((size_t)i, (i % 7) - 3);
+	for (int i = 0; i < 17 * 13; ++i)
+		b8.setFlat((size_t)i, (i % 5) - 2);
+	expectClose(a8.matmul(b8), naiveMatmulI64(a8, b8));
+
+	NDArray au({16, 16}, UINT8);
+	NDArray bu({16, 16}, UINT8);
+	fillSeq(au, 3);
+	fillSeq(bu, 9);
+	expectClose(au.matmul(bu), naiveMatmulI64(au, bu));
+
+	NDArray a3({16, 16}, INT3);
+	NDArray b3({16, 16}, INT3);
+	for (int i = 0; i < 256; ++i) {
+		a3.setFlat((size_t)i, (i % 7) - 3);
+		b3.setFlat((size_t)i, (i % 5) - 2);
+	}
+	expectClose(a3.matmul(b3), naiveMatmulI64(a3, b3));
+
+	NDArray a3o({7, 11}, INT3);
+	NDArray b3o({11, 9}, INT3);
+	for (int i = 0; i < 77; ++i)
+		a3o.setFlat((size_t)i, (i % 7) - 3);
+	for (int i = 0; i < 99; ++i)
+		b3o.setFlat((size_t)i, (i % 5) - 2);
+	expectClose(a3o.matmul(b3o), naiveMatmulI64(a3o, b3o));
+
+	NDArray ab({64, 64}, BINARY);
+	NDArray bb({64, 64}, BINARY);
+	for (int i = 0; i < 64 * 64; ++i) {
+		ab.setFlat((size_t)i, (i * 3) & 1);
+		bb.setFlat((size_t)i, (i * 5) & 1);
+	}
+	expectClose(ab.matmul(bb), naiveMatmulI64(ab, bb));
+
+	NDArray ai({17, 18}, INT32);
+	NDArray bi({18, 19}, INT32);
+	fillSeq(ai, -4);
+	fillSeq(bi, 3);
+	expectClose(ai.matmul(bi), naiveMatmulI64(ai, bi));
 }
 
 TEST(NDArray_matmul, Dot1D) {
@@ -380,6 +433,100 @@ TEST(NDArray_matmul, INT3_LargerThan1x1) {
 	NDArray c = a.matmul(b);
 	EXPECT_EQ(c.type, INT32);
 	expectClose(c, naiveMatmulI64(a, b));
+}
+
+TEST(NDArray_matmul, INT3_GemvAndFatMatchNaive) {
+	NDArray a1({1, 96}, INT3);
+	NDArray b1({96, 80}, INT3);
+	for (int i = 0; i < 96; ++i)
+		a1.setFlat((size_t)i, (i % 7) - 3);
+	for (int i = 0; i < 96 * 80; ++i)
+		b1.setFlat((size_t)i, (i % 5) - 2);
+	expectClose(a1.matmul(b1), naiveMatmulI64(a1, b1));
+
+	NDArray at({80, 96}, INT3);
+	NDArray x({96, 1}, INT3);
+	for (int i = 0; i < 80 * 96; ++i)
+		at.setFlat((size_t)i, (i % 7) - 3);
+	for (int i = 0; i < 96; ++i)
+		x.setFlat((size_t)i, (i % 5) - 2);
+	expectClose(at.matmul(x), naiveMatmulI64(at, x));
+
+	NDArray a8({8, 64}, INT3);
+	NDArray b8({64, 80}, INT3);
+	for (int i = 0; i < 8 * 64; ++i)
+		a8.setFlat((size_t)i, (i % 7) - 3);
+	for (int i = 0; i < 64 * 80; ++i)
+		b8.setFlat((size_t)i, (i % 5) - 2);
+	expectClose(a8.matmul(b8), naiveMatmulI64(a8, b8));
+
+	NDArray ao({3, 17}, INT3);
+	NDArray bo({17, 19}, INT3);
+	for (int i = 0; i < 51; ++i)
+		ao.setFlat((size_t)i, (i % 7) - 3);
+	for (int i = 0; i < 17 * 19; ++i)
+		bo.setFlat((size_t)i, (i % 5) - 2);
+	expectClose(ao.matmul(bo), naiveMatmulI64(ao, bo));
+}
+
+TEST(NDArray_matmul, INT3_StreamBeatsUnpack) {
+	const int K = 2048;
+	const int N = 2048;
+	NDArray a({1, K}, INT3);
+	NDArray b({K, N}, INT3);
+	for (int i = 0; i < K; ++i)
+		a.setFlat((size_t)i, (i % 7) - 3);
+	for (int i = 0; i < K * N; ++i)
+		b.setFlat((size_t)i, (i % 5) - 2);
+
+	NDArray got = a.matmul(b);
+	EXPECT_EQ(got.type, INT32);
+	{
+		int acc0 = 0;
+		int acc16 = 0;
+		int accN = 0;
+		for (int k = 0; k < K; ++k) {
+			int av = a.get<int>({0, k});
+			acc0 += av * b.get<int>({k, 0});
+			acc16 += av * b.get<int>({k, 16});
+			accN += av * b.get<int>({k, N - 1});
+		}
+		EXPECT_EQ(got.get<int>({0, 0}), acc0);
+		EXPECT_EQ(got.get<int>({0, 16}), acc16);
+		EXPECT_EQ(got.get<int>({0, N - 1}), accN);
+	}
+
+	(void)a.matmul(b);
+	std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+	NDArray c2 = a.matmul(b);
+	std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+	(void)c2;
+
+	int8_t* A = new int8_t[K];
+	int8_t* B = new int8_t[(size_t)K * (size_t)N];
+	int32_t* C = new int32_t[N];
+	std::chrono::steady_clock::time_point u0 = std::chrono::steady_clock::now();
+	for (int k = 0; k < K; ++k)
+		A[k] = (int8_t)a.get<int>({0, k});
+	for (int k = 0; k < K; ++k)
+		for (int j = 0; j < N; ++j)
+			B[(size_t)k * (size_t)N + (size_t)j] = (int8_t)b.get<int>({k, j});
+	for (int j = 0; j < N; ++j) {
+		int acc = 0;
+		for (int k = 0; k < K; ++k)
+			acc += (int)A[k] * (int)B[(size_t)k * (size_t)N + (size_t)j];
+		C[j] = acc;
+	}
+	std::chrono::steady_clock::time_point u1 = std::chrono::steady_clock::now();
+	EXPECT_EQ(got.get<int>({0, 0}), C[0]);
+	delete[] A;
+	delete[] B;
+	delete[] C;
+
+	int64_t streamUs = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+	int64_t unpackUs = std::chrono::duration_cast<std::chrono::microseconds>(u1 - u0).count();
+	EXPECT_LT(streamUs * 20, unpackUs + 2000)
+		<< "stream=" << streamUs << "us unpack-dot=" << unpackUs << "us";
 }
 
 TEST(NDArray_matmul, BINARY_Larger) {

@@ -453,36 +453,35 @@ public:
 	NDArray& div(const NDArray& other);
 
 	/**
-	 * Adds `other` into `*this` with broadcasting.
+	 * Adds `other` into `*this` with NumPy broadcasting.
 	 *
-	 * `other.shape` must be a prefix of `this->shape`.  Each element of
-	 * `other` is applied to a contiguous block of `*this` corresponding to
-	 * the remaining (trailing) dimensions.
+	 * `other` must be broadcastable to `this->shape` (right-align; size-1
+	 * axes expand). Destination shape is unchanged.
 	 *
 	 * Promotes `*this` when needed so precision is not lost.
 	 * Does not mutate `other`.
 	 *
-	 * @param other array to add (broadcast along outer axes)
+	 * @param other array to add
 	 * @return *this
 	 */
 	NDArray& broadcastAdd(const NDArray& other);
 
 	/**
-	 * Subtracts a broadcasted `other` from `*this` (prefix-shape rule).
+	 * Subtracts a broadcasted `other` from `*this` (NumPy rule).
 	 * Promotes `*this` when needed so precision is not lost.
 	 * Does not mutate `other`.
 	 */
 	NDArray& broadcastSub(const NDArray& other);
 
 	/**
-	 * Multiplies `*this` by a broadcasted `other` (prefix-shape rule).
+	 * Multiplies `*this` by a broadcasted `other` (NumPy rule).
 	 * Promotes `*this` when needed so precision is not lost.
 	 * Does not mutate `other`.
 	 */
 	NDArray& broadcastMul(const NDArray& other);
 
 	/**
-	 * Divides `*this` by a broadcasted `other` (prefix-shape rule).
+	 * Divides `*this` by a broadcasted `other` (NumPy rule).
 	 * Promotes `*this` when needed so precision is not lost.
 	 * Does not mutate `other`.
 	 */
@@ -1229,7 +1228,7 @@ private:
 	 */
 	NDArray& broadcastOpInPlace(const NDArray& other, ArithOp op);
 	/** Apply broadcast op; requires same type and prefix shape. */
-	void applyBroadcastInPlace(const NDArray& src, ArithOp op);
+	void applyBroadcastInPlace(const NDArrayView& src, ArithOp op);
 
 	NDArray binaryOp(const NDArray& other, ArithOp op) const;
 	NDArray scalarFloatOp(float other, ArithOp op) const;

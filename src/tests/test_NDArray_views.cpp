@@ -120,6 +120,12 @@ TEST(NDArray_views, NotBroadcastable_Throws) {
 	EXPECT_THROW(a.broadcastTo(ArrayList<int>({2, 4})), std::invalid_argument);
 }
 
+TEST(NDArray_views, CannotDropLeadingAxis) {
+	NDArray a({2, 3}, F32);
+	EXPECT_FALSE(a.isBroadcastableTo(ArrayList<int>({3})));
+	EXPECT_THROW(a.broadcastTo(ArrayList<int>({3})), std::invalid_argument);
+}
+
 TEST(NDArray_views, ReshapeNegativeAxis_Throws) {
 	NDArray empty({0}, F32);
 	EXPECT_THROW(empty.reshapeView(ArrayList<int>({-1})), std::invalid_argument);

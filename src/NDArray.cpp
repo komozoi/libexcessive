@@ -289,14 +289,7 @@ static void requireSameShape(const NDArray& a, const NDArray& b) {
 			throw std::invalid_argument("NDArray: shape mismatch");
 }
 
-static bool isPrefixShape(const ArrayList<int>& prefix, const ArrayList<int>& full) {
-	if (prefix.size() > full.size())
-		return false;
-	for (int i = 0; i < prefix.size(); ++i)
-		if (prefix.get(i) != full.get(i))
-			return false;
-	return true;
-}
+
 
 
 // ---- NDArrayBuffer ---------------------------------------------------------
@@ -896,6 +889,8 @@ size_t NDArrayView::computeOffset(const ArrayList<int>& indices) const {
 bool NDArrayView::isBroadcastableTo(const ArrayList<int>& targetShape) const {
 	int ar = shape.size();
 	int tr = targetShape.size();
+	if (ar > tr)
+		return false;
 	for (int i = 0; i < tr; ++i) {
 		int ti = targetShape.get(tr - 1 - i);
 		int si = (i < ar) ? shape.get(ar - 1 - i) : 1;
@@ -2019,123 +2014,138 @@ NDArray& NDArray::sub(const NDArray& other) { return binaryOpInPlace(other, Arit
 NDArray& NDArray::mul(const NDArray& other) { return binaryOpInPlace(other, ArithOp::Mul); }
 NDArray& NDArray::div(const NDArray& other) { return binaryOpInPlace(other, ArithOp::Div); }
 
-void NDArray::applyBroadcastInPlace(const NDArray& src, ArithOp op) {
+void NDArray::applyBroadcastInPlace(const NDArrayView& src, ArithOp op) {
 	ensureWritable();
-	const size_t thisN = numElements();
-	const size_t otherN = src.numElements();
-	const size_t block = (otherN == 0) ? thisN : (thisN / otherN);
-
-	for (size_t i = 0; i < otherN; ++i) {
-		for (size_t j = 0; j < block; ++j) {
-			const size_t idx = i * block + j;
-			switch (type) {
-				case F32:
-					switch (op) {
-						case ArithOp::Add: float32[idx] += src.float32[i]; break;
-						case ArithOp::Sub: float32[idx] -= src.float32[i]; break;
-						case ArithOp::Mul: float32[idx] *= src.float32[i]; break;
-						case ArithOp::Div: float32[idx] /= src.float32[i]; break;
-					}
-					break;
-				case F64:
-					switch (op) {
-						case ArithOp::Add: float64[idx] += src.float64[i]; break;
-						case ArithOp::Sub: float64[idx] -= src.float64[i]; break;
-						case ArithOp::Mul: float64[idx] *= src.float64[i]; break;
-						case ArithOp::Div: float64[idx] /= src.float64[i]; break;
-					}
-					break;
-				case UINT8:
-					switch (op) {
-						case ArithOp::Add: uint8[idx] = (uint8_t)(uint8[idx] + src.uint8[i]); break;
-						case ArithOp::Sub: uint8[idx] = (uint8_t)(uint8[idx] - src.uint8[i]); break;
-						case ArithOp::Mul: uint8[idx] = (uint8_t)(uint8[idx] * src.uint8[i]); break;
-						case ArithOp::Div: uint8[idx] = (uint8_t)(uint8[idx] / src.uint8[i]); break;
-					}
-					break;
-				case INT8:
-					switch (op) {
-						case ArithOp::Add: int8[idx] = (int8_t)(int8[idx] + src.int8[i]); break;
-						case ArithOp::Sub: int8[idx] = (int8_t)(int8[idx] - src.int8[i]); break;
-						case ArithOp::Mul: int8[idx] = (int8_t)(int8[idx] * src.int8[i]); break;
-						case ArithOp::Div: int8[idx] = (int8_t)(int8[idx] / src.int8[i]); break;
-					}
-					break;
-				case INT32:
-					switch (op) {
-						case ArithOp::Add: int32[idx] += src.int32[i]; break;
-						case ArithOp::Sub: int32[idx] -= src.int32[i]; break;
-						case ArithOp::Mul: int32[idx] *= src.int32[i]; break;
-						case ArithOp::Div: int32[idx] /= src.int32[i]; break;
-					}
-					break;
-				case INT64:
-					switch (op) {
-						case ArithOp::Add: int64[idx] += src.int64[i]; break;
-						case ArithOp::Sub: int64[idx] -= src.int64[i]; break;
-						case ArithOp::Mul: int64[idx] *= src.int64[i]; break;
-						case ArithOp::Div: int64[idx] /= src.int64[i]; break;
-					}
-					break;
-				case UINT256:
-					switch (op) {
-						case ArithOp::Add: uint256[idx] += src.uint256[i]; break;
-						case ArithOp::Sub: uint256[idx] -= src.uint256[i]; break;
-						case ArithOp::Mul: uint256[idx] = uint256[idx] * src.uint256[i]; break;
-						case ArithOp::Div: uint256[idx] = uint256[idx] / src.uint256[i]; break;
-					}
-					break;
-				case BINARY: {
-					uint8_t a = binaryGet(uint64, idx);
-					uint8_t b = binaryGet(src.uint64, i);
-					uint8_t r = 0;
-					switch (op) {
-						case ArithOp::Add: r = (uint8_t)((a + b) & 1); break;
-						case ArithOp::Sub: r = (uint8_t)((a - b) & 1); break;
-						case ArithOp::Mul: r = (uint8_t)(a & b); break;
-						case ArithOp::Div:
-							if (b == 0)
-								throw std::invalid_argument("NDArray: division by zero");
-							r = a;
-							break;
-					}
-					binarySet(uint64, idx, r);
-					break;
+	const size_t n = numElements();
+	switch (type) {
+		case F32:
+			for (size_t i = 0; i < n; ++i) {
+				float b = (float)ndarray_detail::viewLoadDouble(src, viewElemOffset(src, i));
+				switch (op) {
+					case ArithOp::Add: float32[i] += b; break;
+					case ArithOp::Sub: float32[i] -= b; break;
+					case ArithOp::Mul: float32[i] *= b; break;
+					case ArithOp::Div: float32[i] /= b; break;
 				}
-				case INT3: {
-					int av = int3_getSigned(uint64, idx);
-					int bv = int3_getSigned(src.uint64, i);
-					int r = 0;
-					switch (op) {
-						case ArithOp::Add: r = av + bv; break;
-						case ArithOp::Sub: r = av - bv; break;
-						case ArithOp::Mul: r = av * bv; break;
-						case ArithOp::Div:
-							if (bv == 0)
-								throw std::invalid_argument("NDArray: division by zero");
-							r = av / bv;
-							break;
-					}
-					int3_setSigned(uint64, idx, r);
-					break;
-				}
-				default:
-					throw std::runtime_error("NDArray: invalid type in broadcast arithmetic");
 			}
-		}
+			break;
+		case F64:
+			for (size_t i = 0; i < n; ++i) {
+				double b = ndarray_detail::viewLoadDouble(src, viewElemOffset(src, i));
+				switch (op) {
+					case ArithOp::Add: float64[i] += b; break;
+					case ArithOp::Sub: float64[i] -= b; break;
+					case ArithOp::Mul: float64[i] *= b; break;
+					case ArithOp::Div: float64[i] /= b; break;
+				}
+			}
+			break;
+		case UINT8:
+			for (size_t i = 0; i < n; ++i) {
+				uint8_t b = (uint8_t)ndarray_detail::viewLoadI64(src, viewElemOffset(src, i));
+				switch (op) {
+					case ArithOp::Add: uint8[i] = (uint8_t)(uint8[i] + b); break;
+					case ArithOp::Sub: uint8[i] = (uint8_t)(uint8[i] - b); break;
+					case ArithOp::Mul: uint8[i] = (uint8_t)(uint8[i] * b); break;
+					case ArithOp::Div: uint8[i] = (uint8_t)(uint8[i] / b); break;
+				}
+			}
+			break;
+		case INT8:
+			for (size_t i = 0; i < n; ++i) {
+				int8_t b = (int8_t)ndarray_detail::viewLoadI64(src, viewElemOffset(src, i));
+				switch (op) {
+					case ArithOp::Add: int8[i] = (int8_t)(int8[i] + b); break;
+					case ArithOp::Sub: int8[i] = (int8_t)(int8[i] - b); break;
+					case ArithOp::Mul: int8[i] = (int8_t)(int8[i] * b); break;
+					case ArithOp::Div: int8[i] = (int8_t)(int8[i] / b); break;
+				}
+			}
+			break;
+		case INT32:
+			for (size_t i = 0; i < n; ++i) {
+				int32_t b = (int32_t)ndarray_detail::viewLoadI64(src, viewElemOffset(src, i));
+				switch (op) {
+					case ArithOp::Add: int32[i] += b; break;
+					case ArithOp::Sub: int32[i] -= b; break;
+					case ArithOp::Mul: int32[i] *= b; break;
+					case ArithOp::Div: int32[i] /= b; break;
+				}
+			}
+			break;
+		case INT64:
+			for (size_t i = 0; i < n; ++i) {
+				int64_t b = ndarray_detail::viewLoadI64(src, viewElemOffset(src, i));
+				switch (op) {
+					case ArithOp::Add: int64[i] += b; break;
+					case ArithOp::Sub: int64[i] -= b; break;
+					case ArithOp::Mul: int64[i] *= b; break;
+					case ArithOp::Div: int64[i] /= b; break;
+				}
+			}
+			break;
+		case UINT256:
+			for (size_t i = 0; i < n; ++i) {
+				uint256_t b = ndarray_detail::viewLoadU256(src, viewElemOffset(src, i));
+				switch (op) {
+					case ArithOp::Add: uint256[i] += b; break;
+					case ArithOp::Sub: uint256[i] -= b; break;
+					case ArithOp::Mul: uint256[i] = uint256[i] * b; break;
+					case ArithOp::Div: uint256[i] = uint256[i] / b; break;
+				}
+			}
+			break;
+		case BINARY:
+			for (size_t i = 0; i < n; ++i) {
+				uint8_t a = binaryGet(uint64, i);
+				uint8_t b = (uint8_t)ndarray_detail::viewLoadI64(src, viewElemOffset(src, i));
+				uint8_t r = 0;
+				switch (op) {
+					case ArithOp::Add: r = (uint8_t)((a + b) & 1); break;
+					case ArithOp::Sub: r = (uint8_t)((a - b) & 1); break;
+					case ArithOp::Mul: r = (uint8_t)(a & b); break;
+					case ArithOp::Div:
+						if (b == 0)
+							throw std::invalid_argument("NDArray: division by zero");
+						r = a;
+						break;
+				}
+				binarySet(uint64, i, r);
+			}
+			break;
+		case INT3:
+			for (size_t i = 0; i < n; ++i) {
+				int av = int3_getSigned(uint64, i);
+				int bv = (int)ndarray_detail::viewLoadI64(src, viewElemOffset(src, i));
+				int r = 0;
+				switch (op) {
+					case ArithOp::Add: r = av + bv; break;
+					case ArithOp::Sub: r = av - bv; break;
+					case ArithOp::Mul: r = av * bv; break;
+					case ArithOp::Div:
+						if (bv == 0)
+							throw std::invalid_argument("NDArray: division by zero");
+						r = av / bv;
+						break;
+				}
+				int3_setSigned(uint64, i, r);
+			}
+			break;
+		default:
+			throw std::runtime_error("NDArray: invalid type in broadcast arithmetic");
 	}
 }
 
 NDArray& NDArray::broadcastOpInPlace(const NDArray& other, ArithOp op) {
-	if (!isPrefixShape(other.shape, shape))
-		throw std::invalid_argument("NDArray: other.shape must be a prefix of this->shape for broadcast");
+	if (!other.isBroadcastableTo(shape))
+		throw std::invalid_argument("NDArray: other is not broadcastable to this shape");
 	NDArrayType resultType = promoteTypes(type, other.type);
 	promoteInPlace(resultType);
 	if (other.type == resultType) {
-		applyBroadcastInPlace(other, op);
+		applyBroadcastInPlace(other.broadcastTo(shape), op);
 	} else {
 		NDArray tmp = other.convert(resultType);
-		applyBroadcastInPlace(tmp, op);
+		applyBroadcastInPlace(tmp.broadcastTo(shape), op);
 	}
 	return *this;
 }

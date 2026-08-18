@@ -397,16 +397,35 @@ TEST(NDArray_arithmetic, NamedSubMulDiv) {
 
 
 // ============================================================
-// Broadcast ops — other.shape is a prefix of this->shape
+// Broadcast ops — NumPy: right-align, size-1 axes expand
 // ============================================================
 
-TEST(NDArray_arithmetic, BroadcastAdd_Prefix) {
-	// this: [2, 3], other: [2]  (prefix)
+TEST(NDArray_arithmetic, BroadcastAdd_Trailing) {
+	// {3} → {2,3}: the case views accept and prefix broadcast rejected
 	NDArray a({2, 3}, ArrayList({
 		1.0f, 1.0f, 1.0f,
 		1.0f, 1.0f, 1.0f
 	}));
-	NDArray b(ArrayList({10.0f, 20.0f}));
+	NDArray b(ArrayList({10.0f, 20.0f, 30.0f}));
+
+	ASSERT_TRUE(b.isBroadcastableTo(a.shape));
+	a.broadcastAdd(b);
+
+	EXPECT_FLOAT_EQ(a.get<float>({0, 0}), 11.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 1}), 21.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 2}), 31.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 0}), 11.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 1}), 21.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 2}), 31.0f);
+}
+
+TEST(NDArray_arithmetic, BroadcastAdd_Size1) {
+	// {2,1} → {2,3}
+	NDArray a({2, 3}, ArrayList({
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f
+	}));
+	NDArray b({2, 1}, ArrayList({10.0f, 20.0f}));
 
 	a.broadcastAdd(b);
 
@@ -418,7 +437,7 @@ TEST(NDArray_arithmetic, BroadcastAdd_Prefix) {
 	EXPECT_FLOAT_EQ(a.get<float>({1, 2}), 21.0f);
 }
 
-TEST(NDArray_arithmetic, BroadcastSub_Prefix) {
+TEST(NDArray_arithmetic, BroadcastSub_Trailing) {
 	NDArray a({2, 2}, ArrayList({
 		10.0f, 10.0f,
 		20.0f, 20.0f
@@ -428,17 +447,17 @@ TEST(NDArray_arithmetic, BroadcastSub_Prefix) {
 	a.broadcastSub(b);
 
 	EXPECT_FLOAT_EQ(a.get<float>({0, 0}), 7.0f);
-	EXPECT_FLOAT_EQ(a.get<float>({0, 1}), 7.0f);
-	EXPECT_FLOAT_EQ(a.get<float>({1, 0}), 15.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 1}), 5.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 0}), 17.0f);
 	EXPECT_FLOAT_EQ(a.get<float>({1, 1}), 15.0f);
 }
 
-TEST(NDArray_arithmetic, BroadcastMul_Prefix) {
+TEST(NDArray_arithmetic, BroadcastMul_Size1) {
 	NDArray a({2, 3}, ArrayList({
 		1.0f, 2.0f, 3.0f,
 		4.0f, 5.0f, 6.0f
 	}));
-	NDArray b(ArrayList({10.0f, 100.0f}));
+	NDArray b({2, 1}, ArrayList({10.0f, 100.0f}));
 
 	a.broadcastMul(b);
 
@@ -450,7 +469,7 @@ TEST(NDArray_arithmetic, BroadcastMul_Prefix) {
 	EXPECT_FLOAT_EQ(a.get<float>({1, 2}), 600.0f);
 }
 
-TEST(NDArray_arithmetic, BroadcastDiv_Prefix) {
+TEST(NDArray_arithmetic, BroadcastDiv_Trailing) {
 	NDArray a({2, 2}, ArrayList({
 		10.0f, 20.0f,
 		30.0f, 40.0f
@@ -460,9 +479,27 @@ TEST(NDArray_arithmetic, BroadcastDiv_Prefix) {
 	a.broadcastDiv(b);
 
 	EXPECT_FLOAT_EQ(a.get<float>({0, 0}), 5.0f);
-	EXPECT_FLOAT_EQ(a.get<float>({0, 1}), 10.0f);
-	EXPECT_FLOAT_EQ(a.get<float>({1, 0}), 3.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 1}), 2.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 0}), 15.0f);
 	EXPECT_FLOAT_EQ(a.get<float>({1, 1}), 4.0f);
+}
+
+TEST(NDArray_arithmetic, BroadcastAdd_InsertMiddle) {
+	NDArray a({2, 3, 4}, F32);
+	for (int i = 0; i < 2; ++i)
+		for (int j = 0; j < 3; ++j)
+			for (int k = 0; k < 4; ++k)
+				a.set({i, j, k}, 1.0f);
+	NDArray b({2, 3, 1}, F32);
+	float v = 0.0f;
+	for (int i = 0; i < 2; ++i)
+		for (int j = 0; j < 3; ++j)
+			b.set({i, j, 0}, v++);
+
+	a.broadcastAdd(b);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 0, 0}), 1.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 0, 3}), 1.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 2, 1}), 6.0f);
 }
 
 TEST(NDArray_arithmetic, BroadcastAdd_FullPrefix) {
@@ -475,25 +512,29 @@ TEST(NDArray_arithmetic, BroadcastAdd_FullPrefix) {
 	EXPECT_FLOAT_EQ(a.get<float>({2}), 9.0f);
 }
 
-TEST(NDArray_arithmetic, Broadcast_NotPrefix_Throws) {
+TEST(NDArray_arithmetic, Broadcast_NotBroadcastable_Throws) {
 	NDArray a({2, 3}, F32);
-	NDArray b({3}, F32); // not a prefix of [2,3]
+	NDArray b({4}, F32);
 	EXPECT_THROW(a.broadcastAdd(b), std::invalid_argument);
 	EXPECT_THROW(a.broadcastSub(b), std::invalid_argument);
 	EXPECT_THROW(a.broadcastMul(b), std::invalid_argument);
 	EXPECT_THROW(a.broadcastDiv(b), std::invalid_argument);
+
+	NDArray lead({2}, F32); // {2} vs last axis 3
+	EXPECT_FALSE(lead.isBroadcastableTo(a.shape));
+	EXPECT_THROW(a.broadcastAdd(lead), std::invalid_argument);
 }
 
 TEST(NDArray_arithmetic, Broadcast_PromotesDestination) {
-	// UINT8 destination + F32 broadcast source → promote to F32
+	// UINT8 destination + F32 trailing broadcast → promote to F32
 	NDArray a({2, 2}, ArrayList<uint8_t>({1, 1, 1, 1}));
 	NDArray b(ArrayList({0.5f, 2.0f}));
 
 	a.broadcastAdd(b);
 	EXPECT_EQ(a.type, F32);
 	EXPECT_FLOAT_EQ(a.get<float>({0, 0}), 1.5f);
-	EXPECT_FLOAT_EQ(a.get<float>({0, 1}), 1.5f);
-	EXPECT_FLOAT_EQ(a.get<float>({1, 0}), 3.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({0, 1}), 3.0f);
+	EXPECT_FLOAT_EQ(a.get<float>({1, 0}), 1.5f);
 	EXPECT_FLOAT_EQ(a.get<float>({1, 1}), 3.0f);
 }
 

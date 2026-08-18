@@ -297,14 +297,14 @@ TEST(NDArray_int3, Sign) {
 	EXPECT_EQ(a.get<int>({4}), 1);
 }
 
-TEST(NDArray_int3, BroadcastAdd_Prefix) {
+TEST(NDArray_int3, BroadcastAdd_Size1) {
 	NDArray a({2, 3}, INT3);
 	for (int i = 0; i < 2; ++i)
 		for (int j = 0; j < 3; ++j)
 			a.set({i, j}, 1);
-	NDArray b({2}, INT3);
-	b.set({0}, 2);
-	b.set({1}, -3);
+	NDArray b({2, 1}, INT3);
+	b.set({0, 0}, 2);
+	b.set({1, 0}, -3);
 
 	a.broadcastAdd(b);
 	EXPECT_EQ(a.type, INT3);
@@ -316,15 +316,34 @@ TEST(NDArray_int3, BroadcastAdd_Prefix) {
 	EXPECT_EQ(a.get<int>({1, 2}), wrap3(1 + -3));
 }
 
+TEST(NDArray_int3, BroadcastAdd_Trailing) {
+	NDArray a({2, 3}, INT3);
+	for (int i = 0; i < 2; ++i)
+		for (int j = 0; j < 3; ++j)
+			a.set({i, j}, 1);
+	NDArray b({3}, INT3);
+	b.set({0}, 2);
+	b.set({1}, -3);
+	b.set({2}, 1);
+
+	a.broadcastAdd(b);
+	EXPECT_EQ(a.get<int>({0, 0}), 3);
+	EXPECT_EQ(a.get<int>({0, 1}), wrap3(1 + -3));
+	EXPECT_EQ(a.get<int>({0, 2}), 2);
+	EXPECT_EQ(a.get<int>({1, 0}), 3);
+	EXPECT_EQ(a.get<int>({1, 1}), wrap3(1 + -3));
+	EXPECT_EQ(a.get<int>({1, 2}), 2);
+}
+
 TEST(NDArray_int3, BroadcastAdd_WrapsLikeElemwise) {
 	NDArray a({2, 2}, INT3);
 	a.set({0, 0}, 3);
 	a.set({0, 1}, 3);
 	a.set({1, 0}, -4);
 	a.set({1, 1}, -4);
-	NDArray b({2}, INT3);
-	b.set({0}, 2);
-	b.set({1}, -1);
+	NDArray b({2, 1}, INT3);
+	b.set({0, 0}, 2);
+	b.set({1, 0}, -1);
 
 	a.broadcastAdd(b);
 	EXPECT_EQ(a.get<int>({0, 0}), wrap3(3 + 2));
