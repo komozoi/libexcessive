@@ -203,6 +203,8 @@ private:
 
 class NDArray {
 public:
+	/** Empty: shape {0}, type F32, no heap buffer. */
+	NDArray();
 	NDArray(ArrayList<int> shape, NDArrayType type);
 	NDArray(ArrayList<float> vector);
 	NDArray(ArrayList<double> vector);
@@ -253,6 +255,10 @@ public:
 	 */
 	static NDArray wrap(void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type);
 
+	/** Empty 1-D array (shape {0}), no heap buffer. Type F32 if omitted. */
+	static NDArray empty();
+	static NDArray empty(NDArrayType type);
+
 	NDArray(const NDArray& other);
 	NDArray(NDArray&& other) noexcept;
 	~NDArray();
@@ -284,6 +290,9 @@ public:
 	/** Number of logical elements (product of shape; 1 for a scalar).
 	 *  Throws if an axis is negative or the product overflows size_t. */
 	size_t numElements() const;
+
+	/** True when numElements() == 0. Rank-0 scalar is not empty. */
+	bool isEmpty() const;
 
 	/** Row-major element strides for this dense array. */
 	ArrayList<size_t> strides() const;

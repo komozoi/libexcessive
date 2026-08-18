@@ -10,6 +10,8 @@
 
 #include <gtest/gtest.h>
 #include <stdexcept>
+#include <type_traits>
+#include <utility>
 
 #include "NDArray.h"
 
@@ -316,6 +318,106 @@ TEST(NDArray_basics, ZeroAxis_IsEmpty) {
 	EXPECT_EQ(a.numElements(), (size_t)0);
 	EXPECT_EQ(a.shape.get(0), 0);
 	EXPECT_EQ(a.shape.get(1), 8);
+	EXPECT_TRUE(a.isEmpty());
+	EXPECT_FALSE(a.ownsStorage());
+	EXPECT_EQ(a.view().sharedBuffer().get(), nullptr);
+}
+
+// ============================================================
+// Default / empty construction (no dummy buffer)
+// ============================================================
+
+static void expectEmptyNoBuffer(const NDArray& a, NDArrayType type, const ArrayList<int>& shape) {
+	EXPECT_TRUE(a.isEmpty());
+	EXPECT_EQ(a.numElements(), (size_t)0);
+	EXPECT_EQ(a.type, type);
+	ASSERT_EQ(a.shape.size(), shape.size());
+	for (int i = 0; i < shape.size(); ++i)
+		EXPECT_EQ(a.shape.get(i), shape.get(i));
+	EXPECT_FALSE(a.ownsStorage());
+	EXPECT_EQ(a.view().sharedBuffer().get(), nullptr);
+}
+
+TEST(NDArray_basics, DefaultConstructible) {
+	static_assert(std::is_default_constructible_v<NDArray>, "NDArray must be default-constructible");
+	NDArray a;
+	expectEmptyNoBuffer(a, F32, {0});
+}
+
+TEST(NDArray_basics, EmptyFactory) {
+	expectEmptyNoBuffer(NDArray::empty(), F32, {0});
+	expectEmptyNoBuffer(NDArray::empty(INT3), INT3, {0});
+	expectEmptyNoBuffer(NDArray::empty(BINARY), BINARY, {0});
+}
+
+TEST(NDArray_basics, EmptyAsStructMember) {
+	struct Batch {
+		NDArray result;
+		int id = 0;
+	};
+	static_assert(std::is_default_constructible_v<Batch>, "struct with NDArray member");
+	Batch b;
+	EXPECT_EQ(b.id, 0);
+	expectEmptyNoBuffer(b.result, F32, {0});
+}
+
+TEST(NDArray_basics, EmptyAssignAndMove) {
+	NDArray empty;
+	NDArray filled({3}, F32);
+	filled.set({0}, 1.0f);
+	filled.set({1}, 2.0f);
+	filled.set({2}, 3.0f);
+
+	NDArray a = empty;
+	expectEmptyNoBuffer(a, F32, {0});
+	EXPECT_TRUE(a == empty);
+
+	a = filled;
+	EXPECT_FALSE(a.isEmpty());
+	EXPECT_EQ(a.numElements(), (size_t)3);
+	EXPECT_FLOAT_EQ(a.get<float>({1}), 2.0f);
+	EXPECT_TRUE(a.ownsStorage());
+
+	a = empty;
+	expectEmptyNoBuffer(a, F32, {0});
+
+	NDArray movedFromFilled = std::move(filled);
+	EXPECT_EQ(movedFromFilled.numElements(), (size_t)3);
+	EXPECT_FLOAT_EQ(movedFromFilled.get<float>({2}), 3.0f);
+	expectEmptyNoBuffer(filled, F32, {0});
+
+	NDArray dest({2}, UINT8);
+	dest = std::move(empty);
+	expectEmptyNoBuffer(dest, F32, {0});
+	expectEmptyNoBuffer(empty, F32, {0});
+
+	NDArray src = NDArray::empty(INT3);
+	NDArray taken = std::move(src);
+	expectEmptyNoBuffer(taken, INT3, {0});
+	expectEmptyNoBuffer(src, INT3, {0});
+}
+
+TEST(NDArray_basics, EmptyScalarIsNotEmpty) {
+	NDArray s({}, F32);
+	EXPECT_FALSE(s.isEmpty());
+	EXPECT_EQ(s.numElements(), (size_t)1);
+	EXPECT_TRUE(s.ownsStorage());
+	EXPECT_NE(s.view().sharedBuffer().get(), nullptr);
+}
+
+TEST(NDArray_basics, EmptyConvertAndIndexThrow) {
+	NDArray a = NDArray::empty(UINT8);
+	NDArray b = a.convert(F32);
+	expectEmptyNoBuffer(b, F32, {0});
+	EXPECT_THROW(a.get<uint8_t>({0}), std::out_of_range);
+	EXPECT_THROW(a.set({0}, 1), std::out_of_range);
+	EXPECT_THROW(a.getFlat<uint8_t>(0), std::out_of_range);
+	EXPECT_THROW((void)a.sum(), std::invalid_argument);
+}
+
+TEST(NDArray_basics, EmptyFromEmptyVector) {
+	NDArray v(ArrayList<float>{});
+	expectEmptyNoBuffer(v, F32, {0});
 }
 
 TEST(NDArray_basics, NegativeAxis_Throws) {

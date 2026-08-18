@@ -502,21 +502,36 @@ ArrayList<size_t> NDArray::rowMajorStrides(const ArrayList<int>& shape) {
 	return st;
 }
 
+NDArray::NDArray() : shape({0}), type(F32), memory(nullptr) {
+	initialize();
+}
+
 NDArray::NDArray(ArrayList<int> shape, NDArrayType type) : shape(std::move(shape)), type(type), memory(nullptr) {
 	initialize();
 }
 
+NDArray NDArray::empty() {
+	return empty(F32);
+}
+
+NDArray NDArray::empty(NDArrayType type) {
+	return NDArray({0}, type);
+}
+
 NDArray::NDArray(ArrayList<float> vector) : shape({vector.size()}), type(F32), memory(nullptr) {
 	initialize();
-	memcpy(float32, vector.getMemory(), memorySize);
+	if (memorySize)
+		memcpy(float32, vector.getMemory(), memorySize);
 }
 NDArray::NDArray(ArrayList<double> vector) : shape({vector.size()}), type(F64), memory(nullptr) {
 	initialize();
-	memcpy(float64, vector.getMemory(), memorySize);
+	if (memorySize)
+		memcpy(float64, vector.getMemory(), memorySize);
 }
 NDArray::NDArray(ArrayList<uint8_t> vector) : shape({vector.size()}), type(UINT8), memory(nullptr) {
 	initialize();
-	memcpy(uint8, vector.getMemory(), memorySize);
+	if (memorySize)
+		memcpy(uint8, vector.getMemory(), memorySize);
 }
 NDArray::NDArray(ArrayList<int32_t> vector)
 	: shape({vector.size()}),
@@ -527,7 +542,8 @@ NDArray::NDArray(ArrayList<int32_t> vector)
 		for (int i = 0; i < vector.size(); ++i)
 			int3_setSigned(uint64, (size_t)i, vector.get(i));
 	} else {
-		memcpy(int32, vector.getMemory(), memorySize);
+		if (memorySize)
+			memcpy(int32, vector.getMemory(), memorySize);
 	}
 }
 NDArray::NDArray(ArrayList<int64_t> vector)
@@ -539,7 +555,8 @@ NDArray::NDArray(ArrayList<int64_t> vector)
 		for (int i = 0; i < vector.size(); ++i)
 			int3_setSigned(uint64, (size_t)i, (int)vector.get(i));
 	} else {
-		memcpy(int64, vector.getMemory(), memorySize);
+		if (memorySize)
+			memcpy(int64, vector.getMemory(), memorySize);
 	}
 }
 
@@ -547,19 +564,22 @@ NDArray::NDArray(const ArrayList<int>& shape, ArrayList<float> vector) : shape(s
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
-	memcpy(float32, vector.getMemory(), memorySize);
+	if (memorySize)
+		memcpy(float32, vector.getMemory(), memorySize);
 }
 NDArray::NDArray(const ArrayList<int>& shape, ArrayList<double> vector) : shape(shape), type(F64), memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
-	memcpy(float64, vector.getMemory(), memorySize);
+	if (memorySize)
+		memcpy(float64, vector.getMemory(), memorySize);
 }
 NDArray::NDArray(const ArrayList<int>& shape, ArrayList<uint8_t> vector) : shape(shape), type(UINT8), memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
-	memcpy(uint8, vector.getMemory(), memorySize);
+	if (memorySize)
+		memcpy(uint8, vector.getMemory(), memorySize);
 }
 NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector)
 	: shape(shape),
@@ -572,7 +592,8 @@ NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector)
 		for (int i = 0; i < vector.size(); ++i)
 			int3_setSigned(uint64, (size_t)i, vector.get(i));
 	} else {
-		memcpy(int32, vector.getMemory(), memorySize);
+		if (memorySize)
+			memcpy(int32, vector.getMemory(), memorySize);
 	}
 }
 NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int64_t> vector)
@@ -586,7 +607,8 @@ NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int64_t> vector)
 		for (int i = 0; i < vector.size(); ++i)
 			int3_setSigned(uint64, (size_t)i, (int)vector.get(i));
 	} else {
-		memcpy(int64, vector.getMemory(), memorySize);
+		if (memorySize)
+			memcpy(int64, vector.getMemory(), memorySize);
 	}
 }
 
@@ -602,6 +624,8 @@ NDArray::NDArray(const NDArray& other)
 NDArray::NDArray(NDArray&& other) noexcept
 	: shape(std::move(other.shape)), type(other.type), buffer(std::move(other.buffer)), memory(nullptr) {
 	rebindPointers();
+	other.shape = ArrayList<int>({0});
+	other.buffer = nullptr;
 	other.memory = nullptr;
 	other.memorySize = 0;
 }
@@ -625,6 +649,8 @@ NDArray& NDArray::operator=(NDArray&& other) noexcept {
 		type = other.type;
 		buffer = std::move(other.buffer);
 		rebindPointers();
+		other.shape = ArrayList<int>({0});
+		other.buffer = nullptr;
 		other.memory = nullptr;
 		other.memorySize = 0;
 	}
@@ -633,6 +659,12 @@ NDArray& NDArray::operator=(NDArray&& other) noexcept {
 
 size_t NDArray::initialize() {
 	size_t totalElements = shapeElementCount(shape);
+	if (totalElements == 0) {
+		buffer = nullptr;
+		memory = nullptr;
+		memorySize = 0;
+		return 0;
+	}
 
 	memorySize = bufferBytesFor(type, totalElements);
 	// UNIQUE sole owner; first NDArray copy becomes COPY_ON_WRITE via sp copy rules.
@@ -643,6 +675,10 @@ size_t NDArray::initialize() {
 
 size_t NDArray::numElements() const {
 	return shapeElementCount(shape);
+}
+
+bool NDArray::isEmpty() const {
+	return numElements() == 0;
 }
 
 bool NDArray::operator==(const NDArray& other) const {
