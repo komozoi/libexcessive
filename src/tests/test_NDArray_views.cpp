@@ -4,6 +4,7 @@
 //
 // All rights reserved.
 
+#include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <stdexcept>
@@ -11,6 +12,30 @@
 #include "NDArray.h"
 #include "alloc/pointer.h"
 
+
+TEST(NDArray_views, GetFlat_INT64_PreservesAbove2p53) {
+	const int64_t big = (int64_t)1 << 60;
+	NDArray a({2}, INT64);
+	a.set({0}, big);
+	a.set({1}, -big);
+	EXPECT_EQ(a.getFlat<int64_t>(0), big);
+	EXPECT_EQ(a.view().getFlat<int64_t>(0), big);
+	EXPECT_EQ(a.view().getFlat<int64_t>(1), -big);
+	EXPECT_EQ(a.view().get<int64_t>(ArrayList<int>({0})), big);
+
+	NDArray m({2, 2}, INT64);
+	m.set({0, 0}, big);
+	m.set({0, 1}, (int64_t)1);
+	m.set({1, 0}, (int64_t)2);
+	m.set({1, 1}, -big);
+	NDArrayView t = m.transpose();
+	EXPECT_FALSE(t.isContiguous());
+	EXPECT_EQ(t.get<int64_t>(ArrayList<int>({0, 1})), (int64_t)2);
+	EXPECT_EQ(t.get<int64_t>(ArrayList<int>({1, 0})), (int64_t)1);
+	EXPECT_EQ(t.getFlat<int64_t>(1), (int64_t)2);
+	EXPECT_EQ(t.getFlat<int64_t>(2), (int64_t)1);
+	EXPECT_EQ(t.get<int64_t>(ArrayList<int>({1, 1})), -big);
+}
 
 TEST(NDArray_views, View_SharesData) {
 	NDArray a(ArrayList({1.0f, 2.0f, 3.0f}));

@@ -1968,7 +1968,31 @@ namespace ndarray_detail {
 		}
 	}
 	int64_t viewLoadI64(const NDArrayView& v, size_t elementOffset) {
-		return (int64_t)viewLoadDouble(v, elementOffset);
+		const void* data = v.sharedBuffer()->data;
+		switch (v.getType()) {
+			case BINARY: {
+				const uint64_t* words = (const uint64_t*)data;
+				return (int64_t)((words[elementOffset >> 6] >> (elementOffset & 63)) & 1ULL);
+			}
+			case INT3: {
+				const uint64_t* words = (const uint64_t*)data;
+				return (int64_t)int3_getSigned(words, elementOffset);
+			}
+			case UINT8: return (int64_t)((const uint8_t*)data)[elementOffset];
+			case INT8: return (int64_t)((const int8_t*)data)[elementOffset];
+			case INT32: return (int64_t)((const int32_t*)data)[elementOffset];
+			case INT64: return ((const int64_t*)data)[elementOffset];
+			case F16:
+			case BF16:
+				return (int64_t)ndarray_half::load(v.getType(),
+					((const uint16_t*)data)[elementOffset]);
+			case F32: return (int64_t)((const float*)data)[elementOffset];
+			case F64: return (int64_t)((const double*)data)[elementOffset];
+			case UINT256:
+				return (int64_t)(uint64_t)((const uint256_t*)data)[elementOffset];
+			default:
+				throw std::runtime_error("viewLoadI64: invalid type");
+		}
 	}
 	uint256_t viewLoadU256(const NDArrayView& v, size_t elementOffset) {
 		const void* data = v.sharedBuffer().get()->data;
