@@ -1130,7 +1130,9 @@ static int64_t binary_words_pop(const uint64_t* NDSCORE_RESTRICT a, const uint64
 	}
 #elif NDSCORE_NEON
 	{
+#if !defined(__aarch64__)
 		uint32x4_t vacc = vdupq_n_u32(0);
+#endif
 		for (; w + 2 <= fullWords; w += 2) {
 			uint8x16_t xa = vld1q_u8((const uint8_t*)(a + w));
 			uint8x16_t t;
