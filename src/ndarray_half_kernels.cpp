@@ -7,6 +7,13 @@
 #include <cmath>
 #include <cstring>
 
+// GCC -Waggressive-loop-optimizations: `size_t i + k <= n` can wrap, so a
+// leftover `i < nn` tail looks like 2^62 pointer steps. ptrdiff_t add is UB
+// on overflow, so the compiler must treat n as in-range. Shape products are.
+static inline ptrdiff_t ndhLen(size_t n) {
+	return (ptrdiff_t)n;
+}
+
 #if defined(_MSC_VER)
 #define NDH_RESTRICT __restrict
 #else
@@ -141,120 +148,124 @@ static inline uint16_t bf16StorePortable(float f) {
 // ---- F16 → F32 -------------------------------------------------------------
 
 void ndhalf_f16_to_f32(float* NDH_RESTRICT dst, const uint16_t* NDH_RESTRICT src, size_t n) {
-	size_t i = 0;
+	const ptrdiff_t nn = ndhLen(n);
+	ptrdiff_t i = 0;
 #if NDH_AVX512
-	for (; i + 16 <= n; i += 16) {
+	for (; i + 16 <= nn; i += 16) {
 		__m256i h = _mm256_loadu_si256((const __m256i*)(src + i));
 		_mm512_storeu_ps(dst + i, _mm512_cvtph_ps(h));
 	}
 #endif
 #if NDH_AVX2 && NDH_F16C
-	for (; i + 8 <= n; i += 8) {
+	for (; i + 8 <= nn; i += 8) {
 		__m128i h = _mm_loadu_si128((const __m128i*)(src + i));
 		_mm256_storeu_ps(dst + i, _mm256_cvtph_ps(h));
 	}
 #elif NDH_F16C
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		__m128i h = _mm_loadl_epi64((const __m128i*)(src + i));
 		_mm_storeu_ps(dst + i, _mm_cvtph_ps(h));
 	}
 #endif
 #if NDH_NEON_FP16
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		float16x4_t h = vld1_f16((const float16_t*)(src + i));
 		vst1q_f32(dst + i, vcvt_f32_f16(h));
 	}
 #endif
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		dst[i] = f16LoadPortable(src[i]);
 		dst[i + 1] = f16LoadPortable(src[i + 1]);
 		dst[i + 2] = f16LoadPortable(src[i + 2]);
 		dst[i + 3] = f16LoadPortable(src[i + 3]);
 	}
-	for (; i < n; ++i)
+	for (; i < nn; ++i)
 		dst[i] = f16LoadPortable(src[i]);
 }
 
 void ndhalf_f32_to_f16(uint16_t* NDH_RESTRICT dst, const float* NDH_RESTRICT src, size_t n) {
-	size_t i = 0;
+	const ptrdiff_t nn = ndhLen(n);
+	ptrdiff_t i = 0;
 #if NDH_AVX512
-	for (; i + 16 <= n; i += 16) {
+	for (; i + 16 <= nn; i += 16) {
 		__m256i h = _mm512_cvtps_ph(_mm512_loadu_ps(src + i), kCvtRound);
 		_mm256_storeu_si256((__m256i*)(dst + i), h);
 	}
 #endif
 #if NDH_AVX2 && NDH_F16C
-	for (; i + 8 <= n; i += 8) {
+	for (; i + 8 <= nn; i += 8) {
 		__m128i h = _mm256_cvtps_ph(_mm256_loadu_ps(src + i), kCvtRound);
 		_mm_storeu_si128((__m128i*)(dst + i), h);
 	}
 #elif NDH_F16C
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		__m128i h = _mm_cvtps_ph(_mm_loadu_ps(src + i), kCvtRound);
 		_mm_storel_epi64((__m128i*)(dst + i), h);
 	}
 #endif
 #if NDH_NEON_FP16
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		float16x4_t h = vcvt_f16_f32(vld1q_f32(src + i));
 		vst1_f16((float16_t*)(dst + i), h);
 	}
 #endif
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		dst[i] = f16StorePortable(src[i]);
 		dst[i + 1] = f16StorePortable(src[i + 1]);
 		dst[i + 2] = f16StorePortable(src[i + 2]);
 		dst[i + 3] = f16StorePortable(src[i + 3]);
 	}
-	for (; i < n; ++i)
+	for (; i < nn; ++i)
 		dst[i] = f16StorePortable(src[i]);
 }
 
 // ---- BF16 ↔ F32 ------------------------------------------------------------
 
 void ndhalf_bf16_to_f32(float* NDH_RESTRICT dst, const uint16_t* NDH_RESTRICT src, size_t n) {
-	size_t i = 0;
+	const ptrdiff_t nn = ndhLen(n);
+	ptrdiff_t i = 0;
 #if NDH_AVX512BF16
-	for (; i + 16 <= n; i += 16) {
+	for (; i + 16 <= nn; i += 16) {
 		__m256bh h;
 		std::memcpy(&h, src + i, 32);
 		_mm512_storeu_ps(dst + i, _mm512_cvtpbh_ps(h));
 	}
 #endif
 #if NDH_AVX2
-	for (; i + 8 <= n; i += 8) {
+	for (; i + 8 <= nn; i += 8) {
 		__m128i h = _mm_loadu_si128((const __m128i*)(src + i));
 		__m256i w = _mm256_slli_epi32(_mm256_cvtepu16_epi32(h), 16);
 		_mm256_storeu_ps(dst + i, _mm256_castsi256_ps(w));
 	}
 #endif
 #if NDH_NEON
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		uint16x4_t h = vld1_u16(src + i);
 		uint32x4_t w = vshll_n_u16(h, 16);
 		vst1q_f32(dst + i, vreinterpretq_f32_u32(w));
 	}
 #endif
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		dst[i] = bf16LoadPortable(src[i]);
 		dst[i + 1] = bf16LoadPortable(src[i + 1]);
 		dst[i + 2] = bf16LoadPortable(src[i + 2]);
 		dst[i + 3] = bf16LoadPortable(src[i + 3]);
 	}
-	for (; i < n; ++i)
+	for (; i < nn; ++i)
 		dst[i] = bf16LoadPortable(src[i]);
 }
 
 void ndhalf_f32_to_bf16(uint16_t* NDH_RESTRICT dst, const float* NDH_RESTRICT src, size_t n) {
-	size_t i = 0;
+	const ptrdiff_t nn = ndhLen(n);
+	ptrdiff_t i = 0;
 #if NDH_AVX512BF16
-	for (; i + 16 <= n; i += 16) {
+	for (; i + 16 <= nn; i += 16) {
 		__m256bh h = _mm512_cvtneps_pbh(_mm512_loadu_ps(src + i));
 		std::memcpy(dst + i, &h, 32);
 	}
 #endif
 #if NDH_AVX2
-	for (; i + 8 <= n; i += 8) {
+	for (; i + 8 <= nn; i += 8) {
 		__m256i x = _mm256_castps_si256(_mm256_loadu_ps(src + i));
 		__m256i absv = _mm256_and_si256(x, _mm256_set1_epi32((int)0x7fffffff));
 		__m256i isnan = _mm256_cmpgt_epi32(absv, _mm256_set1_epi32((int)0x7f800000));
@@ -269,7 +280,7 @@ void ndhalf_f32_to_bf16(uint16_t* NDH_RESTRICT dst, const float* NDH_RESTRICT sr
 	}
 #endif
 #if NDH_NEON
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		uint32x4_t x = vreinterpretq_u32_f32(vld1q_f32(src + i));
 		uint32x4_t absv = vandq_u32(x, vdupq_n_u32(0x7fffffffu));
 		uint32x4_t isnan = vcgtq_u32(absv, vdupq_n_u32(0x7f800000u));
@@ -281,13 +292,13 @@ void ndhalf_f32_to_bf16(uint16_t* NDH_RESTRICT dst, const float* NDH_RESTRICT sr
 		vst1_u16(dst + i, vmovn_u32(hi));
 	}
 #endif
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		dst[i] = bf16StorePortable(src[i]);
 		dst[i + 1] = bf16StorePortable(src[i + 1]);
 		dst[i + 2] = bf16StorePortable(src[i + 2]);
 		dst[i + 3] = bf16StorePortable(src[i + 3]);
 	}
-	for (; i < n; ++i)
+	for (; i < nn; ++i)
 		dst[i] = bf16StorePortable(src[i]);
 }
 
@@ -354,43 +365,44 @@ static inline float32x4_t ndhOpN4(float32x4_t a, float32x4_t b, NDHalfArith op) 
 
 static void ndhArithF32Buf(float* NDH_RESTRICT d, const float* NDH_RESTRICT a,
                            const float* NDH_RESTRICT b, size_t n, NDHalfArith op) {
-	size_t i = 0;
+	const ptrdiff_t nn = ndhLen(n);
+	ptrdiff_t i = 0;
 	switch (op) {
 		case NDHalfArith::Add:
-			for (; i + 4 <= n; i += 4) {
+			for (; i + 4 <= nn; i += 4) {
 				d[i] = a[i] + b[i];
 				d[i + 1] = a[i + 1] + b[i + 1];
 				d[i + 2] = a[i + 2] + b[i + 2];
 				d[i + 3] = a[i + 3] + b[i + 3];
 			}
-			for (; i < n; ++i) d[i] = a[i] + b[i];
+			for (; i < nn; ++i) d[i] = a[i] + b[i];
 			break;
 		case NDHalfArith::Sub:
-			for (; i + 4 <= n; i += 4) {
+			for (; i + 4 <= nn; i += 4) {
 				d[i] = a[i] - b[i];
 				d[i + 1] = a[i + 1] - b[i + 1];
 				d[i + 2] = a[i + 2] - b[i + 2];
 				d[i + 3] = a[i + 3] - b[i + 3];
 			}
-			for (; i < n; ++i) d[i] = a[i] - b[i];
+			for (; i < nn; ++i) d[i] = a[i] - b[i];
 			break;
 		case NDHalfArith::Mul:
-			for (; i + 4 <= n; i += 4) {
+			for (; i + 4 <= nn; i += 4) {
 				d[i] = a[i] * b[i];
 				d[i + 1] = a[i + 1] * b[i + 1];
 				d[i + 2] = a[i + 2] * b[i + 2];
 				d[i + 3] = a[i + 3] * b[i + 3];
 			}
-			for (; i < n; ++i) d[i] = a[i] * b[i];
+			for (; i < nn; ++i) d[i] = a[i] * b[i];
 			break;
 		case NDHalfArith::Div:
-			for (; i + 4 <= n; i += 4) {
+			for (; i + 4 <= nn; i += 4) {
 				d[i] = a[i] / b[i];
 				d[i + 1] = a[i + 1] / b[i + 1];
 				d[i + 2] = a[i + 2] / b[i + 2];
 				d[i + 3] = a[i + 3] / b[i + 3];
 			}
-			for (; i < n; ++i) d[i] = a[i] / b[i];
+			for (; i < nn; ++i) d[i] = a[i] / b[i];
 			break;
 	}
 }
@@ -423,23 +435,24 @@ static inline float16x8_t ndhOpH8(float16x8_t a, float16x8_t b, NDHalfArith op) 
 
 void ndhalf_arith_f16(uint16_t* NDH_RESTRICT dst, const uint16_t* NDH_RESTRICT a,
                       const uint16_t* NDH_RESTRICT b, size_t n, NDHalfArith op) {
-	size_t i = 0;
+	const ptrdiff_t nn = ndhLen(n);
+	ptrdiff_t i = 0;
 #if NDH_AVX512FP16
-	for (; i + 32 <= n; i += 32) {
+	for (; i + 32 <= nn; i += 32) {
 		__m512h xa = _mm512_castsi512_ph(_mm512_loadu_si512(a + i));
 		__m512h xb = _mm512_castsi512_ph(_mm512_loadu_si512(b + i));
 		_mm512_storeu_si512(dst + i, _mm512_castph_si512(ndhOpPh(xa, xb, op)));
 	}
 #endif
 #if NDH_NEON_FP16
-	for (; i + 8 <= n; i += 8) {
+	for (; i + 8 <= nn; i += 8) {
 		float16x8_t xa = vld1q_f16((const float16_t*)(a + i));
 		float16x8_t xb = vld1q_f16((const float16_t*)(b + i));
 		vst1q_f16((float16_t*)(dst + i), ndhOpH8(xa, xb, op));
 	}
 #endif
 #if NDH_AVX512
-	for (; i + 16 <= n; i += 16) {
+	for (; i + 16 <= nn; i += 16) {
 		__m512 fa = _mm512_cvtph_ps(_mm256_loadu_si256((const __m256i*)(a + i)));
 		__m512 fb = _mm512_cvtph_ps(_mm256_loadu_si256((const __m256i*)(b + i)));
 		__m256i h = _mm512_cvtps_ph(ndhOp512(fa, fb, op), kCvtRound);
@@ -447,20 +460,20 @@ void ndhalf_arith_f16(uint16_t* NDH_RESTRICT dst, const uint16_t* NDH_RESTRICT a
 	}
 #endif
 #if NDH_AVX2 && NDH_F16C
-	for (; i + 8 <= n; i += 8) {
+	for (; i + 8 <= nn; i += 8) {
 		__m256 fa = _mm256_cvtph_ps(_mm_loadu_si128((const __m128i*)(a + i)));
 		__m256 fb = _mm256_cvtph_ps(_mm_loadu_si128((const __m128i*)(b + i)));
 		_mm_storeu_si128((__m128i*)(dst + i), _mm256_cvtps_ph(ndhOp256(fa, fb, op), kCvtRound));
 	}
 #elif NDH_F16C
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		__m128 fa = _mm_cvtph_ps(_mm_loadl_epi64((const __m128i*)(a + i)));
 		__m128 fb = _mm_cvtph_ps(_mm_loadl_epi64((const __m128i*)(b + i)));
 		_mm_storel_epi64((__m128i*)(dst + i), _mm_cvtps_ph(ndhOp128(fa, fb, op), kCvtRound));
 	}
 #endif
 #if NDH_NEON && !NDH_NEON_FP16
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		float ta[4], tb[4], tr[4];
 		ndhalf_f16_to_f32(ta, a + i, 4);
 		ndhalf_f16_to_f32(tb, b + i, 4);
@@ -470,14 +483,14 @@ void ndhalf_arith_f16(uint16_t* NDH_RESTRICT dst, const uint16_t* NDH_RESTRICT a
 #endif
 	{
 		float ta[32], tb[32], tr[32];
-		for (; i + 32 <= n; i += 32) {
+		for (; i + 32 <= nn; i += 32) {
 			ndhalf_f16_to_f32(ta, a + i, 32);
 			ndhalf_f16_to_f32(tb, b + i, 32);
 			ndhArithF32Buf(tr, ta, tb, 32, op);
 			ndhalf_f32_to_f16(dst + i, tr, 32);
 		}
-		if (i < n) {
-			const size_t rem = n - i;
+		if (i < nn) {
+			const size_t rem = (size_t)(nn - i);
 			ndhalf_f16_to_f32(ta, a + i, rem);
 			ndhalf_f16_to_f32(tb, b + i, rem);
 			ndhArithF32Buf(tr, ta, tb, rem, op);
@@ -488,9 +501,10 @@ void ndhalf_arith_f16(uint16_t* NDH_RESTRICT dst, const uint16_t* NDH_RESTRICT a
 
 void ndhalf_arith_bf16(uint16_t* NDH_RESTRICT dst, const uint16_t* NDH_RESTRICT a,
                        const uint16_t* NDH_RESTRICT b, size_t n, NDHalfArith op) {
-	size_t i = 0;
+	const ptrdiff_t nn = ndhLen(n);
+	ptrdiff_t i = 0;
 #if NDH_AVX512BF16
-	for (; i + 16 <= n; i += 16) {
+	for (; i + 16 <= nn; i += 16) {
 		__m256bh ha, hb;
 		std::memcpy(&ha, a + i, 32);
 		std::memcpy(&hb, b + i, 32);
@@ -501,7 +515,7 @@ void ndhalf_arith_bf16(uint16_t* NDH_RESTRICT dst, const uint16_t* NDH_RESTRICT 
 	}
 #endif
 #if NDH_AVX2
-	for (; i + 8 <= n; i += 8) {
+	for (; i + 8 <= nn; i += 8) {
 		__m256 fa = _mm256_castsi256_ps(_mm256_slli_epi32(
 			_mm256_cvtepu16_epi32(_mm_loadu_si128((const __m128i*)(a + i))), 16));
 		__m256 fb = _mm256_castsi256_ps(_mm256_slli_epi32(
@@ -512,7 +526,7 @@ void ndhalf_arith_bf16(uint16_t* NDH_RESTRICT dst, const uint16_t* NDH_RESTRICT 
 	}
 #endif
 #if NDH_NEON
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		float32x4_t fa = vreinterpretq_f32_u32(vshll_n_u16(vld1_u16(a + i), 16));
 		float32x4_t fb = vreinterpretq_f32_u32(vshll_n_u16(vld1_u16(b + i), 16));
 		float tr[4];
@@ -522,14 +536,14 @@ void ndhalf_arith_bf16(uint16_t* NDH_RESTRICT dst, const uint16_t* NDH_RESTRICT 
 #endif
 	{
 		float ta[32], tb[32], tr[32];
-		for (; i + 32 <= n; i += 32) {
+		for (; i + 32 <= nn; i += 32) {
 			ndhalf_bf16_to_f32(ta, a + i, 32);
 			ndhalf_bf16_to_f32(tb, b + i, 32);
 			ndhArithF32Buf(tr, ta, tb, 32, op);
 			ndhalf_f32_to_bf16(dst + i, tr, 32);
 		}
-		if (i < n) {
-			const size_t rem = n - i;
+		if (i < nn) {
+			const size_t rem = (size_t)(nn - i);
 			ndhalf_bf16_to_f32(ta, a + i, rem);
 			ndhalf_bf16_to_f32(tb, b + i, rem);
 			ndhArithF32Buf(tr, ta, tb, rem, op);
@@ -541,8 +555,9 @@ void ndhalf_arith_bf16(uint16_t* NDH_RESTRICT dst, const uint16_t* NDH_RESTRICT 
 static void ndhArithScalarF16(uint16_t* dst, const uint16_t* a, float s, size_t n, NDHalfArith op,
                               bool bf) {
 	float ta[32], tr[32];
-	size_t i = 0;
-	for (; i + 32 <= n; i += 32) {
+	const ptrdiff_t nn = ndhLen(n);
+	ptrdiff_t i = 0;
+	for (; i + 32 <= nn; i += 32) {
 		if (bf) ndhalf_bf16_to_f32(ta, a + i, 32);
 		else ndhalf_f16_to_f32(ta, a + i, 32);
 		switch (op) {
@@ -562,8 +577,8 @@ static void ndhArithScalarF16(uint16_t* dst, const uint16_t* a, float s, size_t 
 		if (bf) ndhalf_f32_to_bf16(dst + i, tr, 32);
 		else ndhalf_f32_to_f16(dst + i, tr, 32);
 	}
-	if (i < n) {
-		const size_t rem = n - i;
+	if (i < nn) {
+		const size_t rem = (size_t)(nn - i);
 		if (bf) ndhalf_bf16_to_f32(ta, a + i, rem);
 		else ndhalf_f16_to_f32(ta, a + i, rem);
 		switch (op) {
@@ -595,8 +610,9 @@ void ndhalf_arith_bf16_scalar(uint16_t* dst, const uint16_t* a, float s, size_t 
 
 static void ndhMinMax(uint16_t* dst, const uint16_t* a, const uint16_t* b, size_t n, bool isMin, bool bf) {
 	float ta[32], tb[32], tr[32];
-	size_t i = 0;
-	for (; i + 32 <= n; i += 32) {
+	const ptrdiff_t nn = ndhLen(n);
+	ptrdiff_t i = 0;
+	for (; i + 32 <= nn; i += 32) {
 		if (bf) {
 			ndhalf_bf16_to_f32(ta, a + i, 32);
 			ndhalf_bf16_to_f32(tb, b + i, 32);
@@ -612,8 +628,8 @@ static void ndhMinMax(uint16_t* dst, const uint16_t* a, const uint16_t* b, size_
 		if (bf) ndhalf_f32_to_bf16(dst + i, tr, 32);
 		else ndhalf_f32_to_f16(dst + i, tr, 32);
 	}
-	if (i < n) {
-		const size_t rem = n - i;
+	if (i < nn) {
+		const size_t rem = (size_t)(nn - i);
 		if (bf) {
 			ndhalf_bf16_to_f32(ta, a + i, rem);
 			ndhalf_bf16_to_f32(tb, b + i, rem);
@@ -669,11 +685,12 @@ static inline float ndhHsum256(__m256 v) {
 
 static float ndhalf_reduce_f16(const uint16_t* a, const uint16_t* b, size_t n, int kind) {
 	// kind: 0=sum, 1=prod, 2=dot, 3=l2self, 4=l2pair
-	size_t i = 0;
+	const ptrdiff_t nn = ndhLen(n);
+	ptrdiff_t i = 0;
 #if NDH_AVX512
 	__m512 acc0 = (kind == 1) ? _mm512_set1_ps(1.0f) : _mm512_setzero_ps();
 	__m512 acc1 = (kind == 1) ? _mm512_set1_ps(1.0f) : _mm512_setzero_ps();
-	for (; i + 32 <= n; i += 32) {
+	for (; i + 32 <= nn; i += 32) {
 		__m512 x0 = _mm512_cvtph_ps(_mm256_loadu_si256((const __m256i*)(a + i)));
 		__m512 x1 = _mm512_cvtph_ps(_mm256_loadu_si256((const __m256i*)(a + i + 16)));
 		if (kind == 0) {
@@ -707,7 +724,7 @@ static float ndhalf_reduce_f16(const uint16_t* a, const uint16_t* b, size_t n, i
 #elif NDH_AVX2 && NDH_F16C
 	__m256 acc0 = (kind == 1) ? _mm256_set1_ps(1.0f) : _mm256_setzero_ps();
 	__m256 acc1 = (kind == 1) ? _mm256_set1_ps(1.0f) : _mm256_setzero_ps();
-	for (; i + 16 <= n; i += 16) {
+	for (; i + 16 <= nn; i += 16) {
 		__m256 x0 = _mm256_cvtph_ps(_mm_loadu_si128((const __m128i*)(a + i)));
 		__m256 x1 = _mm256_cvtph_ps(_mm_loadu_si128((const __m128i*)(a + i + 8)));
 		if (kind == 0) {
@@ -744,7 +761,7 @@ static float ndhalf_reduce_f16(const uint16_t* a, const uint16_t* b, size_t n, i
 #elif NDH_NEON
 	float32x4_t acc0 = (kind == 1) ? vdupq_n_f32(1.0f) : vdupq_n_f32(0.0f);
 	float32x4_t acc1 = (kind == 1) ? vdupq_n_f32(1.0f) : vdupq_n_f32(0.0f);
-	for (; i + 8 <= n; i += 8) {
+	for (; i + 8 <= nn; i += 8) {
 		float x0s[4], x1s[4];
 		ndhalf_f16_to_f32(x0s, a + i, 4);
 		ndhalf_f16_to_f32(x1s, a + i + 4, 4);
@@ -796,7 +813,7 @@ static float ndhalf_reduce_f16(const uint16_t* a, const uint16_t* b, size_t n, i
 	float s1 = (kind == 1) ? 1.0f : 0.0f;
 	float s2 = (kind == 1) ? 1.0f : 0.0f;
 	float s3 = (kind == 1) ? 1.0f : 0.0f;
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		float x0 = f16LoadPortable(a[i]);
 		float x1 = f16LoadPortable(a[i + 1]);
 		float x2 = f16LoadPortable(a[i + 2]);
@@ -822,7 +839,7 @@ static float ndhalf_reduce_f16(const uint16_t* a, const uint16_t* b, size_t n, i
 	}
 	float s = (kind == 1) ? (s0 * s1 * s2 * s3) : ((s0 + s1) + (s2 + s3));
 #endif
-	for (; i < n; ++i) {
+	for (; i < nn; ++i) {
 		float x = f16LoadPortable(a[i]);
 		if (kind == 0) s += x;
 		else if (kind == 1) s *= x;
@@ -837,18 +854,19 @@ static float ndhalf_reduce_f16(const uint16_t* a, const uint16_t* b, size_t n, i
 }
 
 static float ndhalf_reduce_bf16(const uint16_t* a, const uint16_t* b, size_t n, int kind) {
-	size_t i = 0;
+	const ptrdiff_t nn = ndhLen(n);
+	ptrdiff_t i = 0;
 #if NDH_AVX512BF16
 	if (kind == 2) {
 		__m512 acc = _mm512_setzero_ps();
-		for (; i + 32 <= n; i += 32) {
+		for (; i + 32 <= nn; i += 32) {
 			__m512bh xa, xb;
 			std::memcpy(&xa, a + i, 64);
 			std::memcpy(&xb, b + i, 64);
 			acc = _mm512_dpbf16_ps(acc, xa, xb);
 		}
 		float s = _mm512_reduce_add_ps(acc);
-		for (; i < n; ++i)
+		for (; i < nn; ++i)
 			s += bf16LoadPortable(a[i]) * bf16LoadPortable(b[i]);
 		return s;
 	}
@@ -856,7 +874,7 @@ static float ndhalf_reduce_bf16(const uint16_t* a, const uint16_t* b, size_t n, 
 #if NDH_AVX2
 	__m256 acc0 = (kind == 1) ? _mm256_set1_ps(1.0f) : _mm256_setzero_ps();
 	__m256 acc1 = (kind == 1) ? _mm256_set1_ps(1.0f) : _mm256_setzero_ps();
-	for (; i + 16 <= n; i += 16) {
+	for (; i + 16 <= nn; i += 16) {
 		__m256 x0 = _mm256_castsi256_ps(_mm256_slli_epi32(
 			_mm256_cvtepu16_epi32(_mm_loadu_si128((const __m128i*)(a + i))), 16));
 		__m256 x1 = _mm256_castsi256_ps(_mm256_slli_epi32(
@@ -901,7 +919,7 @@ static float ndhalf_reduce_bf16(const uint16_t* a, const uint16_t* b, size_t n, 
 	float s1 = (kind == 1) ? 1.0f : 0.0f;
 	float s2 = (kind == 1) ? 1.0f : 0.0f;
 	float s3 = (kind == 1) ? 1.0f : 0.0f;
-	for (; i + 4 <= n; i += 4) {
+	for (; i + 4 <= nn; i += 4) {
 		float x0 = bf16LoadPortable(a[i]);
 		float x1 = bf16LoadPortable(a[i + 1]);
 		float x2 = bf16LoadPortable(a[i + 2]);
@@ -927,7 +945,7 @@ static float ndhalf_reduce_bf16(const uint16_t* a, const uint16_t* b, size_t n, 
 	}
 	float s = (kind == 1) ? (s0 * s1 * s2 * s3) : ((s0 + s1) + (s2 + s3));
 #endif
-	for (; i < n; ++i) {
+	for (; i < nn; ++i) {
 		float x = bf16LoadPortable(a[i]);
 		if (kind == 0) s += x;
 		else if (kind == 1) s *= x;
