@@ -25,6 +25,7 @@
 #include <thread>
 #include <vector>
 #include <unistd.h>
+#include <sys/stat.h>
 
 
 #define TEST_FILE "test_file.txt"
@@ -218,6 +219,20 @@ TEST_F(FdHandleTest, PrependMergeCorruption) {
 
     EXPECT_EQ(readVal[0], 0x22222222);
     EXPECT_EQ(readVal[1], 0x11111111);
+}
+
+TEST_F(FdHandleTest, QueueWriteWithPaddingZeroWritesOnlyTheValue) {
+	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	uint32_t val = 0xA1B2C3D4;
+	h.queueWriteWithPadding(val, 0, 0);
+	h.queueWriteWithPadding(val, 4, 1);
+	h.flush();
+
+	uint32_t readVal[2] = {0, 0};
+	h.seek(0);
+	EXPECT_EQ(h.read(readVal, sizeof(readVal)), (ssize_t)sizeof(readVal));
+	EXPECT_EQ(readVal[0], val);
+	EXPECT_EQ(readVal[1], val);
 }
 
 TEST_F(FdHandleTest, Printf) {
@@ -760,6 +775,28 @@ TEST_F(FdHandleTest, HighFd_RoundTrips) {
 	char c = 'H';
 	EXPECT_EQ(::write(high, &c, 1), 1);
 	::close(high);
+}
+
+TEST_F(FdHandleTest, TwoArgOpenWithCreatSuppliesMode) {
+	// Two-arg open() with O_CREAT must pass a permission word.  glibc
+	// fortify on ARM aborts `::open(path, O_CREAT)` without a mode.
+	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC);
+	ASSERT_TRUE((bool)h);
+
+	uint32_t v = 0xA5A5A5A5u;
+	ASSERT_EQ(h.write(v), (ssize_t)sizeof(v));
+	h.flush();
+
+	h.seek(0, SEEK_SET);
+	uint32_t got = 0;
+	ASSERT_EQ(h.read(got), (ssize_t)sizeof(got));
+	EXPECT_EQ(got, v);
+
+	mode_t mask = umask(0);
+	umask(mask);
+	struct stat st;
+	ASSERT_EQ(stat(TEST_FILE, &st), 0);
+	EXPECT_EQ(st.st_mode & 0777, (mode_t)(0664 & ~mask));
 }
 
 TEST_F(FdHandleTest, ConcurrentTwoArgOpenClose) {

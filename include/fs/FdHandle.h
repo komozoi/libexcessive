@@ -272,6 +272,10 @@ public:
 	 */
 	template<class T>
 	void queueWriteWithPadding(const T& value, off_t where, uint16_t alignment) const {
+		if (alignment <= 1) {
+			queueWrite(&value, sizeof(value), where);
+			return;
+		}
 		--alignment;
 		queueWrite(&value, (sizeof(value) + alignment) & (0x7FFFFFFFFFFFFFFFL - alignment), where);
 	}

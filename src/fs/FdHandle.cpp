@@ -473,7 +473,7 @@ static void internNewFile(int fd, bool isNew) {
 }
 
 FdHandle FdHandle::open(const char* path, int mode) {
-	int fd = ::open(path, mode);
+	int fd = ::open(path, mode, 0664);
 	if (fd != -1)
 		internNewFile(fd, false);
 	return FdHandle(fd);
