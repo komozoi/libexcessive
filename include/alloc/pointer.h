@@ -278,7 +278,8 @@ public:
 	 * @return Reference to this `sp` instance.
 	 */
 	sp& operator=(sp&& other) noexcept {
-		swap(other);
+		sp tmp(std::move(other));
+		swap(tmp);
 		return *this;
 	}
 
@@ -288,26 +289,15 @@ public:
 	 * @param other The source sp instance.
 	 * @return Reference to this sp instance.
 	 *
-	 * Downcasts are checked with `dynamic_cast`; on failure this is reset to null and `other` is left unchanged.
+	 * Downcasts are checked with `dynamic_cast`; on failure both sides are left unchanged.
+	 * The source is taken before this pointer is released, so assignment from a member of the owned object is safe.
 	 */
 	template<typename U, typename = typename std::enable_if<sp_can_cast<U, T>::value>::type>
 	sp& operator=(sp<U>&& other) noexcept {
-		if (!other.details) {
-			reset();
+		sp tmp(std::move(other));
+		if (!tmp && other)
 			return *this;
-		}
-
-		if constexpr (!std::is_convertible<U*, T*>::value) {
-			// Failed downcast: leave both sides unchanged
-			if (dynamic_cast<T*>(other.get()) == nullptr)
-				return *this;
-		}
-
-		reset();
-		details = (sp_pointer_details_t*)other.details;
-		type = other.type;
-		other.details = nullptr;
-		other.type = NULLPTR;
+		swap(tmp);
 		return *this;
 	}
 
@@ -337,15 +327,15 @@ public:
 	/**
 	 * @brief Copy assignment operator. Increments the reference count and releases current ownership.
 	 *
+	 * The source is copied before the old value is released, so assignment from a
+	 * member of the owned object (`p = p.mut().next`) is safe.
 	 * If the source pointer is `UNIQUE`, the new copy becomes `COPY_ON_WRITE`.
 	 * @param other The source `sp` instance.
 	 * @return Reference to this `sp` instance.
 	 */
 	sp& operator=(sp const& other) {
-		if (this != &other) {
-			reset();
-			acquire_from_copy(other);
-		}
+		sp tmp(other);
+		swap(tmp);
 		return *this;
 	}
 
@@ -357,8 +347,8 @@ public:
 	 */
 	template<typename U, typename = typename std::enable_if<sp_can_cast<U, T>::value>::type>
 	sp& operator=(sp<U> const& other) {
-		reset();
-		acquire_from_templated_copy(other);
+		sp tmp(other);
+		swap(tmp);
 		return *this;
 	}
 

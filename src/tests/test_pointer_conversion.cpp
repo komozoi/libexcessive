@@ -215,6 +215,18 @@ TEST(SpConversionTest, superToAbstractFailedMoveLeavesSource) {
 	EXPECT_EQ(asSuper->tag, 2);
 }
 
+TEST(SpConversionTest, superToAbstractFailedMoveAssignLeavesBoth) {
+	sp<OtherSuper> other = sp<OtherSuper>::create(2);
+	sp<Super> asSuper = other;
+	sp<AbstractMid> mid = sp<ConcreteLeaf>::create(1);
+
+	mid = std::move(asSuper);
+	EXPECT_TRUE(mid);
+	EXPECT_EQ(mid->compute(), 2);
+	EXPECT_TRUE(asSuper);
+	EXPECT_EQ(asSuper->tag, 2);
+}
+
 TEST(SpConversionTest, abstractToSuperStillUpcasts) {
 	sp<ConcreteLeaf> leaf = sp<ConcreteLeaf>::create(4);
 	sp<AbstractMid> mid = leaf;

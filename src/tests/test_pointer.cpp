@@ -466,3 +466,151 @@ TEST(SpTest, IncompatibleTypeComparisons) {
 	EXPECT_TRUE(null_i == (char*)nullptr);
 	EXPECT_TRUE((char*)nullptr == null_i);
 }
+
+struct AssignAliasNode {
+	static int constructed;
+	static int destroyed;
+
+	int value;
+	sp<AssignAliasNode> next;
+
+	explicit AssignAliasNode(int v) : value(v) { ++constructed; }
+	AssignAliasNode(const AssignAliasNode& other) : value(other.value) { ++constructed; }
+	~AssignAliasNode() { ++destroyed; }
+};
+
+int AssignAliasNode::constructed = 0;
+int AssignAliasNode::destroyed = 0;
+
+struct AssignAliasBase {
+	virtual ~AssignAliasBase() = default;
+	virtual int getValue() const = 0;
+};
+
+struct AssignAliasDerived : AssignAliasBase {
+	static int constructed;
+	static int destroyed;
+
+	int value;
+	sp<AssignAliasDerived> next;
+
+	explicit AssignAliasDerived(int v) : value(v) { ++constructed; }
+	AssignAliasDerived(const AssignAliasDerived& other) : value(other.value) { ++constructed; }
+	~AssignAliasDerived() { ++destroyed; }
+
+	int getValue() const override { return value; }
+};
+
+int AssignAliasDerived::constructed = 0;
+int AssignAliasDerived::destroyed = 0;
+
+TEST(SpTest, CopyAssignFromOwnedMember) {
+	AssignAliasNode::constructed = 0;
+	AssignAliasNode::destroyed = 0;
+
+	{
+		sp<AssignAliasNode> p = sp<AssignAliasNode>::create(1);
+		p.mut().next = sp<AssignAliasNode>::create(2);
+		p = p.mut().next;
+
+		EXPECT_TRUE(p);
+		EXPECT_EQ(p->value, 2);
+		EXPECT_FALSE(p->next);
+		EXPECT_EQ(AssignAliasNode::destroyed, 1);
+	}
+
+	EXPECT_EQ(AssignAliasNode::constructed, AssignAliasNode::destroyed);
+}
+
+TEST(SpTest, CopyAssignNullFromOwnedMember) {
+	AssignAliasNode::constructed = 0;
+	AssignAliasNode::destroyed = 0;
+
+	{
+		sp<AssignAliasNode> p = sp<AssignAliasNode>::create(1);
+		p = p.mut().next;
+		EXPECT_FALSE(p);
+		EXPECT_EQ(AssignAliasNode::destroyed, 1);
+	}
+
+	EXPECT_EQ(AssignAliasNode::constructed, AssignAliasNode::destroyed);
+}
+
+TEST(SpTest, CopyAssignFromOwnedMemberKeepsOtherRefs) {
+	AssignAliasNode::constructed = 0;
+	AssignAliasNode::destroyed = 0;
+
+	{
+		sp<AssignAliasNode> p = sp<AssignAliasNode>::create(1);
+		p.mut().next = sp<AssignAliasNode>::create(2);
+		sp<AssignAliasNode> keep = p;
+		p = p.mut().next;
+
+		EXPECT_EQ(keep->value, 1);
+		EXPECT_TRUE(keep->next);
+		EXPECT_EQ(p->value, 2);
+		EXPECT_EQ(AssignAliasNode::destroyed, 0);
+	}
+
+	EXPECT_EQ(AssignAliasNode::constructed, AssignAliasNode::destroyed);
+}
+
+TEST(SpTest, CopyAssignSelf) {
+	sp<int> p(5);
+	p = p;
+	EXPECT_TRUE(p);
+	EXPECT_EQ(*p, 5);
+	EXPECT_EQ(p.numReferences(), 1);
+}
+
+TEST(SpTest, MoveAssignFromOwnedMember) {
+	AssignAliasNode::constructed = 0;
+	AssignAliasNode::destroyed = 0;
+
+	{
+		sp<AssignAliasNode> p = sp<AssignAliasNode>::create(1);
+		p.mut().next = sp<AssignAliasNode>::create(2);
+		p = std::move(p.mut().next);
+
+		EXPECT_TRUE(p);
+		EXPECT_EQ(p->value, 2);
+		EXPECT_FALSE(p->next);
+		EXPECT_EQ(AssignAliasNode::destroyed, 1);
+	}
+
+	EXPECT_EQ(AssignAliasNode::constructed, AssignAliasNode::destroyed);
+}
+
+TEST(SpTest, TemplatedCopyAssignFromOwnedMember) {
+	AssignAliasDerived::constructed = 0;
+	AssignAliasDerived::destroyed = 0;
+
+	{
+		sp<AssignAliasBase> p = sp<AssignAliasDerived>::create(1);
+		static_cast<AssignAliasDerived&>(p.mut()).next = sp<AssignAliasDerived>::create(2);
+		p = static_cast<AssignAliasDerived&>(p.mut()).next;
+
+		EXPECT_TRUE(p);
+		EXPECT_EQ(p->getValue(), 2);
+		EXPECT_EQ(AssignAliasDerived::destroyed, 1);
+	}
+
+	EXPECT_EQ(AssignAliasDerived::constructed, AssignAliasDerived::destroyed);
+}
+
+TEST(SpTest, TemplatedMoveAssignFromOwnedMember) {
+	AssignAliasDerived::constructed = 0;
+	AssignAliasDerived::destroyed = 0;
+
+	{
+		sp<AssignAliasBase> p = sp<AssignAliasDerived>::create(1);
+		static_cast<AssignAliasDerived&>(p.mut()).next = sp<AssignAliasDerived>::create(2);
+		p = std::move(static_cast<AssignAliasDerived&>(p.mut()).next);
+
+		EXPECT_TRUE(p);
+		EXPECT_EQ(p->getValue(), 2);
+		EXPECT_EQ(AssignAliasDerived::destroyed, 1);
+	}
+
+	EXPECT_EQ(AssignAliasDerived::constructed, AssignAliasDerived::destroyed);
+}
