@@ -222,3 +222,24 @@ TEST(LinkedListTest, OutOfBoundsException) {
 	EXPECT_THROW(list.get(-1), std::out_of_range);
 	EXPECT_THROW(list.get(2), std::out_of_range);
 }
+
+TEST(LinkedListTest, Equality) {
+	LinkedList<int> a;
+	a.add(1);
+	a.add(2);
+	a.add(3);
+	LinkedList<int> b;
+	b.add(1);
+	b.add(2);
+	b.add(3);
+	LinkedList<int> c;
+	c.add(1);
+	c.add(2);
+	c.add(4);
+
+	EXPECT_TRUE(a == b);
+	EXPECT_FALSE(a != b);
+	EXPECT_FALSE(a == c);
+	EXPECT_TRUE(a != c);
+	EXPECT_TRUE(LinkedList<int>() == LinkedList<int>());
+}
