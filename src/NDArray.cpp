@@ -5407,6 +5407,133 @@ NDArray NDArray::max(int axis) const { return Impl::reduceAxis(*this, axis, Redu
 NDArray NDArray::prod() const { return Impl::reduceAll(*this, ReduceOp::Prod); }
 NDArray NDArray::prod(int axis) const { return Impl::reduceAxis(*this, axis, ReduceOp::Prod); }
 
+static int cmpViewOffsets(const NDArrayView& v, size_t ea, size_t eb) {
+	const void* d = v.data();
+	if (!d)
+		throw std::invalid_argument("NDArray: cannot argmin/argmax an empty array");
+	switch (v.getType()) {
+		case F32: {
+			float x = ((const float*)d)[ea], y = ((const float*)d)[eb];
+			return (x < y) ? -1 : (y < x) ? 1 : 0;
+		}
+		case F64: {
+			double x = ((const double*)d)[ea], y = ((const double*)d)[eb];
+			return (x < y) ? -1 : (y < x) ? 1 : 0;
+		}
+		case UINT8: {
+			uint8_t x = ((const uint8_t*)d)[ea], y = ((const uint8_t*)d)[eb];
+			return (x < y) ? -1 : (y < x) ? 1 : 0;
+		}
+		case INT8: {
+			int8_t x = ((const int8_t*)d)[ea], y = ((const int8_t*)d)[eb];
+			return (x < y) ? -1 : (y < x) ? 1 : 0;
+		}
+		case INT32: {
+			int32_t x = ((const int32_t*)d)[ea], y = ((const int32_t*)d)[eb];
+			return (x < y) ? -1 : (y < x) ? 1 : 0;
+		}
+		case INT64: {
+			int64_t x = ((const int64_t*)d)[ea], y = ((const int64_t*)d)[eb];
+			return (x < y) ? -1 : (y < x) ? 1 : 0;
+		}
+		case INT3: {
+			int x = int3_getSigned((const uint64_t*)d, ea);
+			int y = int3_getSigned((const uint64_t*)d, eb);
+			return (x < y) ? -1 : (y < x) ? 1 : 0;
+		}
+		case BINARY: {
+			uint8_t x = binaryGet((const uint64_t*)d, ea);
+			uint8_t y = binaryGet((const uint64_t*)d, eb);
+			return (x < y) ? -1 : (y < x) ? 1 : 0;
+		}
+		case UINT256: {
+			const uint256_t& x = ((const uint256_t*)d)[ea];
+			const uint256_t& y = ((const uint256_t*)d)[eb];
+			if (x < y) return -1;
+			if (y < x) return 1;
+			return 0;
+		}
+		default:
+			throw std::runtime_error("NDArray: invalid type in argmin/argmax");
+	}
+}
+
+static size_t viewOffsetAlongAxis(const NDArrayView& v, int axis, size_t outerFlat, size_t along) {
+	const ArrayList<int>& sh = v.getShape();
+	const ArrayList<size_t>& st = v.getStrides();
+	size_t o = v.getOffset();
+	size_t rem = outerFlat;
+	for (int d = sh.size() - 1; d >= 0; --d) {
+		if (d == axis) {
+			o += along * ((d < st.size()) ? st.get(d) : (size_t)0);
+			continue;
+		}
+		int dim = sh.get(d);
+		size_t c = (dim > 0) ? (rem % (size_t)dim) : 0;
+		if (dim > 0)
+			rem /= (size_t)dim;
+		o += c * ((d < st.size()) ? st.get(d) : (size_t)0);
+	}
+	return o;
+}
+
+static NDArray argExtremumAll(const NDArrayView& v, bool wantMin) {
+	const size_t n = v.numElements();
+	if (n == 0)
+		throw std::invalid_argument("NDArray: cannot argmin/argmax an empty array");
+	size_t bestI = 0;
+	size_t bestE = v.elementOffset(0);
+	for (size_t i = 1; i < n; ++i) {
+		size_t e = v.elementOffset(i);
+		int c = cmpViewOffsets(v, e, bestE);
+		if (wantMin ? (c < 0) : (c > 0)) {
+			bestE = e;
+			bestI = i;
+		}
+	}
+	NDArray out({}, INT64);
+	out.set({}, (int64_t)bestI);
+	return out;
+}
+
+static NDArray argExtremumAxis(const NDArrayView& v, int axis, bool wantMin) {
+	const ArrayList<int>& sh = v.getShape();
+	if (sh.size() == 0)
+		throw std::invalid_argument("NDArray: cannot reduce a scalar along an axis");
+	if (axis < 0 || axis >= sh.size())
+		throw std::out_of_range("NDArray: reduction axis out of range");
+	const size_t reduced = axisLength(sh, axis);
+	if (reduced == 0)
+		throw std::invalid_argument("NDArray: cannot reduce along a zero-length axis");
+	ArrayList<int> outShape = shapeWithoutAxis(sh, axis);
+	const size_t outN = resultElemsWithoutAxis(sh, axis);
+	NDArray out(outShape, INT64);
+	for (size_t oi = 0; oi < outN; ++oi) {
+		size_t bestR = 0;
+		size_t bestE = viewOffsetAlongAxis(v, axis, oi, 0);
+		for (size_t r = 1; r < reduced; ++r) {
+			size_t e = viewOffsetAlongAxis(v, axis, oi, r);
+			int c = cmpViewOffsets(v, e, bestE);
+			if (wantMin ? (c < 0) : (c > 0)) {
+				bestE = e;
+				bestR = r;
+			}
+		}
+		out.setFlat(oi, (int64_t)bestR);
+	}
+	return out;
+}
+
+NDArray NDArrayView::argmin() const { return argExtremumAll(*this, true); }
+NDArray NDArrayView::argmin(int axis) const { return argExtremumAxis(*this, axis, true); }
+NDArray NDArrayView::argmax() const { return argExtremumAll(*this, false); }
+NDArray NDArrayView::argmax(int axis) const { return argExtremumAxis(*this, axis, false); }
+
+NDArray NDArray::argmin() const { return view().argmin(); }
+NDArray NDArray::argmin(int axis) const { return view().argmin(axis); }
+NDArray NDArray::argmax() const { return view().argmax(); }
+NDArray NDArray::argmax(int axis) const { return view().argmax(axis); }
+
 
 // ---- left-hand scalar operators:  scalar ⊕ NDArray -------------------------
 

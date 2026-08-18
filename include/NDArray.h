@@ -164,6 +164,15 @@ public:
 	NDArray copy() const;
 
 	/**
+	 * Index of the first minimum / maximum. No-axis form is a scalar INT64
+	 * flat index. Axis form removes that axis (index along it, 0..len-1).
+	 */
+	NDArray argmin() const;
+	NDArray argmin(int axis) const;
+	NDArray argmax() const;
+	NDArray argmax(int axis) const;
+
+	/**
 	 * Widening scores. Accumulator type is the template argument — not a
 	 * separate function per storage dtype. Products are widened into Acc
 	 * (INT3 3·3 is 9, not wrap-mul 1). No intermediate length-n array.
@@ -1070,6 +1079,14 @@ public:
 	NDArray max(int axis) const;
 	NDArray prod() const;
 	NDArray prod(int axis) const;
+	/**
+	 * Index of the first min / max. Scalar INT64 (flat) or INT64 with `axis`
+	 * removed. Same convention on every dtype (INT3 uses signed lanes).
+	 */
+	NDArray argmin() const;
+	NDArray argmin(int axis) const;
+	NDArray argmax() const;
+	NDArray argmax(int axis) const;
 
 	/*
 	**    OPERATORS  (return new arrays — they copy)

@@ -330,6 +330,75 @@ TEST(NDArray_reductions, SumAs_WrapViewNoCopy) {
 	EXPECT_EQ(a.data(), static_cast<const void*>(buf));
 }
 
+TEST(NDArray_reductions, ArgMaxMin_F32_INT32_INT3_UINT8) {
+	NDArray a(ArrayList({3.0f, -1.0f, 5.0f, 5.0f, 0.0f}));
+	NDArray imax = a.argmax();
+	NDArray imin = a.argmin();
+	EXPECT_EQ(imax.type, INT64);
+	EXPECT_EQ(imax.shape.size(), 0);
+	EXPECT_EQ(imax.get<int64_t>({}), 2); // first 5
+	EXPECT_EQ(imin.get<int64_t>({}), 1);
+
+	NDArray i32({4}, INT32);
+	i32.set({0}, 10);
+	i32.set({1}, -4);
+	i32.set({2}, 7);
+	i32.set({3}, -4);
+	EXPECT_EQ(i32.argmax().get<int64_t>({}), 0);
+	EXPECT_EQ(i32.argmin().get<int64_t>({}), 1);
+
+	NDArray i3({5}, INT3);
+	const int v3[] = {1, -4, 3, -2, 3};
+	for (int i = 0; i < 5; ++i)
+		i3.set({i}, v3[i]);
+	EXPECT_EQ(i3.argmax().get<int64_t>({}), 2);
+	EXPECT_EQ(i3.argmin().get<int64_t>({}), 1);
+
+	NDArray u(ArrayList<uint8_t>({10, 3, 200, 7}));
+	EXPECT_EQ(u.argmax().get<int64_t>({}), 2);
+	EXPECT_EQ(u.argmin().get<int64_t>({}), 1);
+}
+
+TEST(NDArray_reductions, ArgMaxMin_Axis) {
+	NDArray m({2, 3}, ArrayList({
+		1.0f, 9.0f, 3.0f,
+		4.0f, 2.0f, 8.0f
+	}));
+	NDArray a0 = m.argmax(0);
+	EXPECT_EQ(a0.type, INT64);
+	ASSERT_EQ(a0.shape.size(), 1);
+	EXPECT_EQ(a0.shape.get(0), 3);
+	EXPECT_EQ(a0.get<int64_t>({0}), 1);
+	EXPECT_EQ(a0.get<int64_t>({1}), 0);
+	EXPECT_EQ(a0.get<int64_t>({2}), 1);
+
+	NDArray n1 = m.argmin(1);
+	EXPECT_EQ(n1.get<int64_t>({0}), 0);
+	EXPECT_EQ(n1.get<int64_t>({1}), 1);
+
+	NDArray i3({2, 3}, INT3);
+	const int vals[2][3] = {{-4, 2, 1}, {3, -1, 0}};
+	for (int i = 0; i < 2; ++i)
+		for (int j = 0; j < 3; ++j)
+			i3.set({i, j}, vals[i][j]);
+	NDArray i3min0 = i3.argmin(0);
+	EXPECT_EQ(i3min0.get<int64_t>({0}), 0);
+	EXPECT_EQ(i3min0.get<int64_t>({1}), 1);
+	EXPECT_EQ(i3min0.get<int64_t>({2}), 1);
+}
+
+TEST(NDArray_reductions, ArgMaxMin_ViewAndEmpty) {
+	NDArray m({2, 3}, ArrayList({1.0f, 2.0f, 9.0f, 4.0f, 8.0f, 3.0f}));
+	EXPECT_EQ(m.row(0).argmax().get<int64_t>({}), 2);
+	EXPECT_EQ(m.col(1).argmax().get<int64_t>({}), 1);
+	NDArray empty = NDArray::empty(F32);
+	EXPECT_THROW(empty.argmax(), std::invalid_argument);
+	EXPECT_THROW(m.argmax(-1), std::out_of_range);
+	NDArray s(F32, 3.0f);
+	EXPECT_EQ(s.argmax().get<int64_t>({}), 0);
+	EXPECT_THROW(s.argmax(0), std::invalid_argument);
+}
+
 TEST(NDArray_reductions, SumAs_EmptyThrows) {
 	NDArray a = NDArray::empty(F32);
 	EXPECT_THROW(a.sumAs<float>(), std::invalid_argument);
