@@ -3315,6 +3315,298 @@ NDArray& NDArray::round() {
 	return mapRealUnary(d_round);
 }
 
+static int actNormalizeAxis(const ArrayList<int>& shape, int axis) {
+	const int r = shape.size();
+	if (r == 0)
+		return 0;
+	if (axis < 0)
+		axis += r;
+	if (axis < 0 || axis >= r)
+		throw std::out_of_range("NDArray: axis out of range");
+	return axis;
+}
+
+static void softmaxF32Row(float* row, size_t n, size_t stride) {
+	float m = row[0];
+	for (size_t i = 1; i < n; ++i) {
+		float v = row[i * stride];
+		if (v > m)
+			m = v;
+	}
+	float s = 0.0f;
+	for (size_t i = 0; i < n; ++i) {
+		float e = std::exp(row[i * stride] - m);
+		row[i * stride] = e;
+		s += e;
+	}
+	const float inv = (s == 0.0f) ? 0.0f : 1.0f / s;
+	for (size_t i = 0; i < n; ++i)
+		row[i * stride] *= inv;
+}
+
+static void softmaxF64Row(double* row, size_t n, size_t stride) {
+	double m = row[0];
+	for (size_t i = 1; i < n; ++i) {
+		double v = row[i * stride];
+		if (v > m)
+			m = v;
+	}
+	double s = 0.0;
+	for (size_t i = 0; i < n; ++i) {
+		double e = std::exp(row[i * stride] - m);
+		row[i * stride] = e;
+		s += e;
+	}
+	const double inv = (s == 0.0) ? 0.0 : 1.0 / s;
+	for (size_t i = 0; i < n; ++i)
+		row[i * stride] *= inv;
+}
+
+static void actAxisGeom(const ArrayList<int>& shape, int axis,
+                        size_t& outer, size_t& len, size_t& inner) {
+	axis = actNormalizeAxis(shape, axis);
+	len = (shape.size() == 0) ? 1 : (size_t)shape.get(axis);
+	inner = 1;
+	for (int d = axis + 1; d < shape.size(); ++d)
+		inner *= (size_t)shape.get(d);
+	outer = 1;
+	for (int d = 0; d < axis; ++d)
+		outer *= (size_t)shape.get(d);
+}
+
+static float siluF32(float x) {
+	return x / (1.0f + std::exp(-x));
+}
+static double siluF64(double x) {
+	return x / (1.0 + std::exp(-x));
+}
+
+NDArray& NDArray::softmax() {
+	return softmax(shape.size() == 0 ? 0 : shape.size() - 1);
+}
+
+NDArray& NDArray::softmax(int axis) {
+	promoteInPlace(typeForRealUnary(type));
+	ensureWritable();
+	if (numElements() == 0)
+		return *this;
+	size_t outer = 1, len = 1, inner = 1;
+	actAxisGeom(shape, axis, outer, len, inner);
+	if (len == 0)
+		return *this;
+
+	if (type == F32) {
+		for (size_t o = 0; o < outer; ++o)
+			for (size_t j = 0; j < inner; ++j)
+				softmaxF32Row(float32 + o * len * inner + j, len, inner);
+		return *this;
+	}
+	if (type == F64) {
+		for (size_t o = 0; o < outer; ++o)
+			for (size_t j = 0; j < inner; ++j)
+				softmaxF64Row(float64 + o * len * inner + j, len, inner);
+		return *this;
+	}
+	if (type == F16 || type == BF16) {
+		ArrayList<float> buf;
+		buf.resize((int)len);
+		float* p = buf.getMemory();
+		for (size_t o = 0; o < outer; ++o) {
+			for (size_t j = 0; j < inner; ++j) {
+				if (inner == 1) {
+					if (type == F16)
+						ndhalf_f16_to_f32(p, u16 + o * len, len);
+					else
+						ndhalf_bf16_to_f32(p, u16 + o * len, len);
+					softmaxF32Row(p, len, 1);
+					if (type == F16)
+						ndhalf_f32_to_f16(u16 + o * len, p, len);
+					else
+						ndhalf_f32_to_bf16(u16 + o * len, p, len);
+				} else {
+					for (size_t k = 0; k < len; ++k)
+						p[k] = ndarray_half::load(type, u16[o * len * inner + k * inner + j]);
+					softmaxF32Row(p, len, 1);
+					for (size_t k = 0; k < len; ++k)
+						u16[o * len * inner + k * inner + j] = ndarray_half::store(type, p[k]);
+				}
+			}
+		}
+		return *this;
+	}
+	throw std::runtime_error("NDArray::softmax: unexpected type");
+}
+
+NDArray NDArray::softmaxed() const {
+	NDArray out(*this);
+	out.softmax();
+	return out;
+}
+
+NDArray NDArray::softmaxed(int axis) const {
+	NDArray out(*this);
+	out.softmax(axis);
+	return out;
+}
+
+static void loadWeightF32(const NDArray& w, float* dst, size_t len, size_t srcBase, size_t srcStride) {
+	if (w.type == F32 && srcStride == 1 && w.isContiguous()) {
+		const float* p = w.data<float>() + srcBase;
+		for (size_t i = 0; i < len; ++i)
+			dst[i] = p[i];
+		return;
+	}
+	for (size_t i = 0; i < len; ++i)
+		dst[i] = w.getFlat<float>(srcBase + i * srcStride);
+}
+
+NDArray NDArray::rmsnorm(const NDArray& weight, float eps) const {
+	return rmsnorm(weight, shape.size() == 0 ? 0 : shape.size() - 1, eps);
+}
+
+NDArray NDArray::rmsnorm(const NDArray& weight, int axis, float eps) const {
+	NDArray x = convert(typeForRealUnary(type));
+	x.ensureWritable();
+	if (x.numElements() == 0)
+		return x;
+	size_t outer = 1, len = 1, inner = 1;
+	actAxisGeom(x.shape, axis, outer, len, inner);
+	if (len == 0)
+		return x;
+
+	const bool weight1d = (weight.shape.size() == 1 && (size_t)weight.shape.get(0) == len)
+		|| (weight.shape.size() == 0 && len == 1);
+	const bool weightSame = weight.shape.size() == x.shape.size();
+	if (weightSame) {
+		for (int d = 0; d < x.shape.size(); ++d)
+			if (weight.shape.get(d) != x.shape.get(d))
+				throw std::invalid_argument("NDArray::rmsnorm: weight shape must be 1-D axis length or match x");
+	} else if (!weight1d) {
+		throw std::invalid_argument("NDArray::rmsnorm: weight shape must be 1-D axis length or match x");
+	}
+
+	ArrayList<float> wrow;
+	ArrayList<float> xrow;
+	wrow.resize((int)len);
+	xrow.resize((int)len);
+	float* wp = wrow.getMemory();
+	float* xp = xrow.getMemory();
+	const float invL = 1.0f / (float)len;
+	const bool last = (inner == 1);
+
+	for (size_t o = 0; o < outer; ++o) {
+		for (size_t j = 0; j < inner; ++j) {
+			if (weight1d)
+				loadWeightF32(weight, wp, len, 0, 1);
+			else
+				loadWeightF32(weight, wp, len, o * len * inner + j, inner);
+
+			if (x.type == F32 && last) {
+				float* row = x.float32 + o * len;
+				float ss = 0.0f;
+				for (size_t k = 0; k < len; ++k)
+					ss += row[k] * row[k];
+				const float inv = 1.0f / std::sqrt(ss * invL + eps);
+				for (size_t k = 0; k < len; ++k)
+					row[k] = row[k] * wp[k] * inv;
+			} else if (x.type == F64 && last) {
+				double* row = x.float64 + o * len;
+				double ss = 0.0;
+				for (size_t k = 0; k < len; ++k)
+					ss += row[k] * row[k];
+				const double inv = 1.0 / std::sqrt(ss / (double)len + (double)eps);
+				for (size_t k = 0; k < len; ++k)
+					row[k] = row[k] * (double)wp[k] * inv;
+			} else {
+				for (size_t k = 0; k < len; ++k)
+					xp[k] = (float)x.loadAsDouble(o * len * inner + k * inner + j);
+				float ss = 0.0f;
+				for (size_t k = 0; k < len; ++k)
+					ss += xp[k] * xp[k];
+				const float inv = 1.0f / std::sqrt(ss * invL + eps);
+				for (size_t k = 0; k < len; ++k)
+					x.storeFromDouble(o * len * inner + k * inner + j, (double)(xp[k] * wp[k] * inv));
+			}
+		}
+	}
+	return x;
+}
+
+NDArray& NDArray::silu() {
+	promoteInPlace(typeForRealUnary(type));
+	ensureWritable();
+	const size_t n = numElements();
+	if (type == F32) {
+		for (size_t i = 0; i < n; ++i)
+			float32[i] = siluF32(float32[i]);
+	} else if (type == F64) {
+		for (size_t i = 0; i < n; ++i)
+			float64[i] = siluF64(float64[i]);
+	} else if (type == F16 || type == BF16) {
+		float buf[32];
+		for (size_t i = 0; i < n; ) {
+			const size_t m = n - i < 32 ? n - i : 32;
+			if (type == F16)
+				ndhalf_f16_to_f32(buf, u16 + i, m);
+			else
+				ndhalf_bf16_to_f32(buf, u16 + i, m);
+			for (size_t j = 0; j < m; ++j)
+				buf[j] = siluF32(buf[j]);
+			if (type == F16)
+				ndhalf_f32_to_f16(u16 + i, buf, m);
+			else
+				ndhalf_f32_to_bf16(u16 + i, buf, m);
+			i += m;
+		}
+	} else {
+		throw std::runtime_error("NDArray::silu: unexpected type");
+	}
+	return *this;
+}
+
+NDArray NDArray::silued() const {
+	NDArray out(*this);
+	out.silu();
+	return out;
+}
+
+NDArray& NDArray::siluMul(const NDArray& other) {
+	requireSameShape(*this, other);
+	promoteInPlace(promoteTypes(typeForRealUnary(type), typeForRealUnary(other.type)));
+	NDArray rhs = other.convert(type);
+	ensureWritable();
+	const size_t n = numElements();
+	if (type == F32) {
+		for (size_t i = 0; i < n; ++i)
+			float32[i] = siluF32(float32[i]) * rhs.float32[i];
+	} else if (type == F64) {
+		for (size_t i = 0; i < n; ++i)
+			float64[i] = siluF64(float64[i]) * rhs.float64[i];
+	} else if (type == F16 || type == BF16) {
+		float xb[32], yb[32];
+		for (size_t i = 0; i < n; ) {
+			const size_t m = n - i < 32 ? n - i : 32;
+			if (type == F16) {
+				ndhalf_f16_to_f32(xb, u16 + i, m);
+				ndhalf_f16_to_f32(yb, rhs.u16 + i, m);
+			} else {
+				ndhalf_bf16_to_f32(xb, u16 + i, m);
+				ndhalf_bf16_to_f32(yb, rhs.u16 + i, m);
+			}
+			for (size_t j = 0; j < m; ++j)
+				xb[j] = siluF32(xb[j]) * yb[j];
+			if (type == F16)
+				ndhalf_f32_to_f16(u16 + i, xb, m);
+			else
+				ndhalf_f32_to_bf16(u16 + i, xb, m);
+			i += m;
+		}
+	} else {
+		throw std::runtime_error("NDArray::siluMul: unexpected type");
+	}
+	return *this;
+}
+
 // ---- binary real functions (return new arrays) -----------------------------
 
 static void mapRealBinary(NDArray& a, const NDArray& b, double (*fn)(double, double)) {
