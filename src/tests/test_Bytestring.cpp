@@ -152,3 +152,99 @@ TEST(BytestringTest, CompareLexicographically) {
 	ASSERT_TRUE(a == c);
 	ASSERT_TRUE(b != c);
 }
+
+static void writeRaw(const char* path, const uint8_t* data, size_t n) {
+	FdHandle sf = FdHandle::open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdTransaction tx(sf);
+	if (n > 0)
+		tx.write(data, n);
+	sf.flush();
+}
+
+TEST(BytestringTest, ReadEmptyFileIsEmpty) {
+	const char* path = TEST_FILE_PATH "ReadEmptyFileIsEmpty.bin";
+	writeRaw(path, nullptr, 0);
+
+	FdHandle sf = FdHandle::open(path, O_RDWR);
+	FdTransaction tx(sf);
+	Bytestring bs(tx);
+
+	EXPECT_EQ(bs.size(), (size_t)0);
+	EXPECT_FALSE(bs);
+}
+
+TEST(BytestringTest, ReadTruncatedTwoByteLengthIsEmpty) {
+	const char* path = TEST_FILE_PATH "ReadTruncatedTwoByteLengthIsEmpty.bin";
+	uint8_t data[] = { 0x80 };
+	writeRaw(path, data, sizeof(data));
+
+	FdHandle sf = FdHandle::open(path, O_RDWR);
+	FdTransaction tx(sf);
+	Bytestring bs(tx);
+
+	EXPECT_EQ(bs.size(), (size_t)0);
+	EXPECT_FALSE(bs);
+}
+
+TEST(BytestringTest, ReadTruncatedThreeByteLengthIsEmpty) {
+	const char* path = TEST_FILE_PATH "ReadTruncatedThreeByteLengthIsEmpty.bin";
+	uint8_t data[] = { 0xFE, 0x00 };
+	writeRaw(path, data, sizeof(data));
+
+	FdHandle sf = FdHandle::open(path, O_RDWR);
+	FdTransaction tx(sf);
+	Bytestring bs(tx);
+
+	EXPECT_EQ(bs.size(), (size_t)0);
+	EXPECT_FALSE(bs);
+}
+
+TEST(BytestringTest, ReadTruncatedFourByteLengthIsEmpty) {
+	const char* path = TEST_FILE_PATH "ReadTruncatedFourByteLengthIsEmpty.bin";
+	uint8_t data[] = { 0xFF };
+	writeRaw(path, data, sizeof(data));
+
+	FdHandle sf = FdHandle::open(path, O_RDWR);
+	FdTransaction tx(sf);
+	Bytestring bs(tx);
+
+	EXPECT_EQ(bs.size(), (size_t)0);
+	EXPECT_FALSE(bs);
+}
+
+TEST(BytestringTest, ReadEncodedEmptyString) {
+	const char* path = TEST_FILE_PATH "ReadEncodedEmptyString.bin";
+	{
+		FdHandle sf = FdHandle::open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
+		FdTransaction tx(sf);
+		Bytestring empty((void*)"", (size_t)0);
+		ASSERT_GT(empty.write(tx), (size_t)0);
+		sf.flush();
+	}
+
+	FdHandle sf = FdHandle::open(path, O_RDWR);
+	FdTransaction tx(sf);
+	Bytestring bs(tx);
+	EXPECT_EQ(bs.size(), (size_t)0);
+}
+
+TEST(BytestringTest, ReadTwoByteLengthPrefix) {
+	const char* path = TEST_FILE_PATH "ReadTwoByteLengthPrefix.bin";
+	uint8_t payload[200];
+	for (int i = 0; i < 200; i++)
+		payload[i] = (uint8_t)(i * 3);
+
+	{
+		FdHandle sf = FdHandle::open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
+		FdTransaction tx(sf);
+		Bytestring bs(payload, sizeof(payload));
+		ASSERT_GT(bs.write(tx), (size_t)0);
+		sf.flush();
+	}
+
+	FdHandle sf = FdHandle::open(path, O_RDWR);
+	FdTransaction tx(sf);
+	Bytestring bs(tx);
+	Bytestring expected(payload, sizeof(payload));
+	EXPECT_EQ(bs, expected);
+}

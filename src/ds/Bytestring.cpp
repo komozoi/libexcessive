@@ -32,39 +32,51 @@ Bytestring::Bytestring(void* buffer, size_t length) : length(length) {
 	memcpy((void*)memory, buffer, length);
 }
 
-Bytestring::Bytestring(FdTransaction& reader) {
+Bytestring::Bytestring(FdTransaction& reader) : memory(nullptr), length(0) {
 	// Read a big chunk first to minimize later syscalls
 	// Most bytestrings fit within 128 bytes, including length data.
 	// We can rewind if we read too much.
 	uint8_t buffer[128];
-	uint8_t* startPtr;
 	ssize_t bytesRead = reader.read(buffer, 128);
+	if (bytesRead < 1)
+		return;
 
 	// Get the length
 	// This is encoded to minimize disk usage on length data, especially for small bytestrings
-	if (*buffer < 128) {
-		length = *buffer;
-		startPtr = &buffer[1];
-	} else if (*buffer < 254) {
-		length = (((int)*buffer - 128) << 8) | buffer[1];
-		startPtr = &buffer[2];
+	int headerSize;
+	if (buffer[0] < 128) {
+		length = buffer[0];
+		headerSize = 1;
+	} else if (buffer[0] < 254) {
+		headerSize = 2;
+		if (bytesRead < headerSize)
+			return;
+		length = (((int)buffer[0] - 128) << 8) | buffer[1];
 	} else {
-		int numLengthBytes = *buffer - 252;
+		int numLengthBytes = buffer[0] - 252;
+		headerSize = 1 + numLengthBytes;
+		if (bytesRead < headerSize)
+			return;
 		length = (((int)buffer[1]) << 8) | buffer[2];
 		if (numLengthBytes == 3)
 			length = (length << 8) | buffer[3];
-		startPtr = &buffer[1 + numLengthBytes];
 	}
+
+	uint8_t* startPtr = &buffer[headerSize];
+	int bytesLeftInBuffer = (int)bytesRead - headerSize;
+	if (bytesLeftInBuffer < 0)
+		bytesLeftInBuffer = 0;
 
 	// Allocate memory and copy the data into our buffer
 	memory = (const char*)allocate(length);
-	int bytesLeftInBuffer = &buffer[bytesRead] - startPtr;
-	if (bytesLeftInBuffer >= length)
-		memcpy((void*)memory, startPtr, length);
-	else {
+	if (bytesLeftInBuffer >= length) {
+		if (length > 0)
+			memcpy((void*)memory, startPtr, (size_t)length);
+	} else {
 		// Didn't fit into our initial buffer - read the rest
-		memcpy((void*)memory, startPtr, bytesLeftInBuffer);
-		reader.read((void*)&memory[bytesLeftInBuffer], length - bytesLeftInBuffer);
+		if (bytesLeftInBuffer > 0)
+			memcpy((void*)memory, startPtr, (size_t)bytesLeftInBuffer);
+		reader.read((void*)&memory[bytesLeftInBuffer], (size_t)length - (size_t)bytesLeftInBuffer);
 	}
 
 	// Rewind if needed.
