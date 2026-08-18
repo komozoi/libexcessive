@@ -305,7 +305,7 @@ public:
 	bool isFile() const override { return true; }
 
 	void sync() override {
-		syncfs(fd);
+		fsync(fd);
 	}
 
 	const bool isNew;
