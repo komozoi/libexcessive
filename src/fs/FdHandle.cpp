@@ -21,6 +21,8 @@
 #include <cstdio>
 #include <mutex>
 #include <atomic>
+#include <condition_variable>
+#include <unordered_set>
 #include <sys/poll.h>
 #include "fcntl.h"
 #include "unistd.h"
@@ -40,12 +42,14 @@
 class FdHandleState {
 public:
 	DefaultAllocator allocator;
-	HashMap<int16_t, FdHandleData*>* fileDescriptors = nullptr;
+	HashMap<int, FdHandleData*>* fileDescriptors = nullptr;
 	std::mutex mutex;
+	std::condition_variable cv;
+	std::unordered_set<int> closing;
 
-	Map<int16_t, FdHandleData*>* getFds() {
+	Map<int, FdHandleData*>* getFds() {
 		if (fileDescriptors == nullptr)
-			fileDescriptors = new HashMap<int16_t, FdHandleData*>(64, allocator);
+			fileDescriptors = new HashMap<int, FdHandleData*>(64, allocator);
 		return fileDescriptors;
 	}
 
@@ -64,17 +68,32 @@ typedef struct {
 
 class FdHandleData {
 public:
-	FdHandleData(int fd) : fd(fd), refs(0) {}
+	FdHandleData(int fd, bool ownsFd = true) : fd(fd), ownsFd(ownsFd), refs(0) {}
+
+	void incRefUnlocked() {
+		refs++;
+	}
 
 	void incRef() {
+		std::lock_guard<std::mutex> lock(state.mutex);
 		refs++;
 	}
 
 	void decRef() {
-		refs--;
-		if (refs <= 0 && fd >= 0) {
-			state.getFds()->remove(fd);
-			destroy();
+		int key = fd;
+		{
+			std::unique_lock<std::mutex> lock(state.mutex);
+			refs--;
+			if (refs > 0 || key < 0)
+				return;
+			state.getFds()->remove(key);
+			state.closing.insert(key);
+		}
+		destroy();
+		{
+			std::lock_guard<std::mutex> lock(state.mutex);
+			state.closing.erase(key);
+			state.cv.notify_all();
 		}
 	}
 
@@ -233,12 +252,14 @@ public:
 	virtual ~FdHandleData() {
 		if (fd >= 0) {
 			flush();
-			::close(fd);
+			if (ownsFd)
+				::close(fd);
 		}
 		fd = -1;
 	}
 
-	int16_t fd;
+	int fd;
+	bool ownsFd;
 	std::recursive_mutex mutex;
 
 	int numReferences() const {
@@ -305,7 +326,11 @@ public:
 	bool isFile() const override { return true; }
 
 	void sync() override {
-		syncfs(fd);
+#if defined(__APPLE__)
+		::fsync(fd);
+#else
+		::fdatasync(fd);
+#endif
 	}
 
 	const bool isNew;
@@ -318,7 +343,7 @@ public:
 
 class SocketHandleData: public FdHandleData {
 public:
-	explicit SocketHandleData(int fd) : FdHandleData(fd), shouldClose(false) {}
+	explicit SocketHandleData(int fd, bool ownsFd = true) : FdHandleData(fd, ownsFd), shouldClose(false) {}
 
 	ssize_t read(void* value, size_t size) override {
 		struct pollfd pfd {fd, POLLIN | POLLHUP | POLLERR | POLLNVAL, 0};
@@ -376,21 +401,42 @@ public:
 
 static FileHandleData errorHandle(-1, false);
 
-static FdHandleData& getHandleData(int16_t fd) {
+/** Caller must hold state.mutex. */
+static FdHandleData& getHandleDataLocked(int fd) {
 	if (fd < 0)
 		return errorHandle;
-	return *state.getFds()->get(fd);
+	FdHandleData** slot = state.getFds()->getPtr(fd);
+	if (slot == nullptr || *slot == nullptr)
+		return errorHandle;
+	return **slot;
 }
 
+static FdHandleData& getHandleData(int fd) {
+	std::lock_guard<std::mutex> lock(state.mutex);
+	return getHandleDataLocked(fd);
+}
 
-FdHandle::FdHandle(int fd) : fd((int16_t)fd) {
-	if (this->fd >= 0)
-		getHandleData(this->fd).incRef();
+static void waitFdNotClosing(std::unique_lock<std::mutex>& lock, int fd) {
+	while (state.closing.count(fd) != 0)
+		state.cv.wait(lock);
+}
+
+FdHandle::FdHandle(int fd) : fd(fd) {
+	if (this->fd < 0)
+		return;
+	std::lock_guard<std::mutex> lock(state.mutex);
+	FdHandleData& data = getHandleDataLocked(this->fd);
+	if (&data != &errorHandle)
+		data.incRefUnlocked();
 }
 
 FdHandle::FdHandle(const FdHandle& other) : fd(other.fd) {
-	if (fd >= 0)
-		getHandleData(fd).incRef();
+	if (fd < 0)
+		return;
+	std::lock_guard<std::mutex> lock(state.mutex);
+	FdHandleData& data = getHandleDataLocked(fd);
+	if (&data != &errorHandle)
+		data.incRefUnlocked();
 }
 
 FdHandle::FdHandle(FdHandle&& other) noexcept : fd(other.fd) {
@@ -417,12 +463,19 @@ FdHandle &FdHandle::operator=(const FdHandle& other) {
 	return *this;
 }
 
+static void internNewFile(int fd, bool isNew) {
+	std::unique_lock<std::mutex> lock(state.mutex);
+	waitFdNotClosing(lock, fd);
+	if (!state.getFds()->hasKey(fd)) {
+		FileHandleData* handleData = new FileHandleData(fd, isNew);
+		state.getFds()->put(fd, handleData);
+	}
+}
+
 FdHandle FdHandle::open(const char* path, int mode) {
 	int fd = ::open(path, mode);
-	if (fd != -1) {
-		FdHandleData* handleData = new FileHandleData(fd, false);
-		state.getFds()->put((int16_t) fd, handleData);
-	}
+	if (fd != -1)
+		internNewFile(fd, false);
 	return FdHandle(fd);
 }
 
@@ -439,23 +492,43 @@ FdHandle FdHandle::open(const char* path, int mode, int flag) {
 	} else
 		fd = ::open(path, mode, flag);
 
-	if (fd != -1) {
-		FileHandleData* handleData = new FileHandleData(fd, isNew);
-		std::lock_guard<std::mutex> lock(state.mutex);
-		state.getFds()->put((int16_t) fd, handleData);
-	}
+	if (fd != -1)
+		internNewFile(fd, isNew);
 	return FdHandle(fd);
 }
 
-FdHandle FdHandle::from(int fd) {
-	std::lock_guard<std::mutex> lock(state.mutex);
+static void internExistingFd(int fd, bool ownsFd) {
+	std::unique_lock<std::mutex> lock(state.mutex);
+	waitFdNotClosing(lock, fd);
 	if (!state.getFds()->hasKey(fd)) {
-		//SocketHandleData* handleData = new(slab.allocate<SocketHandleData>()) SocketHandleData(fd);
-		SocketHandleData* handleData = new SocketHandleData(fd);
-		state.getFds()->put((int16_t) fd, handleData);
+		SocketHandleData* handleData = new SocketHandleData(fd, ownsFd);
+		state.getFds()->put(fd, handleData);
 	}
+}
 
+FdHandle FdHandle::from(int fd) {
+	if (fd >= 0)
+		internExistingFd(fd, true);
 	return FdHandle(fd);
+}
+
+FdHandle FdHandle::wrap(int fd) {
+	if (fd >= 0)
+		internExistingFd(fd, false);
+	return FdHandle(fd);
+}
+
+void FdHandle::syncFile() const {
+	getHandleData(fd).flush();
+}
+
+void FdHandle::syncFilesystem() const {
+	getHandleData(fd).flushWrites();
+#if defined(__linux__)
+	syncfs(fd);
+#else
+	::fsync(fd);
+#endif
 }
 
 void FdHandle::pipe(FdHandle& reader, FdHandle& writer) {
@@ -762,8 +835,9 @@ MmapHandle::~MmapHandle() {
 }
 
 FdHandleState::~FdHandleState() {
+	std::lock_guard<std::mutex> lock(mutex);
 	if (fileDescriptors) {
-		for (MapElement<int16_t, FdHandleData*> entry: *fileDescriptors)
+		for (MapElement<int, FdHandleData*> entry: *fileDescriptors)
 			entry.value->destroy();
 		delete fileDescriptors;
 	}

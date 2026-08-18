@@ -19,6 +19,7 @@
 #include "fs/FdHandle.h"
 #include <gtest/gtest.h>
 #include "fcntl.h"
+#include <cerrno>
 #include <string>
 #include <atomic>
 #include <thread>
@@ -127,7 +128,7 @@ TEST_F(FdHandleTest, CloseOnReferenceLost) {
 }
 
 TEST_F(FdHandleTest, FdHandleSize) {
-	EXPECT_EQ(sizeof(FdHandle), 2);
+	EXPECT_EQ(sizeof(FdHandle), sizeof(int));
 }
 
 
@@ -715,5 +716,89 @@ TEST_F(FdHandleTest, MultiQueueWriteMmapReadback) {
 	EXPECT_EQ(ptr[1], val2);
 	EXPECT_EQ(ptr[2], 0); // Hole should be zeroed
 	EXPECT_EQ(ptr[3], val3);
+}
+
+TEST_F(FdHandleTest, Wrap_DoesNotCloseCallerFd) {
+	int fd = ::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0660);
+	ASSERT_GE(fd, 0);
+	{
+		FdHandle h = FdHandle::wrap(fd);
+		ASSERT_TRUE((bool)h);
+		EXPECT_EQ(h.getFd(), fd);
+	}
+	char c = 'W';
+	EXPECT_EQ(::write(fd, &c, 1), 1);
+	::close(fd);
+}
+
+TEST_F(FdHandleTest, From_ClosesOnLastRef) {
+	int fd = ::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0660);
+	ASSERT_GE(fd, 0);
+	{
+		FdHandle h = FdHandle::from(fd);
+		ASSERT_TRUE((bool)h);
+	}
+	char c = 'A';
+	EXPECT_EQ(::write(fd, &c, 1), -1);
+	EXPECT_EQ(errno, EBADF);
+}
+
+TEST_F(FdHandleTest, HighFd_RoundTrips) {
+	int low = ::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0660);
+	ASSERT_GE(low, 0);
+	int high = ::fcntl(low, F_DUPFD, 40000);
+	::close(low);
+	if (high < 40000) {
+		if (high >= 0)
+			::close(high);
+		GTEST_SKIP() << "OS did not give an fd >= 40000";
+	}
+	{
+		FdHandle h = FdHandle::wrap(high);
+		EXPECT_EQ(h.getFd(), high);
+	}
+	char c = 'H';
+	EXPECT_EQ(::write(high, &c, 1), 1);
+	::close(high);
+}
+
+TEST_F(FdHandleTest, ConcurrentTwoArgOpenClose) {
+	const int nThreads = 8;
+	const int nIters = 40;
+	std::atomic<int> errors(0);
+	std::thread threads[8];
+	for (int t = 0; t < nThreads; ++t) {
+		threads[t] = std::thread([t, nIters, &errors]() {
+			for (int i = 0; i < nIters; ++i) {
+				std::string path = std::string(TEST_FILE) + ".c" + std::to_string(t) + "." + std::to_string(i);
+				{
+					FdHandle h = FdHandle::open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC);
+					if (!h) {
+						errors.fetch_add(1);
+						remove(path.c_str());
+						continue;
+					}
+					uint32_t v = (uint32_t)(t + 1);
+					if (h.write(v) != (ssize_t)sizeof(v))
+						errors.fetch_add(1);
+				}
+				remove(path.c_str());
+			}
+		});
+	}
+	for (int t = 0; t < nThreads; ++t)
+		threads[t].join();
+	EXPECT_EQ(errors.load(), 0);
+}
+
+TEST_F(FdHandleTest, SyncFile_PersistsWrite) {
+	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0660);
+	uint32_t v = 0xAABBCCDDu;
+	ASSERT_EQ(h.write(v), (ssize_t)sizeof(v));
+	h.syncFile();
+	h.seek(0, SEEK_SET);
+	uint32_t got = 0;
+	ASSERT_EQ(h.read(got), (ssize_t)sizeof(got));
+	EXPECT_EQ(got, v);
 }
 

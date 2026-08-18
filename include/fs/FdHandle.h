@@ -223,6 +223,8 @@ public:
 	 * @return FdHandle.
 	 */
 	static FdHandle from(int fd);
+	/** Attach to an fd we must not close. Caller still owns the fd. */
+	static FdHandle wrap(int fd);
 
 	/**
 	 * @brief Creates a pipe and returns reader and writer FdHandles.
@@ -400,6 +402,11 @@ public:
 	 */
 	void flush() const;
 
+	/** fdatasync/fsync this fd (after queued writes). Not syncfs. */
+	void syncFile() const;
+	/** syncfs(this fd) on Linux; fsync on macOS. */
+	void syncFilesystem() const;
+
 	/**
 	 * @brief Closes the file descriptor.
 	 */
@@ -456,7 +463,7 @@ public:
 	int numReferences() const;
 
 private:
-	int16_t fd; /**< The raw file descriptor. */
+	int fd; /**< The raw file descriptor. */
 };
 
 /**
