@@ -5,15 +5,14 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <limits>
-#include <vector>
 
 #include "NDArray.h"
 
 
-static NDArray halfFromF32(const std::vector<float>& v, NDArrayType t) {
-	NDArray a({(int)v.size()}, F32);
-	for (size_t i = 0; i < v.size(); ++i)
-		a.set({(int)i}, v[i]);
+static NDArray halfFromF32(const ArrayList<float>& v, NDArrayType t) {
+	NDArray a({v.size()}, F32);
+	for (int i = 0; i < v.size(); ++i)
+		a.set({i}, v.get(i));
 	return a.convert(t);
 }
 
@@ -82,16 +81,11 @@ TEST(NDArray_half, F16_plus_BF16_PromotesToF32) {
 }
 
 TEST(NDArray_half, SumDot_MatchesF32) {
-	std::vector<float> va, vb;
-	for (int i = 0; i < 128; ++i) {
-		va.push_back((float)(i % 7) - 3.0f);
-		vb.push_back((float)(i % 5) - 2.0f);
-	}
 	NDArray fa({128}, F32);
 	NDArray fb({128}, F32);
 	for (int i = 0; i < 128; ++i) {
-		fa.set({i}, va[(size_t)i]);
-		fb.set({i}, vb[(size_t)i]);
+		fa.set({i}, (float)(i % 7) - 3.0f);
+		fb.set({i}, (float)(i % 5) - 2.0f);
 	}
 	NDArray ha = fa.convert(F16);
 	NDArray hb = fb.convert(F16);

@@ -414,7 +414,7 @@ public:
 		/** Start a proxy at the first index. */
 		Ref(NDArray* parent, int first);
 		/** Append one index; read/write only after rank matches the array. */
-		Ref operator[](int i);
+		Ref operator[](int i) const;
 
 		template <typename T>
 		/** Load the element at the accumulated indices. */
@@ -453,29 +453,29 @@ public:
 	/** Dense owner of `shape` × `type` (zero-filled). A zero axis allocates nothing. */
 	NDArray(ArrayList<int> shape, NDArrayType type);
 	/** 1-D F32 from `vector`. */
-	NDArray(ArrayList<float> vector);
+	NDArray(const ArrayList<float>& vector);
 	/** 1-D F64 from `vector`. */
-	NDArray(ArrayList<double> vector);
+	NDArray(const ArrayList<double>& vector);
 	/** 1-D UINT8 from `vector`. */
-	NDArray(ArrayList<uint8_t> vector);
+	NDArray(const ArrayList<uint8_t>& vector);
 	/** 1-D INT8 from `vector`. */
-	NDArray(ArrayList<int8_t> vector);
+	NDArray(const ArrayList<int8_t>& vector);
 	/** 1-D INT32 from `vector` (INT3 if every value is in {-1,0,1}). */
-	NDArray(ArrayList<int32_t> vector);
+	NDArray(const ArrayList<int32_t>& vector);
 	/** 1-D INT64 from `vector` (INT3 if every value is in {-1,0,1}). */
-	NDArray(ArrayList<int64_t> vector);
+	NDArray(const ArrayList<int64_t>& vector);
 	/** F32 owner of `shape` filled from `vector` (product must match). */
-	NDArray(const ArrayList<int>& shape, ArrayList<float> vector);
+	NDArray(const ArrayList<int>& shape, const ArrayList<float>& vector);
 	/** F64 / UINT8 / INT8 / INT32 / INT64 owner of `shape` from `vector`. */
-	NDArray(const ArrayList<int>& shape, ArrayList<double> vector);
+	NDArray(const ArrayList<int>& shape, const ArrayList<double>& vector);
 	/** UINT8 owner of `shape` filled from `vector`. */
-	NDArray(const ArrayList<int>& shape, ArrayList<uint8_t> vector);
+	NDArray(const ArrayList<int>& shape, const ArrayList<uint8_t>& vector);
 	/** INT8 owner of `shape` filled from `vector`. */
-	NDArray(const ArrayList<int>& shape, ArrayList<int8_t> vector);
+	NDArray(const ArrayList<int>& shape, const ArrayList<int8_t>& vector);
 	/** INT32 owner of `shape` filled from `vector`. */
-	NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector);
+	NDArray(const ArrayList<int>& shape, const ArrayList<int32_t>& vector);
 	/** INT64 owner of `shape` filled from `vector`. */
-	NDArray(const ArrayList<int>& shape, ArrayList<int64_t> vector);
+	NDArray(const ArrayList<int>& shape, const ArrayList<int64_t>& vector);
 
 	template <typename T, typename = std::enable_if_t<std::is_same_v<T, NDArrayType>>>
 	/** Rank-0 scalar of `type` holding `value`. */

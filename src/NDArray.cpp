@@ -16,7 +16,6 @@
 
 #include <atomic>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -97,10 +96,6 @@ static int maxPowerOfType(NDArrayType type) {
 		default:
 			throw std::invalid_argument("Invalid type");
 	}
-}
-
-static void retainTypeRuleHelpers() {
-	(void)&maxPowerOfType;
 }
 
 static bool isLosslessConversion(NDArrayType from, NDArrayType to) {
@@ -290,7 +285,7 @@ static void divBasic(A* a, B b, size_t size) {
 
 
 static uint8_t binaryGet(const uint64_t* words, size_t i) {
-	return (uint8_t)((words[i >> 6] >> (i & 63)) & 1ULL);
+	return (uint8_t)(words[i >> 6] >> (i & 63) & 1ULL);
 }
 static void binarySet(uint64_t* words, size_t i, uint8_t bit) {
 	if (bit)
@@ -418,8 +413,8 @@ NDArrayBuffer::~NDArrayBuffer() {
 
 void NDArray::rebindPointers() {
 	if (buffer && buffer.get()) {
-		memory = buffer.get()->data;
-		memorySize = buffer.get()->byteSize;
+		memory = buffer->data;
+		memorySize = buffer->byteSize;
 	} else {
 		memory = nullptr;
 		memorySize = 0;
@@ -468,7 +463,7 @@ static size_t packedBufferBytes(NDArrayType t, size_t numElems) {
 		case BINARY:
 			if (numElems > SIZE_MAX - 63)
 				throw std::invalid_argument("NDArray: size overflow");
-			return ((numElems + 63) / 64) * 8;
+			return (numElems + 63) / 64 * 8;
 		case INT3:
 			if (numElems > SIZE_MAX - (int3_kLanesPerWord - 1))
 				throw std::invalid_argument("NDArray: size overflow");
@@ -526,7 +521,7 @@ sp<NDArrayBuffer> NDArray::makeWrapBuffer(void* data, size_t byteSize, const Arr
 		throw std::invalid_argument("NDArray wrap: buffer smaller than required packed size");
 	if (data && need > 0) {
 		const size_t align = wrapAlignment(type);
-		if ((reinterpret_cast<std::uintptr_t>(data) % align) != 0)
+		if (reinterpret_cast<std::uintptr_t>(data) % align != 0)
 			throw std::invalid_argument("NDArray wrap: data is not aligned for element type");
 	}
 	return sp<NDArrayBuffer>(UNIQUE, data, byteSize, type);
@@ -541,7 +536,7 @@ sp<NDArrayBuffer> NDArray::makeWrapBuffer(const void* data, size_t byteSize, con
 		throw std::invalid_argument("NDArray wrap: buffer smaller than required packed size");
 	if (data && need > 0) {
 		const size_t align = wrapAlignment(type);
-		if ((reinterpret_cast<std::uintptr_t>(data) % align) != 0)
+		if (reinterpret_cast<std::uintptr_t>(data) % align != 0)
 			throw std::invalid_argument("NDArray wrap: data is not aligned for element type");
 	}
 
@@ -561,7 +556,7 @@ NDArray NDArray::wrap(void* data, size_t byteSize, ArrayList<int> shape, NDArray
 
 static size_t elementsForPackedBytes(NDArrayType t, size_t bytes) {
 	const size_t align = wrapAlignment(t);
-	if (align != 0 && (bytes % align) != 0)
+	if (align != 0 && bytes % align != 0)
 		throw std::invalid_argument("NDArray wrap: row stride is not aligned for element type");
 	switch (t) {
 		case BINARY:
@@ -623,7 +618,7 @@ static void checkWrapPointer(const void* data, size_t byteSize, size_t need, NDA
 		throw std::invalid_argument("NDArray wrap: buffer smaller than required packed size");
 	if (data && need > 0) {
 		const size_t align = wrapAlignment(type);
-		if ((reinterpret_cast<std::uintptr_t>(data) % align) != 0)
+		if (reinterpret_cast<std::uintptr_t>(data) % align != 0)
 			throw std::invalid_argument("NDArray wrap: data is not aligned for element type");
 	}
 }
@@ -635,7 +630,7 @@ NDArrayView NDArrayView::wrap(const void* data, size_t byteSize, ArrayList<int> 
 	if (shape.size() < 2) {
 		if (rowStrideBytes != dense)
 			throw std::invalid_argument("NDArray wrap: row stride requires rank >= 2");
-		return NDArrayView::wrap(data, byteSize, std::move(shape), type);
+		return wrap(data, byteSize, std::move(shape), type);
 	}
 	const size_t need = paddedWrapNeed(shape, type, rowStrideBytes);
 	checkWrapPointer(data, byteSize, need, type);
@@ -651,16 +646,16 @@ NDArray NDArray::wrap(void* data, size_t byteSize, ArrayList<int> shape,
 	if (shape.size() < 2) {
 		if (rowStrideBytes != dense)
 			throw std::invalid_argument("NDArray wrap: row stride requires rank >= 2");
-		return NDArray::wrap(data, byteSize, std::move(shape), type);
+		return wrap(data, byteSize, std::move(shape), type);
 	}
 	const size_t rowPacked = packedBufferBytes(type, tailElementCount(shape));
 	if (rowStrideBytes != rowPacked)
 		throw std::invalid_argument("NDArray wrap: padded row stride requires NDArrayView::wrap");
-	return NDArray::wrap(data, byteSize, std::move(shape), type);
+	return wrap(data, byteSize, std::move(shape), type);
 }
 
 bool NDArray::ownsStorage() const {
-	return buffer && buffer.get() && buffer.get()->ownsData;
+	return buffer && buffer.get() && buffer->ownsData;
 }
 
 size_t NDArray::ownedBufferAllocCount() {
@@ -700,27 +695,31 @@ NDArray NDArray::empty(NDArrayType type) {
 	return NDArray({0}, type);
 }
 
-NDArray::NDArray(ArrayList<float> vector) : shape({vector.size()}), type(F32), memory(nullptr) {
+NDArray::NDArray(const ArrayList<float>& vector) : shape({vector.size()}), type(F32), memory(nullptr) {
 	initialize();
 	if (memorySize)
 		memcpy(float32, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(ArrayList<double> vector) : shape({vector.size()}), type(F64), memory(nullptr) {
+
+NDArray::NDArray(const ArrayList<double>& vector) : shape({vector.size()}), type(F64), memory(nullptr) {
 	initialize();
 	if (memorySize)
 		memcpy(float64, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(ArrayList<uint8_t> vector) : shape({vector.size()}), type(UINT8), memory(nullptr) {
+
+NDArray::NDArray(const ArrayList<uint8_t>& vector) : shape({vector.size()}), type(UINT8), memory(nullptr) {
 	initialize();
 	if (memorySize)
 		memcpy(uint8, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(ArrayList<int8_t> vector) : shape({vector.size()}), type(INT8), memory(nullptr) {
+
+NDArray::NDArray(const ArrayList<int8_t>& vector) : shape({vector.size()}), type(INT8), memory(nullptr) {
 	initialize();
 	if (memorySize)
 		memcpy(int8, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(ArrayList<int32_t> vector)
+
+NDArray::NDArray(const ArrayList<int32_t>& vector)
 	: shape({vector.size()}),
 	  type(allTernaryInts(vector.getMemory(), (size_t)vector.size()) ? INT3 : INT32),
 	  memory(nullptr) {
@@ -733,7 +732,8 @@ NDArray::NDArray(ArrayList<int32_t> vector)
 			memcpy(int32, vector.getMemory(), memorySize);
 	}
 }
-NDArray::NDArray(ArrayList<int64_t> vector)
+
+NDArray::NDArray(const ArrayList<int64_t>& vector)
 	: shape({vector.size()}),
 	  type(allTernaryInts(vector.getMemory(), (size_t)vector.size()) ? INT3 : INT64),
 	  memory(nullptr) {
@@ -747,35 +747,43 @@ NDArray::NDArray(ArrayList<int64_t> vector)
 	}
 }
 
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<float> vector) : shape(shape), type(F32), memory(nullptr) {
+NDArray::NDArray(const ArrayList<int>& shape, const ArrayList<float>& vector)
+	: shape(shape), type(F32), memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
 	if (memorySize)
 		memcpy(float32, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<double> vector) : shape(shape), type(F64), memory(nullptr) {
+
+NDArray::NDArray(const ArrayList<int>& shape, const ArrayList<double>& vector)
+	: shape(shape), type(F64), memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
 	if (memorySize)
 		memcpy(float64, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<uint8_t> vector) : shape(shape), type(UINT8), memory(nullptr) {
+
+NDArray::NDArray(const ArrayList<int>& shape, const ArrayList<uint8_t>& vector)
+	: shape(shape), type(UINT8), memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
 	if (memorySize)
 		memcpy(uint8, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int8_t> vector) : shape(shape), type(INT8), memory(nullptr) {
+
+NDArray::NDArray(const ArrayList<int>& shape, const ArrayList<int8_t>& vector)
+	: shape(shape), type(INT8), memory(nullptr) {
 	size_t expectedSize = initialize();
 	if (expectedSize != (size_t)vector.size())
 		throw std::out_of_range("Attempted to construct NDArray with number of input elements not matching shape");
 	if (memorySize)
 		memcpy(int8, vector.getMemory(), memorySize);
 }
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector)
+
+NDArray::NDArray(const ArrayList<int>& shape, const ArrayList<int32_t>& vector)
 	: shape(shape),
 	  type(allTernaryInts(vector.getMemory(), (size_t)vector.size()) ? INT3 : INT32),
 	  memory(nullptr) {
@@ -790,7 +798,8 @@ NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int32_t> vector)
 			memcpy(int32, vector.getMemory(), memorySize);
 	}
 }
-NDArray::NDArray(const ArrayList<int>& shape, ArrayList<int64_t> vector)
+
+NDArray::NDArray(const ArrayList<int>& shape, const ArrayList<int64_t>& vector)
 	: shape(shape),
 	  type(allTernaryInts(vector.getMemory(), (size_t)vector.size()) ? INT3 : INT64),
 	  memory(nullptr) {
@@ -818,7 +827,7 @@ NDArray::NDArray(const NDArray& other)
 NDArray::NDArray(NDArray&& other) noexcept
 	: shape(std::move(other.shape)), type(other.type), buffer(std::move(other.buffer)), memory(nullptr) {
 	rebindPointers();
-	other.shape = ArrayList<int>({0});
+	other.shape = ArrayList({0});
 	other.buffer = nullptr;
 	other.memory = nullptr;
 	other.memorySize = 0;
@@ -843,7 +852,7 @@ NDArray& NDArray::operator=(NDArray&& other) noexcept {
 		type = other.type;
 		buffer = std::move(other.buffer);
 		rebindPointers();
-		other.shape = ArrayList<int>({0});
+		other.shape = ArrayList({0});
 		other.buffer = nullptr;
 		other.memory = nullptr;
 		other.memorySize = 0;
@@ -917,8 +926,8 @@ size_t NDArray::computeOffset(const int* indices, int rank) const {
 
 size_t NDArray::computeOffset(const ArrayList<int>& indices) const {
 	const int r = indices.size();
-	if (r <= NDArray::kMaxRank) {
-		int tmp[NDArray::kMaxRank] = {};
+	if (r <= kMaxRank) {
+		int tmp[kMaxRank] = {};
 		for (int i = 0; i < r; ++i)
 			tmp[i] = indices.get(i);
 		return computeOffset(tmp, r);
@@ -1052,12 +1061,12 @@ NDArray::CRef NDArray::operator[](int i) const {
 
 // ---- NDArray::Ref / CRef ----------------------------------------------
 
-NDArray::Ref::Ref(NDArray* parent_, int first)
-	: parent(parent_), rank(1) {
+NDArray::Ref::Ref(NDArray* parent, int first)
+	: parent(parent), rank(1) {
 	idx[0] = first;
 }
 
-NDArray::Ref NDArray::Ref::operator[](int i) {
+NDArray::Ref NDArray::Ref::operator[](int i) const {
 	if (rank >= kMaxRank)
 		throw std::out_of_range("NDArray: rank exceeds kMaxRank");
 	Ref next = *this;
@@ -1065,8 +1074,8 @@ NDArray::Ref NDArray::Ref::operator[](int i) {
 	return next;
 }
 
-NDArray::CRef::CRef(const NDArray* parent_, int first)
-	: parent(parent_), rank(1) {
+NDArray::CRef::CRef(const NDArray* parent, int first)
+	: parent(parent), rank(1) {
 	idx[0] = first;
 }
 
@@ -1116,7 +1125,7 @@ bool NDArrayView::isBroadcastableTo(const ArrayList<int>& targetShape) const {
 		return false;
 	for (int i = 0; i < tr; ++i) {
 		int ti = targetShape.get(tr - 1 - i);
-		int si = (i < ar) ? shape.get(ar - 1 - i) : 1;
+		int si = i < ar ? shape.get(ar - 1 - i) : 1;
 		if (si != ti && si != 1)
 			return false;
 	}
@@ -1134,9 +1143,9 @@ NDArrayView NDArrayView::broadcastTo(const ArrayList<int>& targetShape) const {
 		newStrides.add((size_t)0);
 	for (int i = 0; i < tr; ++i) {
 		int ti = targetShape.get(tr - 1 - i);
-		int si = (i < ar) ? shape.get(ar - 1 - i) : 1;
-		size_t oldStride = (i < ar) ? strides.get(ar - 1 - i) : 0;
-		newStrides.set(tr - 1 - i, (si == ti) ? oldStride : (size_t)0);
+		int si = i < ar ? shape.get(ar - 1 - i) : 1;
+		size_t oldStride = i < ar ? strides.get(ar - 1 - i) : 0;
+		newStrides.set(tr - 1 - i, si == ti ? oldStride : (size_t)0);
 		(void)ti;
 	}
 	return NDArrayView(buffer, targetShape, std::move(newStrides), offset, type);
@@ -1214,7 +1223,7 @@ NDArrayView NDArrayView::slice(int axis, int index) const {
 		throw std::out_of_range("NDArrayView::slice - axis out of range");
 	if (index < 0 || index >= shape.get(axis))
 		throw std::out_of_range("NDArrayView::slice - index out of bounds");
-	size_t newOff = offset + (size_t)index * ((axis < strides.size()) ? strides.get(axis) : (size_t)0);
+	size_t newOff = offset + (size_t)index * (axis < strides.size() ? strides.get(axis) : (size_t)0);
 	ArrayList<int> ns;
 	ArrayList<size_t> nst;
 	for (int d = 0; d < r; ++d) {
@@ -1299,9 +1308,9 @@ static void viewStoreLane(NDArray& out, size_t dst, const void* data, NDArrayTyp
 NDArray NDArrayView::copy() const {
 	NDArray out(shape, type);
 	const size_t n = numElements();
-	if (n == 0 || !sharedBuffer() || !sharedBuffer().get() || !sharedBuffer().get()->data)
+	if (n == 0 || !sharedBuffer() || !sharedBuffer().get() || !sharedBuffer()->data)
 		return out;
-	const void* data = sharedBuffer().get()->data;
+	const void* data = sharedBuffer()->data;
 	const size_t esize = unpackedElemSize(type);
 	if (isContiguous() && esize != 0) {
 		memcpy(out.data(), (const char*)data + offset * esize, n * esize);
@@ -1319,7 +1328,7 @@ NDArray NDArrayView::copy() const {
 		size_t dst = 0;
 		const int last = rank - 1;
 		const int nLast = shape.get(last);
-		const size_t stLast = (last < strides.size()) ? strides.get(last) : (size_t)0;
+		const size_t stLast = last < strides.size() ? strides.get(last) : (size_t)0;
 		while (true) {
 			if (esize != 0 && stLast == 1 && nLast > 0) {
 				memcpy((char*)out.data() + dst * esize,
@@ -1468,12 +1477,12 @@ static Acc scoreGeneric(const NDArrayView& a, const NDArrayView* b, size_t n, Sc
 
 template <typename Acc>
 static Acc scorePackedSameType(const NDArrayView& a, const NDArrayView* b, size_t n, ScoreKind kind) {
-	const void* da = a.sharedBuffer().get()->data;
+	const void* da = a.sharedBuffer()->data;
 	const size_t oa = a.getOffset();
 	const NDArrayType t = a.getType();
 	const NDScoreOp op = toNDScoreOp(kind);
-	const void* db = (kind == ScoreKind::L2Self) ? nullptr : b->sharedBuffer().get()->data;
-	const size_t ob = (kind == ScoreKind::L2Self) ? 0 : b->getOffset();
+	const void* db = kind == ScoreKind::L2Self ? nullptr : b->sharedBuffer()->data;
+	const size_t ob = kind == ScoreKind::L2Self ? 0 : b->getOffset();
 	switch (t) {
 		case F16: {
 			const uint16_t* pa = (const uint16_t*)da + oa;
@@ -1555,7 +1564,7 @@ static Acc scorePackedSameType(const NDArrayView& a, const NDArrayView* b, size_
 				}
 				return acc;
 			}
-			const uint256_t* pb = (const uint256_t*)b->sharedBuffer().get()->data + b->getOffset();
+			const uint256_t* pb = (const uint256_t*)b->sharedBuffer()->data + b->getOffset();
 			for (size_t i = 0; i < n; ++i) {
 				Acc va, vb;
 				if constexpr (std::is_same_v<Acc, uint256_t>) {
@@ -1629,8 +1638,8 @@ Acc NDArrayView::hamming(const NDArrayView& other) const {
 	if (n == 0)
 		return Acc{};
 	if (viewIsPacked(*this) && viewIsPacked(other)) {
-		const uint64_t* wa = (const uint64_t*)sharedBuffer().get()->data;
-		const uint64_t* wb = (const uint64_t*)other.sharedBuffer().get()->data;
+		const uint64_t* wa = (const uint64_t*)sharedBuffer()->data;
+		const uint64_t* wb = (const uint64_t*)other.sharedBuffer()->data;
 		return accFromKernelI64<Acc>(ndscore_binary_i64(
 			wa, getOffset(), wb, other.getOffset(), n, NDScoreOp::L2Pair));
 	}
@@ -1663,7 +1672,7 @@ LIBEXCESSIVE_INSTANTIATE_SCORE(uint256_t)
 // typed pointers / packed words; F32/INT32 use the score-TU horizontal add.
 
 template <typename Lane, typename Acc>
-static Acc accFromLane(Lane v) {
+static Acc accFromLane(const Lane& v) {
 	if constexpr (std::is_same_v<Lane, uint256_t>) {
 		if constexpr (std::is_same_v<Acc, uint256_t>)
 			return v;
@@ -1691,7 +1700,7 @@ static Acc denseSum(const Lane* a, size_t n) {
 		s2 += accFromLane<Lane, Acc>(a[i + 2]);
 		s3 += accFromLane<Lane, Acc>(a[i + 3]);
 	}
-	Acc s = (s0 + s1) + (s2 + s3);
+	Acc s = s0 + s1 + (s2 + s3);
 	for (; i < n; ++i)
 		s += accFromLane<Lane, Acc>(a[i]);
 	return s;
@@ -1715,7 +1724,7 @@ static Acc denseProd(const Lane* a, size_t n) {
 		accMulEq(p2, accFromLane<Lane, Acc>(a[i + 2]));
 		accMulEq(p3, accFromLane<Lane, Acc>(a[i + 3]));
 	}
-	Acc p = (p0 * p1) * (p2 * p3);
+	Acc p = p0 * p1 * (p2 * p3);
 	for (; i < n; ++i)
 		accMulEq(p, accFromLane<Lane, Acc>(a[i]));
 	return p;
@@ -1731,7 +1740,7 @@ static Acc accFromSigned(int v) {
 
 template <typename Acc>
 static Acc packedSum(const NDArrayView& v, size_t n) {
-	const void* data = v.sharedBuffer().get()->data;
+	const void* data = v.sharedBuffer()->data;
 	const size_t o = v.getOffset();
 	switch (v.getType()) {
 		case F16: {
@@ -1776,7 +1785,7 @@ static Acc packedSum(const NDArrayView& v, size_t n) {
 				s2 += accFromSigned<Acc>(int3_getSigned(w, o + i + 2));
 				s3 += accFromSigned<Acc>(int3_getSigned(w, o + i + 3));
 			}
-			Acc s = (s0 + s1) + (s2 + s3);
+			Acc s = s0 + s1 + (s2 + s3);
 			for (; i < n; ++i)
 				s += accFromSigned<Acc>(int3_getSigned(w, o + i));
 			return s;
@@ -1806,7 +1815,7 @@ static Acc packedSum(const NDArrayView& v, size_t n) {
 
 template <typename Acc>
 static Acc packedProd(const NDArrayView& v, size_t n) {
-	const void* data = v.sharedBuffer().get()->data;
+	const void* data = v.sharedBuffer()->data;
 	const size_t o = v.getOffset();
 	switch (v.getType()) {
 		case F16:
@@ -1948,7 +1957,7 @@ namespace ndarray_detail {
 		switch (v.getType()) {
 			case BINARY: {
 				const uint64_t* words = (const uint64_t*)data;
-				return (double)((words[elementOffset >> 6] >> (elementOffset & 63)) & 1ULL);
+				return (double)(words[elementOffset >> 6] >> (elementOffset & 63) & 1ULL);
 			}
 			case INT3: {
 				const uint64_t* words = (const uint64_t*)data;
@@ -1972,7 +1981,7 @@ namespace ndarray_detail {
 		switch (v.getType()) {
 			case BINARY: {
 				const uint64_t* words = (const uint64_t*)data;
-				return (int64_t)((words[elementOffset >> 6] >> (elementOffset & 63)) & 1ULL);
+				return (int64_t)(words[elementOffset >> 6] >> (elementOffset & 63) & 1ULL);
 			}
 			case INT3: {
 				const uint64_t* words = (const uint64_t*)data;
@@ -1995,7 +2004,7 @@ namespace ndarray_detail {
 		}
 	}
 	uint256_t viewLoadU256(const NDArrayView& v, size_t elementOffset) {
-		const void* data = v.sharedBuffer().get()->data;
+		const void* data = v.sharedBuffer()->data;
 		if (v.getType() == UINT256)
 			return ((const uint256_t*)data)[elementOffset];
 		return uint256_t(viewLoadDouble(v, elementOffset));
@@ -2397,8 +2406,8 @@ void NDArray::applyBinaryInPlace(const NDArray& src, ArithOp op) {
 				uint8_t b = binaryGet(src.uint64, i);
 				uint8_t r = 0;
 				switch (op) {
-					case ArithOp::Add: r = (uint8_t)((a + b) & 1); break;
-					case ArithOp::Sub: r = (uint8_t)((a - b) & 1); break;
+					case ArithOp::Add: r = (uint8_t)(a + b & 1); break;
+					case ArithOp::Sub: r = (uint8_t)(a - b & 1); break;
 					case ArithOp::Mul: r = (uint8_t)(a & b); break;
 					case ArithOp::Div:
 						if (b == 0)
@@ -2498,8 +2507,8 @@ void NDArray::applyBinaryInto(const NDArray& a, const NDArray& b, ArithOp op) {
 				uint8_t bv = binaryGet(b.uint64, i);
 				uint8_t r = 0;
 				switch (op) {
-					case ArithOp::Add: r = (uint8_t)((av + bv) & 1); break;
-					case ArithOp::Sub: r = (uint8_t)((av - bv) & 1); break;
+					case ArithOp::Add: r = (uint8_t)(av + bv & 1); break;
+					case ArithOp::Sub: r = (uint8_t)(av - bv & 1); break;
 					case ArithOp::Mul: r = (uint8_t)(av & bv); break;
 					case ArithOp::Div:
 						if (bv == 0)
@@ -2631,8 +2640,8 @@ void NDArray::applyDoubleScalarInPlace(double scalar, ArithOp op) {
 				uint8_t a = binaryGet(uint64, i);
 				uint8_t r = 0;
 				switch (op) {
-					case ArithOp::Add: r = (uint8_t)((a + s) & 1); break;
-					case ArithOp::Sub: r = (uint8_t)((a - s) & 1); break;
+					case ArithOp::Add: r = (uint8_t)(a + s & 1); break;
+					case ArithOp::Sub: r = (uint8_t)(a - s & 1); break;
 					case ArithOp::Mul: r = (uint8_t)(a & s); break;
 					case ArithOp::Div:
 						if (s == 0)
@@ -2731,8 +2740,8 @@ void NDArray::applyIntScalarInPlace(int scalar, ArithOp op) {
 				uint8_t a = binaryGet(uint64, i);
 				uint8_t r = 0;
 				switch (op) {
-					case ArithOp::Add: r = (uint8_t)((a + s) & 1); break;
-					case ArithOp::Sub: r = (uint8_t)((a - s) & 1); break;
+					case ArithOp::Add: r = (uint8_t)(a + s & 1); break;
+					case ArithOp::Sub: r = (uint8_t)(a - s & 1); break;
 					case ArithOp::Mul: r = (uint8_t)(a & s); break;
 					case ArithOp::Div:
 						if (s == 0)
@@ -2809,7 +2818,7 @@ void NDArray::applyInt64ScalarInPlace(int64_t scalar, ArithOp op) {
 			break;
 		}
 		case UINT256: {
-			uint256_t s = (scalar < 0)
+			uint256_t s = scalar < 0
 				? uint256_t((int)scalar)
 				: uint256_t((uint64_t)scalar);
 			switch (op) {
@@ -2832,8 +2841,8 @@ void NDArray::applyInt64ScalarInPlace(int64_t scalar, ArithOp op) {
 				uint8_t a = binaryGet(uint64, i);
 				uint8_t r = 0;
 				switch (op) {
-					case ArithOp::Add: r = (uint8_t)((a + s) & 1); break;
-					case ArithOp::Sub: r = (uint8_t)((a - s) & 1); break;
+					case ArithOp::Add: r = (uint8_t)(a + s & 1); break;
+					case ArithOp::Sub: r = (uint8_t)(a - s & 1); break;
 					case ArithOp::Mul: r = (uint8_t)(a & s); break;
 					case ArithOp::Div:
 						if (s == 0)
@@ -3006,8 +3015,8 @@ void NDArray::applyBroadcastInPlace(const NDArrayView& src, ArithOp op) {
 				uint8_t b = (uint8_t)ndarray_detail::viewLoadI64(src, viewElemOffset(src, i));
 				uint8_t r = 0;
 				switch (op) {
-					case ArithOp::Add: r = (uint8_t)((a + b) & 1); break;
-					case ArithOp::Sub: r = (uint8_t)((a - b) & 1); break;
+					case ArithOp::Add: r = (uint8_t)(a + b & 1); break;
+					case ArithOp::Sub: r = (uint8_t)(a - b & 1); break;
 					case ArithOp::Mul: r = (uint8_t)(a & b); break;
 					case ArithOp::Div:
 						if (b == 0)
@@ -3249,11 +3258,11 @@ NDArray& NDArray::neg() {
 			// Two's-complement wrap in 3 bits: pattern → (8 - p) & 7; 0 stays 0.
 			for (size_t i = 0; i < n; ++i) {
 				uint8_t p = int3_get(uint64, i);
-				int3_set(uint64, i, p ? (uint8_t)((8 - p) & 7) : 0);
+				int3_set(uint64, i, p ? (uint8_t)(8 - p & 7) : 0);
 			}
 			break;
 		case INT8:
-			for (size_t i = 0; i < n; ++i) int8[i] = (int8_t)(-int8[i]);
+			for (size_t i = 0; i < n; ++i) int8[i] = (int8_t)-int8[i];
 			break;
 		case UINT256:
 			for (size_t i = 0; i < n; ++i) uint256[i] = -uint256[i];
@@ -3320,7 +3329,7 @@ NDArray& NDArray::abs() {
 			for (size_t i = 0; i < n; ++i) {
 				int8_t v = int8[i];
 				if (v < 0)
-					int8[i] = (int8_t)(-v);
+					int8[i] = (int8_t)-v;
 			}
 			break;
 		case UINT8:
@@ -3342,38 +3351,38 @@ NDArray& NDArray::sign() {
 		case BF16:
 			for (size_t i = 0; i < n; ++i) {
 				float v = ndarray_half::load(type, u16[i]);
-				float s = (v > 0.0f) ? 1.0f : ((v < 0.0f) ? -1.0f : 0.0f);
+				float s = v > 0.0f ? 1.0f : v < 0.0f ? -1.0f : 0.0f;
 				u16[i] = ndarray_half::store(type, s);
 			}
 			break;
 		case F32:
 			for (size_t i = 0; i < n; ++i) {
 				float v = float32[i];
-				float32[i] = (v > 0.0f) ? 1.0f : ((v < 0.0f) ? -1.0f : 0.0f);
+				float32[i] = v > 0.0f ? 1.0f : v < 0.0f ? -1.0f : 0.0f;
 			}
 			break;
 		case F64:
 			for (size_t i = 0; i < n; ++i) {
 				double v = float64[i];
-				float64[i] = (v > 0.0) ? 1.0 : ((v < 0.0) ? -1.0 : 0.0);
+				float64[i] = v > 0.0 ? 1.0 : v < 0.0 ? -1.0 : 0.0;
 			}
 			break;
 		case INT32:
 			for (size_t i = 0; i < n; ++i)
-				int32[i] = (int32[i] > 0) ? 1 : ((int32[i] < 0) ? -1 : 0);
+				int32[i] = int32[i] > 0 ? 1 : int32[i] < 0 ? -1 : 0;
 			break;
 		case INT64:
 			for (size_t i = 0; i < n; ++i)
-				int64[i] = (int64[i] > 0) ? 1 : ((int64[i] < 0) ? -1 : 0);
+				int64[i] = int64[i] > 0 ? 1 : int64[i] < 0 ? -1 : 0;
 			break;
 		case INT8:
 			for (size_t i = 0; i < n; ++i)
-				int8[i] = (int8[i] > 0) ? 1 : ((int8[i] < 0) ? (int8_t)-1 : 0);
+				int8[i] = int8[i] > 0 ? 1 : int8[i] < 0 ? (int8_t)-1 : 0;
 			break;
 		case INT3:
 			for (size_t i = 0; i < n; ++i) {
 				int v = int3_getSigned(uint64, i);
-				int3_setSigned(uint64, i, (v > 0) ? 1 : ((v < 0) ? -1 : 0));
+				int3_setSigned(uint64, i, v > 0 ? 1 : v < 0 ? -1 : 0);
 			}
 			break;
 		case UINT8:
@@ -3382,7 +3391,7 @@ NDArray& NDArray::sign() {
 			break;
 		case UINT256:
 			for (size_t i = 0; i < n; ++i)
-				uint256[i] = (uint256[i] == uint256_t(0)) ? uint256_t(0) : uint256_t(1);
+				uint256[i] = uint256[i] == uint256_t(0) ? uint256_t(0) : uint256_t(1);
 			break;
 		case BINARY:
 			break;
@@ -3487,7 +3496,7 @@ static void softmaxF32Row(float* row, size_t n, size_t stride) {
 		row[i * stride] = e;
 		s += e;
 	}
-	const float inv = (s == 0.0f) ? 0.0f : 1.0f / s;
+	const float inv = s == 0.0f ? 0.0f : 1.0f / s;
 	for (size_t i = 0; i < n; ++i)
 		row[i * stride] *= inv;
 }
@@ -3505,7 +3514,7 @@ static void softmaxF64Row(double* row, size_t n, size_t stride) {
 		row[i * stride] = e;
 		s += e;
 	}
-	const double inv = (s == 0.0) ? 0.0 : 1.0 / s;
+	const double inv = s == 0.0 ? 0.0 : 1.0 / s;
 	for (size_t i = 0; i < n; ++i)
 		row[i * stride] *= inv;
 }
@@ -3513,7 +3522,7 @@ static void softmaxF64Row(double* row, size_t n, size_t stride) {
 static void actAxisGeom(const ArrayList<int>& shape, int axis,
                         size_t& outer, size_t& len, size_t& inner) {
 	axis = actNormalizeAxis(shape, axis);
-	len = (shape.size() == 0) ? 1 : (size_t)shape.get(axis);
+	len = shape.size() == 0 ? 1 : (size_t)shape.get(axis);
 	inner = 1;
 	for (int d = axis + 1; d < shape.size(); ++d)
 		inner *= (size_t)shape.get(d);
@@ -3640,7 +3649,7 @@ NDArray NDArray::rmsnorm(const NDArray& weight, int axis, float eps) const {
 	float* wp = wrow.getMemory();
 	float* xp = xrow.getMemory();
 	const float invL = 1.0f / (float)len;
-	const bool last = (inner == 1);
+	const bool last = inner == 1;
 
 	for (size_t o = 0; o < outer; ++o) {
 		for (size_t j = 0; j < inner; ++j) {
@@ -3801,7 +3810,7 @@ static void mapRealBinaryScalar(NDArray& a, double x, double (*fn)(double, doubl
 
 NDArray NDArray::atan2(const NDArray& x) const {
 	requireSameShape(*this, x);
-	NDArrayType rt = (isFloatingPoint(type) && isFloatingPoint(x.type))
+	NDArrayType rt = isFloatingPoint(type) && isFloatingPoint(x.type)
 		? promoteTypes(type, x.type)
 		: F64;
 	NDArray y = convert(rt);
@@ -3822,7 +3831,7 @@ NDArray NDArray::atan2(int x) const { return atan2((double)x); }
 
 NDArray NDArray::hypot(const NDArray& x) const {
 	requireSameShape(*this, x);
-	NDArrayType rt = (isFloatingPoint(type) && isFloatingPoint(x.type))
+	NDArrayType rt = isFloatingPoint(type) && isFloatingPoint(x.type)
 		? promoteTypes(type, x.type)
 		: F64;
 	NDArray a = convert(rt);
@@ -4237,7 +4246,7 @@ struct NDArray::Impl {
 		NDArray out(a.shape, BINARY);
 		const size_t n = left.numElements();
 		for (size_t i = 0; i < n; ++i) {
-			bool r = (ct == F32)
+			bool r = ct == F32
 				? cmpDouble(left.float32[i], s, op)
 				: cmpDouble(left.float64[i], s, op);
 			binarySet(out.uint64, i, r ? 1 : 0);
@@ -4411,7 +4420,7 @@ struct NDArray::Impl {
 				out.u16[i] = ndarray_half::store(out.type, arithF32(
 					ndarray_half::load(num.type, num.u16[i]),
 					ndarray_half::load(den.type, den.u16[i]),
-					NDArray::ArithOp::Div));
+					ArithOp::Div));
 				break;
 			case F32: out.float32[i] = num.float32[i] / den.float32[i]; break;
 			case F64: out.float64[i] = num.float64[i] / den.float64[i]; break;
@@ -4435,19 +4444,19 @@ struct NDArray::Impl {
 
 	// ---- ArrayOrScalar helpers (shared by select / safeDiv / piecewise) ----
 
-	static NDArrayType aosType(const NDArray::ArrayOrScalar& p) {
-		if (p.kind == NDArray::ArrayOrScalar::Array)
+	static NDArrayType aosType(const ArrayOrScalar& p) {
+		if (p.kind == ArrayOrScalar::Array)
 			return p.arr->type;
-		if (p.kind == NDArray::ArrayOrScalar::ScalarDouble)
+		if (p.kind == ArrayOrScalar::ScalarDouble)
 			return F64;
 		return INT32;
 	}
 
-	static NDArrayType promoteAos(const NDArray::ArrayOrScalar* args, int nArgs) {
+	static NDArrayType promoteAos(const ArrayOrScalar* args, int nArgs) {
 		bool haveArr = false;
 		NDArrayType rt = F64;
 		for (int k = 0; k < nArgs; ++k) {
-			if (args[k].kind == NDArray::ArrayOrScalar::Array) {
+			if (args[k].kind == ArrayOrScalar::Array) {
 				if (!haveArr) {
 					rt = args[k].arr->type;
 					haveArr = true;
@@ -4461,9 +4470,9 @@ struct NDArray::Impl {
 			bool allTernaryInts = true;
 			bool anyInt = false;
 			for (int k = 0; k < nArgs; ++k) {
-				if (args[k].kind == NDArray::ArrayOrScalar::ScalarDouble)
+				if (args[k].kind == ArrayOrScalar::ScalarDouble)
 					anyDouble = true;
-				else if (args[k].kind == NDArray::ArrayOrScalar::ScalarInt) {
+				else if (args[k].kind == ArrayOrScalar::ScalarInt) {
 					anyInt = true;
 					int64_t v = args[k].i;
 					if (v != -1 && v != 0 && v != 1)
@@ -4478,9 +4487,9 @@ struct NDArray::Impl {
 			return INT32;
 		}
 		for (int k = 0; k < nArgs; ++k) {
-			if (args[k].kind == NDArray::ArrayOrScalar::ScalarDouble)
+			if (args[k].kind == ArrayOrScalar::ScalarDouble)
 				rt = promoteTypes(rt, F64);
-			else if (args[k].kind == NDArray::ArrayOrScalar::ScalarInt)
+			else if (args[k].kind == ArrayOrScalar::ScalarInt)
 				// -1/0/1 promote as INT3 so where(mask, -1, int3Arr) stays INT3
 				rt = promoteTypes(rt, typeForIntConstant(args[k].i));
 		}
@@ -4488,15 +4497,14 @@ struct NDArray::Impl {
 	}
 
 	/** Also promote against a fixed array type (e.g. num/den for safeDiv). */
-	static NDArrayType promoteAosWith(NDArrayType base, const NDArray::ArrayOrScalar& p) {
-		NDArray::ArrayOrScalar tmp[1] = { p };
+	static NDArrayType promoteAosWith(NDArrayType base, const ArrayOrScalar& p) {
+		ArrayOrScalar tmp[1] = { p };
 		NDArrayType t = promoteAos(tmp, 1);
 		return promoteTypes(base, t);
 	}
 
-	static const NDArray* prepAosArray(const NDArray::ArrayOrScalar& p, NDArrayType rt,
-	                                   std::unique_ptr<NDArray>& storage) {
-		if (p.kind != NDArray::ArrayOrScalar::Array)
+	static const NDArray* prepAosArray(const ArrayOrScalar& p, NDArrayType rt, std::unique_ptr<NDArray>& storage) {
+		if (p.kind != ArrayOrScalar::Array)
 			return nullptr;
 		if (p.arr->type == rt)
 			return p.arr;
@@ -4504,25 +4512,25 @@ struct NDArray::Impl {
 		return storage.get();
 	}
 
-	static void writeAos(NDArray& out, size_t i, const NDArray::ArrayOrScalar& p, const NDArray* arrConv) {
-		if (p.kind == NDArray::ArrayOrScalar::Array)
+	static void writeAos(NDArray& out, size_t i, const ArrayOrScalar& p, const NDArray* arrConv) {
+		if (p.kind == ArrayOrScalar::Array)
 			copyElement(out, i, *arrConv, i);
-		else if (p.kind == NDArray::ArrayOrScalar::ScalarDouble)
+		else if (p.kind == ArrayOrScalar::ScalarDouble)
 			out.storeFromDouble(i, p.d);
 		else
 			out.storeFromI64(i, p.i);
 	}
 
-	static void requireAosShape(const NDArray& m, const NDArray::ArrayOrScalar& v) {
-		if (v.kind == NDArray::ArrayOrScalar::Array)
+	static void requireAosShape(const NDArray& m, const ArrayOrScalar& v) {
+		if (v.kind == ArrayOrScalar::Array)
 			requireSameShape(m, *v.arr);
 	}
 
 	/** Single-pass select: out[i] = truthy(cond[i]) ? x : y (array or scalar). */
-	static NDArray select(const NDArray& condition, NDArray::ArrayOrScalar x, NDArray::ArrayOrScalar y) {
+	static NDArray select(const NDArray& condition, ArrayOrScalar x, ArrayOrScalar y) {
 		requireAosShape(condition, x);
 		requireAosShape(condition, y);
-		NDArray::ArrayOrScalar args[2] = { x, y };
+		ArrayOrScalar args[2] = { x, y };
 		NDArrayType rt = promoteAos(args, 2);
 		std::unique_ptr<NDArray> storX, storY;
 		const NDArray* ax = prepAosArray(x, rt, storX);
@@ -4539,7 +4547,7 @@ struct NDArray::Impl {
 	}
 
 	/** num / den with zero-den → whenZero (scalar or array). */
-	static NDArray safeDiv(const NDArray& num, const NDArray& den, NDArray::ArrayOrScalar whenZero) {
+	static NDArray safeDiv(const NDArray& num, const NDArray& den, const ArrayOrScalar& whenZero) {
 		requireSameShape(num, den);
 		requireAosShape(num, whenZero);
 		NDArrayType rt = promoteTypes(num.type, den.type);
@@ -4559,10 +4567,10 @@ struct NDArray::Impl {
 		return out;
 	}
 
-	static NDArray piecewise1(const NDArray& m0, NDArray::ArrayOrScalar v0, NDArray::ArrayOrScalar otherwise) {
+	static NDArray piecewise1(const NDArray& m0, const ArrayOrScalar& v0, const ArrayOrScalar& otherwise) {
 		requireAosShape(m0, v0);
 		requireAosShape(m0, otherwise);
-		NDArray::ArrayOrScalar args[2] = { v0, otherwise };
+		ArrayOrScalar args[2] = { v0, otherwise };
 		NDArrayType rt = promoteAos(args, 2);
 		std::unique_ptr<NDArray> stor0, storO;
 		const NDArray* a0 = prepAosArray(v0, rt, stor0);
@@ -4578,14 +4586,14 @@ struct NDArray::Impl {
 		return out;
 	}
 
-	static NDArray piecewise2(const NDArray& m0, NDArray::ArrayOrScalar v0,
-	                          const NDArray& m1, NDArray::ArrayOrScalar v1,
-	                          NDArray::ArrayOrScalar otherwise) {
+	static NDArray piecewise2(const NDArray& m0, ArrayOrScalar v0,
+	                          const NDArray& m1, ArrayOrScalar v1,
+	                          ArrayOrScalar otherwise) {
 		requireSameShape(m0, m1);
 		requireAosShape(m0, v0);
 		requireAosShape(m0, v1);
 		requireAosShape(m0, otherwise);
-		NDArray::ArrayOrScalar args[3] = { v0, v1, otherwise };
+		ArrayOrScalar args[3] = { v0, v1, otherwise };
 		NDArrayType rt = promoteAos(args, 3);
 		std::unique_ptr<NDArray> stor0, stor1, storO;
 		const NDArray* a0 = prepAosArray(v0, rt, stor0);
@@ -4604,17 +4612,17 @@ struct NDArray::Impl {
 		return out;
 	}
 
-	static NDArray piecewise3(const NDArray& m0, NDArray::ArrayOrScalar v0,
-	                          const NDArray& m1, NDArray::ArrayOrScalar v1,
-	                          const NDArray& m2, NDArray::ArrayOrScalar v2,
-	                          NDArray::ArrayOrScalar otherwise) {
+	static NDArray piecewise3(const NDArray& m0, ArrayOrScalar v0,
+	                          const NDArray& m1, ArrayOrScalar v1,
+	                          const NDArray& m2, ArrayOrScalar v2,
+	                          ArrayOrScalar otherwise) {
 		requireSameShape(m0, m1);
 		requireSameShape(m0, m2);
 		requireAosShape(m0, v0);
 		requireAosShape(m0, v1);
 		requireAosShape(m0, v2);
 		requireAosShape(m0, otherwise);
-		NDArray::ArrayOrScalar args[4] = { v0, v1, v2, otherwise };
+		ArrayOrScalar args[4] = { v0, v1, v2, otherwise };
 		NDArrayType rt = promoteAos(args, 4);
 		std::unique_ptr<NDArray> stor0, stor1, stor2, storO;
 		const NDArray* a0 = prepAosArray(v0, rt, stor0);
@@ -4777,7 +4785,7 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 				float acc = ndarray_half::load(a.type, a.u16[0]);
 				for (size_t i = 1; i < n; ++i) {
 					float v = ndarray_half::load(a.type, a.u16[i]);
-					acc = (op == ReduceOp::Min) ? std::fmin(acc, v) : std::fmax(acc, v);
+					acc = op == ReduceOp::Min ? std::fmin(acc, v) : std::fmax(acc, v);
 				}
 				out.u16[0] = ndarray_half::store(a.type, acc);
 				break;
@@ -4785,14 +4793,14 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 			case F32: {
 				float acc = a.float32[0];
 				for (size_t i = 1; i < n; ++i)
-					acc = (op == ReduceOp::Min) ? std::fmin(acc, a.float32[i]) : std::fmax(acc, a.float32[i]);
+					acc = op == ReduceOp::Min ? std::fmin(acc, a.float32[i]) : std::fmax(acc, a.float32[i]);
 				out.float32[0] = acc;
 				break;
 			}
 			case F64: {
 				double acc = a.float64[0];
 				for (size_t i = 1; i < n; ++i)
-					acc = (op == ReduceOp::Min) ? std::fmin(acc, a.float64[i]) : std::fmax(acc, a.float64[i]);
+					acc = op == ReduceOp::Min ? std::fmin(acc, a.float64[i]) : std::fmax(acc, a.float64[i]);
 				out.float64[0] = acc;
 				break;
 			}
@@ -4800,7 +4808,7 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 				uint8_t acc = a.uint8[0];
 				for (size_t i = 1; i < n; ++i) {
 					uint8_t v = a.uint8[i];
-					acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+					acc = op == ReduceOp::Min ? (v < acc ? v : acc) : v > acc ? v : acc;
 				}
 				out.uint8[0] = acc;
 				break;
@@ -4809,7 +4817,7 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 				int8_t acc = a.int8[0];
 				for (size_t i = 1; i < n; ++i) {
 					int8_t v = a.int8[i];
-					acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+					acc = op == ReduceOp::Min ? (v < acc ? v : acc) : v > acc ? v : acc;
 				}
 				out.int8[0] = acc;
 				break;
@@ -4818,7 +4826,7 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 				int acc = int3_getSigned(a.uint64, 0);
 				for (size_t i = 1; i < n; ++i) {
 					int v = int3_getSigned(a.uint64, i);
-					acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+					acc = op == ReduceOp::Min ? (v < acc ? v : acc) : v > acc ? v : acc;
 				}
 				int3_setSigned(out.uint64, 0, acc);
 				break;
@@ -4827,7 +4835,7 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 				int32_t acc = a.int32[0];
 				for (size_t i = 1; i < n; ++i) {
 					int32_t v = a.int32[i];
-					acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+					acc = op == ReduceOp::Min ? (v < acc ? v : acc) : v > acc ? v : acc;
 				}
 				out.int32[0] = acc;
 				break;
@@ -4836,7 +4844,7 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 				int64_t acc = a.int64[0];
 				for (size_t i = 1; i < n; ++i) {
 					int64_t v = a.int64[i];
-					acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+					acc = op == ReduceOp::Min ? (v < acc ? v : acc) : v > acc ? v : acc;
 				}
 				out.int64[0] = acc;
 				break;
@@ -4854,7 +4862,7 @@ NDArray NDArray::Impl::reduceAll(const NDArray& a, ReduceOp op) {
 				uint8_t acc = binaryGet(a.uint64, 0);
 				for (size_t i = 1; i < n; ++i) {
 					uint8_t v = binaryGet(a.uint64, i);
-					acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+					acc = op == ReduceOp::Min ? (v < acc ? v : acc) : v > acc ? v : acc;
 				}
 				binarySet(out.uint64, 0, acc);
 				break;
@@ -4932,7 +4940,7 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 					float acc = ndarray_half::load(a.type, a.u16[first]);
 					for (size_t r = 1; r < reduced; ++r) {
 						float v = ndarray_half::load(a.type, a.u16[flatIndexWithAxis(a.shape, axis, oi, r)]);
-						acc = (op == ReduceOp::Min) ? std::fmin(acc, v) : std::fmax(acc, v);
+						acc = op == ReduceOp::Min ? std::fmin(acc, v) : std::fmax(acc, v);
 					}
 					out.u16[oi] = ndarray_half::store(a.type, acc);
 					break;
@@ -4941,7 +4949,7 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 					float acc = a.float32[first];
 					for (size_t r = 1; r < reduced; ++r) {
 						float v = a.float32[flatIndexWithAxis(a.shape, axis, oi, r)];
-						acc = (op == ReduceOp::Min) ? std::fmin(acc, v) : std::fmax(acc, v);
+						acc = op == ReduceOp::Min ? std::fmin(acc, v) : std::fmax(acc, v);
 					}
 					out.float32[oi] = acc;
 					break;
@@ -4950,7 +4958,7 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 					double acc = a.float64[first];
 					for (size_t r = 1; r < reduced; ++r) {
 						double v = a.float64[flatIndexWithAxis(a.shape, axis, oi, r)];
-						acc = (op == ReduceOp::Min) ? std::fmin(acc, v) : std::fmax(acc, v);
+						acc = op == ReduceOp::Min ? std::fmin(acc, v) : std::fmax(acc, v);
 					}
 					out.float64[oi] = acc;
 					break;
@@ -4959,7 +4967,7 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 					uint8_t acc = a.uint8[first];
 					for (size_t r = 1; r < reduced; ++r) {
 						uint8_t v = a.uint8[flatIndexWithAxis(a.shape, axis, oi, r)];
-						acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+						acc = op == ReduceOp::Min ? (v < acc ? v : acc) : v > acc ? v : acc;
 					}
 					out.uint8[oi] = acc;
 					break;
@@ -4968,7 +4976,7 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 					int8_t acc = a.int8[first];
 					for (size_t r = 1; r < reduced; ++r) {
 						int8_t v = a.int8[flatIndexWithAxis(a.shape, axis, oi, r)];
-						acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+						acc = op == ReduceOp::Min ? (v < acc ? v : acc) : v > acc ? v : acc;
 					}
 					out.int8[oi] = acc;
 					break;
@@ -4977,7 +4985,7 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 					int acc = int3_getSigned(a.uint64, first);
 					for (size_t r = 1; r < reduced; ++r) {
 						int v = int3_getSigned(a.uint64, flatIndexWithAxis(a.shape, axis, oi, r));
-						acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+						acc = op == ReduceOp::Min ? (v < acc ? v : acc) : v > acc ? v : acc;
 					}
 					int3_setSigned(out.uint64, oi, acc);
 					break;
@@ -4986,7 +4994,7 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 					int32_t acc = a.int32[first];
 					for (size_t r = 1; r < reduced; ++r) {
 						int32_t v = a.int32[flatIndexWithAxis(a.shape, axis, oi, r)];
-						acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+						acc = op == ReduceOp::Min ? (v < acc ? v : acc) : v > acc ? v : acc;
 					}
 					out.int32[oi] = acc;
 					break;
@@ -4995,7 +5003,7 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 					int64_t acc = a.int64[first];
 					for (size_t r = 1; r < reduced; ++r) {
 						int64_t v = a.int64[flatIndexWithAxis(a.shape, axis, oi, r)];
-						acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+						acc = op == ReduceOp::Min ? (v < acc ? v : acc) : v > acc ? v : acc;
 					}
 					out.int64[oi] = acc;
 					break;
@@ -5014,7 +5022,7 @@ NDArray NDArray::Impl::reduceAxis(const NDArray& a, int axis, ReduceOp op) {
 					uint8_t acc = binaryGet(a.uint64, first);
 					for (size_t r = 1; r < reduced; ++r) {
 						uint8_t v = binaryGet(a.uint64, flatIndexWithAxis(a.shape, axis, oi, r));
-						acc = (op == ReduceOp::Min) ? (v < acc ? v : acc) : (v > acc ? v : acc);
+						acc = op == ReduceOp::Min ? (v < acc ? v : acc) : v > acc ? v : acc;
 					}
 					binarySet(out.uint64, oi, acc);
 					break;
@@ -5268,7 +5276,7 @@ static void binaryInvertInPlace(uint64_t* words, size_t nElems) {
 		words[w] = ~words[w];
 	const unsigned rem = (unsigned)(nElems % 64);
 	if (rem)
-		words[fullWords] = (~words[fullWords]) & ((1ULL << rem) - 1ULL);
+		words[fullWords] = ~words[fullWords] & (1ULL << rem) - 1ULL;
 }
 
 /** Non-zero test → BINARY, word-packed (F32). */
@@ -5404,7 +5412,7 @@ static inline bool f64_match(uint64_t u, FloatClass cls) {
 // F16 inf/nan threshold 0x7c00; BF16 uses F32's top 16 bits (0x7f80).
 static inline bool half_match(uint16_t h, NDArrayType t, FloatClass cls) {
 	const uint16_t absv = (uint16_t)(h & 0x7fffu);
-	const uint16_t infb = (t == F16) ? (uint16_t)0x7c00u : (uint16_t)0x7f80u;
+	const uint16_t infb = t == F16 ? (uint16_t)0x7c00u : (uint16_t)0x7f80u;
 	switch (cls) {
 		case FloatClass::Finite: return absv < infb;
 		case FloatClass::Infinite: return absv == infb;
@@ -5416,14 +5424,14 @@ static inline bool half_match(uint16_t h, NDArrayType t, FloatClass cls) {
 static void classifyHalfToBinary(uint64_t* outWords, const uint16_t* src, size_t n,
                                  NDArrayType t, FloatClass cls) {
 	size_t i = 0;
-	for (; i < n; ) {
+	while (i < n) {
 		const size_t wordIndex = i / 64;
 		const size_t base = wordIndex * 64;
 		const size_t count = n - base < 64 ? n - base : 64;
 		uint64_t word = 0;
 		for (size_t j = 0; j < count; ++j) {
 			if (half_match(src[base + j], t, cls))
-				word |= uint64_t(1) << j;
+				word |= (uint64_t)1 << j;
 		}
 		outWords[wordIndex] = word;
 		i = base + count;
@@ -5899,7 +5907,7 @@ bool NDArray::any() const {
 				if (uint64[w] != 0)
 					return true;
 			const unsigned rem = (unsigned)(n % 64);
-			if (rem && (uint64[full] & ((1ULL << rem) - 1ULL)) != 0)
+			if (rem && (uint64[full] & (1ULL << rem) - 1ULL) != 0)
 				return true;
 			return false;
 		}
@@ -6056,7 +6064,7 @@ bool NDArray::all() const {
 				// has zero byte: (chunk - ones) & ~chunk & 0x8080...
 				const uint64_t ones = 0x0101010101010101ULL;
 				const uint64_t high = 0x8080808080808080ULL;
-				if (((chunk - ones) & ~chunk & high) != 0)
+				if ((chunk - ones & ~chunk & high) != 0)
 					return false;
 			}
 			for (; i < n; ++i)
@@ -6164,8 +6172,8 @@ int NDArray::countNonzero() const {
 	} else if (type == INT3 /* || type == INT4 || type == UINT3 || type == UINT4*/) {
 		for (size_t i = 0; i < memorySize / 8; i++) {
 			uint64_t tmp = uint64[i];
-			tmp = (tmp & 0x3333333333333333) | ((tmp >> 2) & 0x3333333333333333);
-			tmp = (tmp & 0x1111111111111111) | ((tmp >> 1) & 0x1111111111111111);
+			tmp = tmp & 0x3333333333333333 | tmp >> 2 & 0x3333333333333333;
+			tmp = tmp & 0x1111111111111111 | tmp >> 1 & 0x1111111111111111;
 			total += popcnt64(tmp);
 		}
 	} else if (type == UINT8 || type == INT8)
@@ -6213,41 +6221,41 @@ static int cmpViewOffsets(const NDArrayView& v, size_t ea, size_t eb) {
 		case BF16: {
 			float x = ndarray_half::load(v.getType(), ((const uint16_t*)d)[ea]);
 			float y = ndarray_half::load(v.getType(), ((const uint16_t*)d)[eb]);
-			return (x < y) ? -1 : (y < x) ? 1 : 0;
+			return x < y ? -1 : y < x ? 1 : 0;
 		}
 		case F32: {
 			float x = ((const float*)d)[ea], y = ((const float*)d)[eb];
-			return (x < y) ? -1 : (y < x) ? 1 : 0;
+			return x < y ? -1 : y < x ? 1 : 0;
 		}
 		case F64: {
 			double x = ((const double*)d)[ea], y = ((const double*)d)[eb];
-			return (x < y) ? -1 : (y < x) ? 1 : 0;
+			return x < y ? -1 : y < x ? 1 : 0;
 		}
 		case UINT8: {
 			uint8_t x = ((const uint8_t*)d)[ea], y = ((const uint8_t*)d)[eb];
-			return (x < y) ? -1 : (y < x) ? 1 : 0;
+			return x < y ? -1 : y < x ? 1 : 0;
 		}
 		case INT8: {
 			int8_t x = ((const int8_t*)d)[ea], y = ((const int8_t*)d)[eb];
-			return (x < y) ? -1 : (y < x) ? 1 : 0;
+			return x < y ? -1 : y < x ? 1 : 0;
 		}
 		case INT32: {
 			int32_t x = ((const int32_t*)d)[ea], y = ((const int32_t*)d)[eb];
-			return (x < y) ? -1 : (y < x) ? 1 : 0;
+			return x < y ? -1 : y < x ? 1 : 0;
 		}
 		case INT64: {
 			int64_t x = ((const int64_t*)d)[ea], y = ((const int64_t*)d)[eb];
-			return (x < y) ? -1 : (y < x) ? 1 : 0;
+			return x < y ? -1 : y < x ? 1 : 0;
 		}
 		case INT3: {
 			int x = int3_getSigned((const uint64_t*)d, ea);
 			int y = int3_getSigned((const uint64_t*)d, eb);
-			return (x < y) ? -1 : (y < x) ? 1 : 0;
+			return x < y ? -1 : y < x ? 1 : 0;
 		}
 		case BINARY: {
 			uint8_t x = binaryGet((const uint64_t*)d, ea);
 			uint8_t y = binaryGet((const uint64_t*)d, eb);
-			return (x < y) ? -1 : (y < x) ? 1 : 0;
+			return x < y ? -1 : y < x ? 1 : 0;
 		}
 		case UINT256: {
 			const uint256_t& x = ((const uint256_t*)d)[ea];
@@ -6268,14 +6276,14 @@ static size_t viewOffsetAlongAxis(const NDArrayView& v, int axis, size_t outerFl
 	size_t rem = outerFlat;
 	for (int d = sh.size() - 1; d >= 0; --d) {
 		if (d == axis) {
-			o += along * ((d < st.size()) ? st.get(d) : (size_t)0);
+			o += along * (d < st.size() ? st.get(d) : (size_t)0);
 			continue;
 		}
 		int dim = sh.get(d);
-		size_t c = (dim > 0) ? (rem % (size_t)dim) : 0;
+		size_t c = dim > 0 ? rem % (size_t)dim : 0;
 		if (dim > 0)
 			rem /= (size_t)dim;
-		o += c * ((d < st.size()) ? st.get(d) : (size_t)0);
+		o += c * (d < st.size() ? st.get(d) : (size_t)0);
 	}
 	return o;
 }
@@ -6289,7 +6297,7 @@ static NDArray argExtremumAll(const NDArrayView& v, bool wantMin) {
 	for (size_t i = 1; i < n; ++i) {
 		size_t e = v.elementOffset(i);
 		int c = cmpViewOffsets(v, e, bestE);
-		if (wantMin ? (c < 0) : (c > 0)) {
+		if (wantMin ? c < 0 : c > 0) {
 			bestE = e;
 			bestI = i;
 		}
@@ -6317,7 +6325,7 @@ static NDArray argExtremumAxis(const NDArrayView& v, int axis, bool wantMin) {
 		for (size_t r = 1; r < reduced; ++r) {
 			size_t e = viewOffsetAlongAxis(v, axis, oi, r);
 			int c = cmpViewOffsets(v, e, bestE);
-			if (wantMin ? (c < 0) : (c > 0)) {
+			if (wantMin ? c < 0 : c > 0) {
 				bestE = e;
 				bestR = r;
 			}
@@ -6362,32 +6370,32 @@ NDArray fullLike(const NDArray& ref, NDArrayType seedType, double value) {
 NDArray fullLikeInt64(const NDArray& ref, int64_t value) {
 	ArrayList<int64_t> data;
 	data.addCopies(value, (int)ref.numElements());
-	return NDArray(ref.shape, std::move(data));
+	return NDArray(ref.shape, data);
 }
 
 } // namespace
 
 NDArray operator+(float lhs, const NDArray& rhs) { return rhs + lhs; }
 NDArray operator*(float lhs, const NDArray& rhs) { return rhs * lhs; }
-NDArray operator-(float lhs, const NDArray& rhs) { return (-rhs) + lhs; }
+NDArray operator-(float lhs, const NDArray& rhs) { return -rhs + lhs; }
 NDArray operator/(float lhs, const NDArray& rhs) { return fullLike(rhs, F32, lhs) / rhs; }
 NDArray operator%(float lhs, const NDArray& rhs) { return fullLike(rhs, F32, lhs) % rhs; }
 
 NDArray operator+(double lhs, const NDArray& rhs) { return rhs + lhs; }
 NDArray operator*(double lhs, const NDArray& rhs) { return rhs * lhs; }
-NDArray operator-(double lhs, const NDArray& rhs) { return (-rhs) + lhs; }
+NDArray operator-(double lhs, const NDArray& rhs) { return -rhs + lhs; }
 NDArray operator/(double lhs, const NDArray& rhs) { return fullLike(rhs, F64, lhs) / rhs; }
 NDArray operator%(double lhs, const NDArray& rhs) { return fullLike(rhs, F64, lhs) % rhs; }
 
 NDArray operator+(int lhs, const NDArray& rhs) { return rhs + lhs; }
 NDArray operator*(int lhs, const NDArray& rhs) { return rhs * lhs; }
-NDArray operator-(int lhs, const NDArray& rhs) { return (-rhs) + lhs; }
+NDArray operator-(int lhs, const NDArray& rhs) { return -rhs + lhs; }
 NDArray operator/(int lhs, const NDArray& rhs) { return fullLike(rhs, INT32, lhs) / rhs; }
 NDArray operator%(int lhs, const NDArray& rhs) { return fullLike(rhs, INT32, lhs) % rhs; }
 
 NDArray operator+(int64_t lhs, const NDArray& rhs) { return rhs + lhs; }
 NDArray operator*(int64_t lhs, const NDArray& rhs) { return rhs * lhs; }
-NDArray operator-(int64_t lhs, const NDArray& rhs) { return (-rhs) + lhs; }
+NDArray operator-(int64_t lhs, const NDArray& rhs) { return -rhs + lhs; }
 NDArray operator/(int64_t lhs, const NDArray& rhs) { return fullLikeInt64(rhs, lhs) / rhs; }
 NDArray operator%(int64_t lhs, const NDArray& rhs) { return fullLikeInt64(rhs, lhs) % rhs; }
 
@@ -6412,10 +6420,3 @@ NDArray operator>(int lhs, const NDArray& rhs) { return rhs < lhs; }
 NDArray operator<(int lhs, const NDArray& rhs) { return rhs > lhs; }
 NDArray operator>=(int lhs, const NDArray& rhs) { return rhs <= lhs; }
 NDArray operator<=(int lhs, const NDArray& rhs) { return rhs >= lhs; }
-
-namespace {
-struct TypeRuleAnchor {
-	TypeRuleAnchor() { retainTypeRuleHelpers(); }
-};
-static TypeRuleAnchor typeRuleAnchor;
-}

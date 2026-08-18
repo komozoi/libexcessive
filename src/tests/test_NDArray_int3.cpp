@@ -57,6 +57,62 @@ TEST(NDArray_int3, AddSubMulDiv_Array) {
 	EXPECT_EQ(quot.get<int>({3}), -4);
 }
 
+TEST(NDArray_int3, MinimumMaximumPowMod_StayINT3) {
+	NDArray a({4}, INT3);
+	NDArray b({4}, INT3);
+	a.set({0}, -4); a.set({1}, 3); a.set({2}, -2); a.set({3}, 1);
+	b.set({0}, 1); b.set({1}, -3); b.set({2}, 2); b.set({3}, 3);
+
+	NDArray mn = a.minimum(b);
+	EXPECT_EQ(mn.type, INT3);
+	EXPECT_EQ(mn.get<int>({0}), -4);
+	EXPECT_EQ(mn.get<int>({1}), -3);
+	EXPECT_EQ(mn.get<int>({2}), -2);
+	EXPECT_EQ(mn.get<int>({3}), 1);
+
+	NDArray mx = a.maximum(b);
+	EXPECT_EQ(mx.type, INT3);
+	EXPECT_EQ(mx.get<int>({0}), 1);
+	EXPECT_EQ(mx.get<int>({1}), 3);
+	EXPECT_EQ(mx.get<int>({2}), 2);
+	EXPECT_EQ(mx.get<int>({3}), 3);
+
+	NDArray e({4}, INT3);
+	e.set({0}, 1); e.set({1}, 3); e.set({2}, 2); e.set({3}, 3);
+	NDArray p = a.pow(e);
+	EXPECT_EQ(p.type, INT3);
+	EXPECT_EQ(p.get<int>({0}), wrap3(-4));
+	EXPECT_EQ(p.get<int>({1}), wrap3(27));
+	EXPECT_EQ(p.get<int>({2}), wrap3(4));
+	EXPECT_EQ(p.get<int>({3}), wrap3(1));
+
+	NDArray md = a.mod(b);
+	EXPECT_EQ(md.type, INT3);
+	EXPECT_EQ(md.get<int>({0}), wrap3((-4) % 1));
+	EXPECT_EQ(md.get<int>({1}), wrap3(3 % (-3)));
+	EXPECT_EQ(md.get<int>({2}), wrap3((-2) % 2));
+	EXPECT_EQ(md.get<int>({3}), wrap3(1 % 3));
+
+	NDArray c = a.clip(NDArray::full(ArrayList<int>({4}), INT3, -1),
+	                   NDArray::full(ArrayList<int>({4}), INT3, 2));
+	EXPECT_EQ(c.type, INT3);
+	EXPECT_EQ(c.get<int>({0}), -1);
+	EXPECT_EQ(c.get<int>({1}), 2);
+	EXPECT_EQ(c.get<int>({2}), -1);
+	EXPECT_EQ(c.get<int>({3}), 1);
+
+	NDArray smin = a.minimum(1);
+	EXPECT_EQ(smin.type, INT3);
+	EXPECT_EQ(smin.get<int>({0}), -4);
+	EXPECT_EQ(smin.get<int>({1}), 1);
+
+	NDArray z({1}, INT3);
+	NDArray one({1}, INT3);
+	z.set({0}, 0);
+	one.set({0}, 1);
+	EXPECT_THROW(one.mod(z), std::invalid_argument);
+}
+
 TEST(NDArray_int3, DivByZero_Throws) {
 	NDArray a({2}, INT3);
 	NDArray b({2}, INT3);
