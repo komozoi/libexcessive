@@ -21,14 +21,22 @@
 #include "fs/FdHandle.h"
 
 #include "fcntl.h"
+#include "unistd.h"
 
 
 #define TEST_FILE_PATH "/tmp/DiskBytestringSearchTreeTest_"
 
+// O_CREAT|O_TRUNC on an existing leftover file does not set FdHandle::isNew(),
+// so FreeSpaceFile's BTree will refuse to treat the truncated empty file as a
+// valid tree.  Unlink first so the handle is actually new.
+static FdHandle createTestFile(const char* path) {
+	unlink(path);
+	return FdHandle::open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
+}
 
 
 TEST(DiskBytestringSearchTreeTest, InsertSingleKeyAndFindIt) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "InsertSingleKeyAndFindIt.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "InsertSingleKeyAndFindIt.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 
@@ -40,7 +48,7 @@ TEST(DiskBytestringSearchTreeTest, InsertSingleKeyAndFindIt) {
 }
 
 TEST(DiskBytestringSearchTreeTest, FindMissingKeyReturnsZero) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "FindMissingKeyReturnsZero.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "FindMissingKeyReturnsZero.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 
@@ -48,7 +56,7 @@ TEST(DiskBytestringSearchTreeTest, FindMissingKeyReturnsZero) {
 }
 
 TEST(DiskBytestringSearchTreeTest, InsertDuplicateKeyDoesNotOverwrite) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "InsertDuplicateKeyDoesNotOverwrite.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "InsertDuplicateKeyDoesNotOverwrite.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 
@@ -62,7 +70,7 @@ TEST(DiskBytestringSearchTreeTest, InsertDuplicateKeyDoesNotOverwrite) {
 }
 
 TEST(DiskBytestringSearchTreeTest, InsertDuplicateKeyOverwrite) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "InsertDuplicateKeyOverwrite.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "InsertDuplicateKeyOverwrite.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 
@@ -76,7 +84,7 @@ TEST(DiskBytestringSearchTreeTest, InsertDuplicateKeyOverwrite) {
 }
 
 TEST(DiskBytestringSearchTreeTest, InsertPrefixOfExistingKey) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "InsertPrefixOfExistingKey.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "InsertPrefixOfExistingKey.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 
@@ -88,7 +96,7 @@ TEST(DiskBytestringSearchTreeTest, InsertPrefixOfExistingKey) {
 }
 
 TEST(DiskBytestringSearchTreeTest, InsertExtensionOfExistingKey) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "InsertExtensionOfExistingKey.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "InsertExtensionOfExistingKey.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 
@@ -100,7 +108,7 @@ TEST(DiskBytestringSearchTreeTest, InsertExtensionOfExistingKey) {
 }
 
 TEST(DiskBytestringSearchTreeTest, DivergesCorrectlyAtFragmentBoundary) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "DivergesCorrectlyAtFragmentBoundary.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "DivergesCorrectlyAtFragmentBoundary.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 
@@ -114,7 +122,7 @@ TEST(DiskBytestringSearchTreeTest, DivergesCorrectlyAtFragmentBoundary) {
 }
 
 TEST(DiskBytestringSearchTreeTest, InsertManySmallKeys) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "InsertManySmallKeys.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "InsertManySmallKeys.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 
@@ -130,7 +138,7 @@ TEST(DiskBytestringSearchTreeTest, InsertManySmallKeys) {
 }
 
 TEST(DiskBytestringSearchTreeTest, InsertLongKey) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "InsertLongKey.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "InsertLongKey.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 
@@ -142,7 +150,7 @@ TEST(DiskBytestringSearchTreeTest, InsertLongKey) {
 }
 
 TEST(DiskBytestringSearchTreeTest, InsertBinaryKey) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "InsertBinaryKey.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "InsertBinaryKey.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 
@@ -158,7 +166,7 @@ TEST(DiskBytestringSearchTreeTest, PersistenceAcrossRestart) {
 	uint64_t value = 0x9201;
 
 	{
-		FdHandle handle = FdHandle::open(TEST_FILE_PATH "PersistenceAcrossRestart.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+		FdHandle handle = createTestFile(TEST_FILE_PATH "PersistenceAcrossRestart.bin");
 		FreeSpaceFile fss(std::move(handle));
 		DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 		ASSERT_FALSE(tree.insert(key, value));
@@ -173,7 +181,7 @@ TEST(DiskBytestringSearchTreeTest, PersistenceAcrossRestart) {
 }
 
 TEST(DiskBytestringSearchTreeTest, RemoveKeyShouldDeleteIt) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "RemoveKeyShouldDeleteIt.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "RemoveKeyShouldDeleteIt.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 
@@ -186,7 +194,7 @@ TEST(DiskBytestringSearchTreeTest, RemoveKeyShouldDeleteIt) {
 }
 
 TEST(DiskBytestringSearchTreeTest, RemoveNonexistentKeyReturnsFalse) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "RemoveNonexistentKeyReturnsFalse.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "RemoveNonexistentKeyReturnsFalse.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 
@@ -194,7 +202,7 @@ TEST(DiskBytestringSearchTreeTest, RemoveNonexistentKeyReturnsFalse) {
 }
 
 TEST(DiskBytestringSearchTreeTest, FindReturnsZeroWhenKeyMissing) {
-	FdHandle handle = FdHandle::open(TEST_FILE_PATH "FindReturnsZeroWhenKeyMissing.bin", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	FdHandle handle = createTestFile(TEST_FILE_PATH "FindReturnsZeroWhenKeyMissing.bin");
 	FreeSpaceFile fss(std::move(handle));
 	DiskBytestringSearchTree tree(fss, DiskBytestringSearchTree::initialize(fss));
 

@@ -17,10 +17,20 @@
 
 
 #include <gtest/gtest.h>
+#include <cstdio>
+#include <string>
+#include <unistd.h>
 #include "fcntl.h"
 #include "fs/BTree.h"
 #include "ds/ArrayList.h"
 #include "universaltime.h"
+
+
+static std::string makeBTreeTempFile(const char* base) {
+	char buf[256];
+	snprintf(buf, sizeof(buf), "%s_%llu.tmp", base, (unsigned long long)millis_since_epoch());
+	return std::string(buf);
+}
 
 
 template <class T, int N>
@@ -383,3 +393,270 @@ TEST(BTreeFindNext, FindsOutlierAcrossSubtrees) {
 	val = 100001;
 	EXPECT_FALSE(tree.findNext(val));
 }
+
+
+TEST(BTreeDisk, InitializeInsertFindAndReopen) {
+	std::string path = makeBTreeTempFile("btree_disk_ok");
+	unlink(path.c_str());
+
+	{
+		FdHandle file = FdHandle::open(path.c_str(), O_RDWR | O_CREAT, 0660);
+		ASSERT_TRUE((bool)file);
+		BTree<int, 3> tree(file, 0, compareInts);
+		for (int i = 0; i < 50; ++i)
+			EXPECT_FALSE(tree.insert(i));
+		for (int i = 0; i < 50; ++i) {
+			int v = i;
+			ASSERT_TRUE(tree.find(v));
+			EXPECT_EQ(v, i);
+		}
+		int miss = 1000;
+		EXPECT_FALSE(tree.find(miss));
+	}
+
+	{
+		FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+		ASSERT_TRUE((bool)file);
+		BTree<int, 3> tree(file, 0, compareInts);
+		for (int i = 0; i < 50; ++i) {
+			int v = i;
+			ASSERT_TRUE(tree.find(v)) << i;
+			EXPECT_EQ(v, i);
+		}
+	}
+
+	unlink(path.c_str());
+}
+
+
+namespace {
+
+template <int N>
+void writeCraftedBTree(const char* path, const btree_node_t<int, N>* nodes, int count) {
+	unlink(path);
+	FdHandle h = FdHandle::open(path, O_RDWR | O_CREAT | O_TRUNC, 0660);
+	ASSERT_TRUE((bool)h);
+	for (int i = 0; i < count; ++i) {
+		off_t off = (off_t)i * (off_t)sizeof(nodes[i]);
+		ASSERT_EQ(h.pwrite(nodes[i], off), (ssize_t)sizeof(nodes[i]));
+	}
+	h.flush();
+}
+
+}
+
+
+TEST(BTreeSecurity, RejectsInvalidMagic) {
+	std::string path = makeBTreeTempFile("btree_bad_magic");
+	auto node = makeBTreeNode<int, 3>();
+	node.header.magic = 0xDEAD;
+	writeCraftedBTree<3>(path.c_str(), &node, 1);
+
+	FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+	EXPECT_THROW((BTree<int, 3>(file, 0, compareInts)), BTreeCorruptError);
+	unlink(path.c_str());
+}
+
+
+TEST(BTreeSecurity, AcceptsLegacyUnstampedFormat) {
+	// Nodes written before magic/version existed have 0 in that word.
+	// They must still open, be searchable, and accept new inserts.
+	std::string path = makeBTreeTempFile("btree_legacy");
+	auto node = makeBTreeNode<int, 3>();
+	node.header.magic = 0;
+	node.header.version = 0;
+	node.header.nElements = 2;
+	node.elements[0] = 10;
+	node.elements[1] = 20;
+	writeCraftedBTree<3>(path.c_str(), &node, 1);
+
+	{
+		FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+		BTree<int, 3> tree(file, 0, compareInts);
+		int v = 10;
+		ASSERT_TRUE(tree.find(v));
+		EXPECT_EQ(v, 10);
+		v = 20;
+		ASSERT_TRUE(tree.find(v));
+		EXPECT_FALSE(tree.insert(15));
+		v = 15;
+		ASSERT_TRUE(tree.find(v));
+	}
+
+	{
+		FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+		BTree<int, 3> tree(file, 0, compareInts);
+		int v = 15;
+		ASSERT_TRUE(tree.find(v));
+		EXPECT_EQ(v, 15);
+	}
+
+	// Count checks still apply to the old format.
+	node.header.nElements = 1000;
+	writeCraftedBTree<3>(path.c_str(), &node, 1);
+	FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+	EXPECT_THROW((BTree<int, 3>(file, 0, compareInts)), BTreeCorruptError);
+	unlink(path.c_str());
+}
+
+
+TEST(BTreeSecurity, RejectsNElementsOutOfRange) {
+	std::string path = makeBTreeTempFile("btree_bad_nelems");
+	auto node = makeBTreeNode<int, 3>();
+	node.header.nElements = 1000;
+	writeCraftedBTree<3>(path.c_str(), &node, 1);
+
+	FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+	EXPECT_THROW((BTree<int, 3>(file, 0, compareInts)), BTreeCorruptError);
+	unlink(path.c_str());
+}
+
+
+TEST(BTreeSecurity, RejectsNChildrenOutOfRange) {
+	std::string path = makeBTreeTempFile("btree_bad_nchildren");
+	auto node = makeBTreeNode<int, 3>();
+	node.header.nChildren = 1000;
+	writeCraftedBTree<3>(path.c_str(), &node, 1);
+
+	FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+	EXPECT_THROW((BTree<int, 3>(file, 0, compareInts)), BTreeCorruptError);
+	unlink(path.c_str());
+}
+
+
+TEST(BTreeSecurity, RejectsShortFile) {
+	std::string path = makeBTreeTempFile("btree_short");
+	unlink(path.c_str());
+	{
+		FdHandle h = FdHandle::open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0660);
+		ASSERT_TRUE((bool)h);
+		uint32_t junk = 0x41414141;
+		h.pwrite(junk, 0);
+		h.flush();
+	}
+
+	FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+	EXPECT_THROW((BTree<int, 3>(file, 0, compareInts)), BTreeCorruptError);
+	unlink(path.c_str());
+}
+
+
+TEST(BTreeSecurity, RejectsHugeChildOffset) {
+	std::string path = makeBTreeTempFile("btree_huge_child");
+	auto node = makeBTreeNode<int, 3>(0, 2, 1, -1);
+	node.elements[0] = 50;
+	node.header.childOffsets[0] = (uint64_t)1 << 60;
+	node.header.childOffsets[1] = (uint64_t)1 << 60;
+	writeCraftedBTree<3>(path.c_str(), &node, 1);
+
+	FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+	BTree<int, 3> tree(file, 0, compareInts);
+	int q = 10;
+	EXPECT_THROW(tree.find(q), BTreeCorruptError);
+	q = 10;
+	EXPECT_THROW(tree.findNext(q), BTreeCorruptError);
+	unlink(path.c_str());
+}
+
+
+TEST(BTreeSecurity, InsertDoesNotWriteCraftedParent) {
+	// Full leaf whose parent offset points at a decoy region with an
+	// unrecognized stamp.  insert() must throw instead of pwrite-ing there.
+	// (A zero-filled region would be the legacy unstamped format and is valid.)
+	std::string path = makeBTreeTempFile("btree_bad_parent");
+	using Node = btree_node_t<int, 3>;
+	const off_t decoyOff = (off_t)sizeof(Node);
+
+	Node root = makeBTreeNode<int, 3>(0, 2, 1, -1);
+	root.elements[0] = 50;
+	root.header.childOffsets[0] = (uint64_t)(2 * sizeof(Node));
+	root.header.childOffsets[1] = (uint64_t)(3 * sizeof(Node));
+
+	Node decoy = makeBTreeNode<int, 3>();
+	decoy.header.magic = 0xDEAD;
+
+	Node left = makeBTreeNode<int, 3>((uint64_t)decoyOff, 0, 3, 0);
+	left.elements[0] = 10;
+	left.elements[1] = 20;
+	left.elements[2] = 30;
+
+	Node right = makeBTreeNode<int, 3>(0, 0, 1, 1);
+	right.elements[0] = 60;
+
+	unlink(path.c_str());
+	{
+		FdHandle h = FdHandle::open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0660);
+		ASSERT_TRUE((bool)h);
+		ASSERT_EQ(h.pwrite(root, 0), (ssize_t)sizeof(root));
+		ASSERT_EQ(h.pwrite(decoy, decoyOff), (ssize_t)sizeof(decoy));
+		ASSERT_EQ(h.pwrite(left, (off_t)(2 * sizeof(Node))), (ssize_t)sizeof(left));
+		ASSERT_EQ(h.pwrite(right, (off_t)(3 * sizeof(Node))), (ssize_t)sizeof(right));
+		h.flush();
+	}
+
+	{
+		FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+		BTree<int, 3> tree(file, 0, compareInts);
+		EXPECT_THROW(tree.insert(15), BTreeCorruptError);
+	}
+
+	{
+		FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+		Node got{};
+		ASSERT_EQ(file.pread(got, decoyOff), (ssize_t)sizeof(got));
+		EXPECT_EQ(got.header.magic, (uint16_t)0xDEAD);
+	}
+
+	unlink(path.c_str());
+}
+/*
+class BTreeIteratorTest : public ::testing::Test {
+public:
+	BTreeIteratorTest() : tree(compareInts) {}
+protected:
+	RAMBTree<int, 63> tree;
+};
+
+TEST_F(BTreeIteratorTest, EmptyTree) {
+	auto it = tree.begin();
+	auto end = tree.end();
+	EXPECT_EQ(it, end);
+	EXPECT_TRUE(it == tree.end());
+}
+
+TEST_F(BTreeIteratorTest, SingleElement) {
+	tree.insert(42);
+	auto it = tree.begin();
+	EXPECT_EQ(*it, 42);
+	++it;
+	EXPECT_EQ(it, tree.end());
+}
+
+TEST_F(BTreeIteratorTest, MultipleElements) {
+	tree.insert(10);
+	tree.insert(5);
+	tree.insert(20);
+	tree.insert(15);
+
+	std::vector<int> expected = {5, 10, 15, 20};
+	auto it = tree.begin();
+	for (int val : expected) {
+		EXPECT_EQ(*it, val);
+		++it;
+	}
+	EXPECT_EQ(it, tree.end());
+}
+
+TEST_F(BTreeIteratorTest, LargeTreeTraversal) {
+	const int num_elements = 100;
+	for (int i = 0; i < num_elements; ++i) {
+		tree.insert(i);
+	}
+
+	auto it = tree.begin();
+	for (int i = 0; i < num_elements; ++i) {
+		EXPECT_EQ(*it, i);
+		++it;
+	}
+	EXPECT_EQ(it, tree.end());
+}*/

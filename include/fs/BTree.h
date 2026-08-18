@@ -22,10 +22,29 @@
 #include "fs/FdHandle.h"
 
 #include "stdint.h"
-#include "stddef.h"
 #include "string.h"
 #include <mutex>
 #include <shared_mutex>
+#include <stdexcept>
+#include <string>
+#include <sys/stat.h>
+
+
+/** On-disk / serialized node magic: 'B' | ('T' << 8). */
+constexpr uint16_t BTREE_NODE_MAGIC = 0x5442;
+/** Current on-disk node format version. */
+constexpr uint16_t BTREE_NODE_VERSION = 1;
+
+
+/**
+ * Thrown when a B-Tree node or offset read from untrusted storage is invalid.
+ * Callers must treat this as a corrupt (or malicious) tree image.
+ */
+class BTreeCorruptError : public std::runtime_error {
+public:
+	explicit BTreeCorruptError(const char* what) : std::runtime_error(what) {}
+	explicit BTreeCorruptError(const std::string& what) : std::runtime_error(what) {}
+};
 
 
 /**
@@ -35,15 +54,15 @@
  */
 template <int N = 63>
 struct btree_node_header_t {
-	uint64_t parent;        /**< Offset of the parent node. */
-	int nChildren;          /**< Number of children of this node. */
-	int nElements;          /**< Number of elements currently in this node. */
-	int indexInParent;      /**< Index of this node in the parent's childOffsets. */
+	uint64_t parent = 0;        /**< Offset of the parent node. */
+	int nChildren = 0;          /**< Number of children of this node. */
+	int nElements = 0;          /**< Number of elements currently in this node. */
+	int indexInParent = -1;     /**< Index of this node in the parent's childOffsets. */
 
-	// Unused 4 bytes for 8-byte alignment
-	uint32_t reserved;      /**< Reserved for 8-byte alignment. */
+	uint16_t magic = BTREE_NODE_MAGIC;     /**< BTREE_NODE_MAGIC, or 0 for the pre-magic format. */
+	uint16_t version = BTREE_NODE_VERSION; /**< BTREE_NODE_VERSION, or 0 for the pre-magic format. */
 
-	uint64_t childOffsets[N + 1]; /**< Offsets of children nodes. */
+	uint64_t childOffsets[N + 1] = {}; /**< Offsets of children nodes. */
 };
 
 
@@ -63,6 +82,22 @@ struct btree_node_t {
 	btree_node_header_t<N> header; /**< Node header containing metadata and child offsets. */
 	T elements[N];                 /**< Array of elements in the node. */
 };
+
+
+/**
+ * @brief Construct an empty node with valid magic/version.
+ */
+template <class T, int N = 63>
+inline btree_node_t<T, N> makeBTreeNode(uint64_t parent = 0, int nChildren = 0, int nElements = 0, int indexInParent = -1) {
+	btree_node_t<T, N> node{};
+	node.header.parent = parent;
+	node.header.nChildren = nChildren;
+	node.header.nElements = nElements;
+	node.header.indexInParent = indexInParent;
+	node.header.magic = BTREE_NODE_MAGIC;
+	node.header.version = BTREE_NODE_VERSION;
+	return node;
+}
 
 
 /**
@@ -87,7 +122,7 @@ public:
 	 * @return true if the key is already present, false if the key was not previously present and has been inserted
 	 */
 	bool insert(const T& val) {
-		//std::unique_lock<std::shared_mutex> lock(treeMutex);
+		std::unique_lock<std::shared_mutex> lock(mutex);
 		btree_node_t<T, N> target;
 		btree_node_header_t<N>& header = target.header;
 		uint64_t offset;
@@ -129,7 +164,7 @@ public:
 	 * @return true if the key was already present and overwritten, false if the key was not previously present and has been newly inserted
 	 */
 	bool overwrite(const T& val) {
-		//std::unique_lock<std::shared_mutex> lock(treeMutex);
+		std::unique_lock<std::shared_mutex> lock(mutex);
 		btree_node_t<T, N> target;
 		uint64_t offset;
 
@@ -175,7 +210,7 @@ public:
 	 * @return true if the value was found, false if not
 	 */
 	bool find(T& val) {
-		//std::shared_lock<std::shared_mutex> lock(treeMutex);
+		std::shared_lock<std::shared_mutex> lock(mutex);
 		btree_node_t<T, N> target;
 		uint64_t offset;
 
@@ -195,13 +230,15 @@ public:
 	 * @return true if a match was found, false if not
 	 */
 	bool findNext(T& val) {
-		//std::shared_lock<std::shared_mutex> lock(treeMutex);
+		std::shared_lock<std::shared_mutex> lock(mutex);
 		btree_node_t<T, N> node = getRootNode();
 		uint64_t offset = getRootOffset();
 		bool found = false;
 		T best;
 
 		while (true) {
+			validateNodeCounts(node.header);
+
 			int low = 0;
 			int high = node.header.nElements - 1;
 			int midIdx = -1;
@@ -230,6 +267,9 @@ public:
 			if (node.header.nChildren == 0)
 				break;
 
+			if (low < 0 || low >= node.header.nChildren)
+				throw BTreeCorruptError("BTree: child index out of range");
+
 			offset = node.header.childOffsets[low];
 			node = getNode(offset);
 		}
@@ -249,7 +289,7 @@ public:
 	 * @return true if the value was found and removed, false if not
 	 */
 	bool remove(T& val) {
-		//std::unique_lock<std::shared_mutex> lock(treeMutex);
+		std::unique_lock<std::shared_mutex> lock(mutex);
 		btree_node_t<T, N> node;
 		uint64_t offset;
 
@@ -284,6 +324,45 @@ protected:
 	 */
 	explicit BTreeBase(int (*compare) (const T&, const T&)) : compare(compare) {}
 
+	/**
+	 * Reject nElements / nChildren / indexInParent that cannot be used as
+	 * indexes into elements[] or childOffsets[].
+	 */
+	static void validateNodeCounts(const btree_node_header_t<N>& header) {
+		if (header.nElements < 0 || header.nElements > N)
+			throw BTreeCorruptError("BTree: nElements out of range");
+		if (header.nChildren < 0 || header.nChildren > N + 1)
+			throw BTreeCorruptError("BTree: nChildren out of range");
+		if (header.nChildren != 0 && header.nChildren != header.nElements + 1)
+			throw BTreeCorruptError("BTree: nChildren does not match nElements");
+		if (header.indexInParent < -1 || header.indexInParent > N)
+			throw BTreeCorruptError("BTree: indexInParent out of range");
+	}
+
+	/**
+	 * True if this header is a format we can interpret.
+	 *
+	 * Pre-magic files stored a zero `reserved` word in this slot, so
+	 * magic==0 && version==0 is the original on-disk format and must still
+	 * be accepted.  New nodes write BTREE_NODE_MAGIC / BTREE_NODE_VERSION.
+	 * Any other combination is unknown or corrupt.
+	 */
+	static bool isRecognizedOnDiskFormat(const btree_node_header_t<N>& header) {
+		if (header.magic == 0 && header.version == 0)
+			return true;
+		return header.magic == BTREE_NODE_MAGIC && header.version == BTREE_NODE_VERSION;
+	}
+
+	/**
+	 * Full check for a node loaded from untrusted storage (disk or mmap).
+	 * Count/index checks run for every recognized format, including legacy.
+	 */
+	static void validateOnDiskNode(const btree_node_header_t<N>& header) {
+		if (!isRecognizedOnDiskFormat(header))
+			throw BTreeCorruptError("BTree: invalid magic or version");
+		validateNodeCounts(header);
+	}
+
 	// The mutex is non-copyable/non-movable but instances of BTreeBase are
 	// embedded in other containers (e.g. TreeMap) that rely on copy/move.
 	// Each instance gets its own fresh mutex.
@@ -306,6 +385,8 @@ protected:
 		offset = getRootOffset();
 
 		while (true) {
+			validateNodeCounts(node.header);
+
 			int low = 0;
 			int high = node.header.nElements - 1;
 
@@ -324,6 +405,9 @@ protected:
 			if (node.header.nChildren == 0)
 				return low;
 
+			if (low < 0 || low >= node.header.nChildren)
+				throw BTreeCorruptError("BTree: child index out of range");
+
 			offset = node.header.childOffsets[low];
 			node = getNode(offset);
 		}
@@ -336,6 +420,8 @@ protected:
 	 * @param idx The index at which to insert the element.
 	 */
 	void addToNodeUnchecked(btree_node_t<T, N>& node, const T& element, int idx) {
+		if (idx < 0 || idx > node.header.nElements || node.header.nElements < 0 || node.header.nElements >= N)
+			throw BTreeCorruptError("BTree: insert index out of range");
 		for (int j = node.header.nElements - 1; j >= idx; j--)
 			node.elements[j + 1] = node.elements[j];
 		new (&node.elements[idx]) T(element);
@@ -349,15 +435,21 @@ protected:
 	 * @param element The element to insert.
 	 */
 	void insertNonFull(btree_node_t<T, N>& node, uint64_t offset, const T& element) {
+		validateNodeCounts(node.header);
+
 		int i = scanNode(node, element);
 
 		if (node.header.nChildren == 0) {
+			if (i < 0 || i > node.header.nElements || node.header.nElements >= N)
+				throw BTreeCorruptError("BTree: insert index out of range");
 			memmove(&node.elements[i + 1], &node.elements[i], (node.header.nElements - i) * sizeof(T));
 			node.elements[i] = element;
 			node.header.nElements++;
 			overwriteNode(offset, node);
 
 		} else {
+			if (i < 0 || i >= node.header.nChildren)
+				throw BTreeCorruptError("BTree: child index out of range");
 			btree_node_t<T, N> child = getNode(node.header.childOffsets[i]);
 
 			if (child.header.nElements == N) {
@@ -369,6 +461,8 @@ protected:
 				}
 			}
 
+			if (i < 0 || i >= node.header.nChildren)
+				throw BTreeCorruptError("BTree: child index out of range");
 			insertNonFull(child, node.header.childOffsets[i], element);
 		}
 
@@ -394,7 +488,7 @@ protected:
 			overwriteNodeHeader(oldRoot.header.childOffsets[j], subChild);
 		}
 
-		newRoot = {{0, 1, 0, -1, 0, {}}, {}};
+		newRoot = makeBTreeNode<T, N>(0, 1, 0, -1);
 		newRoot.header.childOffsets[0] = oldRootOffset;
 
 		return splitChild(newRoot, oldRoot, oldRootOffset, newChildOffset);
@@ -430,7 +524,15 @@ protected:
 			}
 		}
 
+		validateNodeCounts(parent.header);
+		validateNodeCounts(originalChild.header);
+		if (originalChild.header.nElements != N)
+			throw BTreeCorruptError("BTree: split of non-full node");
+
 		int i = originalChild.header.indexInParent;
+		if (i < 0 || i > parent.header.nElements)
+			throw BTreeCorruptError("BTree: indexInParent out of range");
+
 		btree_node_t<T, N> newChild = {{originalChild.header.parent, 0, (originalChild.header.nElements + 1) / 2 - 1, i + 1, 0, {}}, {}};
 
 		// Update the size of the original child, which is now much smaller
@@ -569,8 +671,12 @@ public:
 	BTree(FdHandle&& file, off_t rootOffset, int (*compare) (const T&, const T&))
 		: BTreeBase<T, N>(compare), rootOffset(rootOffset), file(file) {
 
+		if (rootOffset < 0)
+			throw BTreeCorruptError("BTree: negative root offset");
 		if (file.isNew())
 			initialize();
+		else
+			(void)getNode((uint64_t)rootOffset);
 	}
 
 	/**
@@ -582,8 +688,12 @@ public:
 	BTree(const FdHandle& file, off_t rootOffset, int (*compare) (const T&, const T&))
 			: BTreeBase<T, N>(compare), rootOffset(rootOffset), file(file) {
 
+		if (rootOffset < 0)
+			throw BTreeCorruptError("BTree: negative root offset");
 		if (file.isNew())
 			initialize();
+		else
+			(void)getNode((uint64_t)rootOffset);
 	}
 
 	/**
@@ -598,7 +708,7 @@ public:
 	 * @brief Initializes a new B-Tree by writing an empty root node.
 	 */
 	void initialize() {
-		btree_node_t<T, N> root{{0, 0, 0, -1, 0, {}}, {}};
+		btree_node_t<T, N> root = makeBTreeNode<T, N>();
 		file.pwrite(root, rootOffset);
 	}
 
@@ -610,8 +720,12 @@ protected:
 	 * @return The node.
 	 */
 	btree_node_t<T, N> getNode(uint64_t offset) const override {
-		btree_node_t<T, N> resultat;
-		file.pread(resultat, (off_t)offset);
+		checkNodeOffset(offset);
+		btree_node_t<T, N> resultat{};
+		ssize_t n = file.pread(resultat, (off_t)offset);
+		if (n != (ssize_t)sizeof(resultat))
+			throw BTreeCorruptError("BTree: short read");
+		this->validateOnDiskNode(resultat.header);
 		return resultat;
 	}
 
@@ -648,6 +762,7 @@ protected:
 	 * @param node Node data.
 	 */
 	void overwriteNode(uint64_t offset, const btree_node_t<T, N>& node) override {
+		checkNodeOffset(offset);
 		file.pwrite(node, (off_t)offset);
 	}
 
@@ -657,7 +772,24 @@ protected:
 	 * @param node Node data containing the header.
 	 */
 	void overwriteNodeHeader(uint64_t offset, const btree_node_t<T, N>& node) override {
+		checkNodeOffset(offset);
 		file.pwrite(&node, sizeof(node.header), (off_t)offset);
+	}
+
+	uint64_t currentFileSize() const {
+		struct stat st;
+		if (fstat(file.getFd(), &st) != 0)
+			throw BTreeCorruptError("BTree: fstat failed");
+		if (st.st_size < 0)
+			throw BTreeCorruptError("BTree: invalid file size");
+		return (uint64_t)st.st_size;
+	}
+
+	void checkNodeOffset(uint64_t offset) const {
+		const uint64_t nodeSize = sizeof(btree_node_t<T, N>);
+		uint64_t size = currentFileSize();
+		if (offset > size || nodeSize > size - offset)
+			throw BTreeCorruptError("BTree: node offset out of range");
 	}
 
 	off_t rootOffset; /**< Offset of the root node in the file. */

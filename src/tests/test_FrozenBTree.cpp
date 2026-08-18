@@ -42,7 +42,7 @@ void runIntRangeChecks(int lo, int hi, int step) {
 	FrozenBTree<int, N>::build(buffer, items);
 	ASSERT_GE(buffer.size(), (int)sizeof(btree_node_t<int, N>));
 
-	FrozenBTree<int, N> tree(buffer.getMemory(), compareInts);
+	FrozenBTree<int, N> tree(buffer, compareInts);
 
 	// Every stored value must be found.
 	for (int i = 0; i < items.size(); ++i) {
@@ -102,7 +102,7 @@ TEST(FrozenBTreeTest, EmptyTreeFindReturnsFalse) {
 	// An empty tree should still emit a single empty root node.
 	ASSERT_EQ(buffer.size(), (int)sizeof(btree_node_t<int, 3>));
 
-	FrozenBTree<int, 3> tree(buffer.getMemory(), compareInts);
+	FrozenBTree<int, 3> tree(buffer, compareInts);
 
 	int q = 42;
 	EXPECT_FALSE(tree.find(q));
@@ -115,7 +115,7 @@ TEST(FrozenBTreeTest, SingleItem) {
 	items.add(7);
 	ArrayList<char> buffer;
 	FrozenBTree<int, 3>::build(buffer, items);
-	FrozenBTree<int, 3> tree(buffer.getMemory(), compareInts);
+	FrozenBTree<int, 3> tree(buffer, compareInts);
 
 	int q = 7;
 	EXPECT_TRUE(tree.find(q));
@@ -165,7 +165,7 @@ TEST(FrozenBTreeTest, StructPayload) {
 
 	ArrayList<char> buffer;
 	FrozenBTree<KV, 3>::build(buffer, items);
-	FrozenBTree<KV, 3> tree(buffer.getMemory(), compareKV);
+	FrozenBTree<KV, 3> tree(buffer, compareKV);
 
 	for (int i = 0; i < 200; ++i) {
 		KV q{i * 3, 0};
@@ -199,7 +199,7 @@ TEST(FrozenBTreeTest, BuildIsMinimalForDenseInput) {
 	EXPECT_LE(nodeCount, (M + N) / N + 4) << "tree is not dense enough";
 
 	// Sanity: the resulting tree is still searchable end-to-end.
-	FrozenBTree<int, N> tree(buffer.getMemory(), compareInts);
+	FrozenBTree<int, N> tree(buffer, compareInts);
 	for (int i = 0; i < M; ++i) {
 		int q = i;
 		ASSERT_TRUE(tree.find(q));
@@ -224,7 +224,7 @@ TEST(FrozenBTreeTest, BuildRandomizedThenSorted) {
 
 	ArrayList<char> buffer;
 	FrozenBTree<int, 7>::build(buffer, items);
-	FrozenBTree<int, 7> tree(buffer.getMemory(), compareInts);
+	FrozenBTree<int, 7> tree(buffer, compareInts);
 
 	for (int i = 0; i < items.size(); ++i) {
 		int q = items.get(i);
@@ -260,9 +260,97 @@ TEST(FrozenBTreeTest, WriteOpsThrow) {
 	items.add(1);
 	ArrayList<char> buffer;
 	FrozenBTree<int, 3>::build(buffer, items);
-	FrozenBTree<int, 3> tree(buffer.getMemory(), compareInts);
+	FrozenBTree<int, 3> tree(buffer, compareInts);
 
 	// Mutating operations must not be allowed on a frozen tree.
 	EXPECT_THROW(tree.insert(2), std::runtime_error);
 	EXPECT_THROW(tree.overwrite(1), std::runtime_error);
+}
+
+
+namespace {
+
+template <int N>
+ArrayList<char> packNode(const btree_node_t<int, N>& node) {
+	ArrayList<char> buffer;
+	buffer.addMany(reinterpret_cast<const char*>(&node), (int)sizeof(node));
+	return buffer;
+}
+
+}
+
+
+TEST(FrozenBTreeSecurity, RejectsInvalidMagic) {
+	auto node = makeBTreeNode<int, 3>();
+	node.header.magic = 0xDEAD;
+	ArrayList<char> buffer = packNode<3>(node);
+	EXPECT_THROW((FrozenBTree<int, 3>(buffer, compareInts)), BTreeCorruptError);
+}
+
+
+TEST(FrozenBTreeSecurity, AcceptsLegacyUnstampedFormat) {
+	// Pre-magic images stored 0 in the reserved word.  They must still open,
+	// and count checks must still apply.
+	auto node = makeBTreeNode<int, 3>();
+	node.header.magic = 0;
+	node.header.version = 0;
+	node.header.nElements = 1;
+	node.elements[0] = 7;
+	ArrayList<char> buffer = packNode<3>(node);
+
+	FrozenBTree<int, 3> tree(buffer, compareInts);
+	int q = 7;
+	EXPECT_TRUE(tree.find(q));
+	EXPECT_EQ(q, 7);
+
+	node.header.nElements = 1000;
+	buffer = packNode<3>(node);
+	EXPECT_THROW((FrozenBTree<int, 3>(buffer, compareInts)), BTreeCorruptError);
+}
+
+
+TEST(FrozenBTreeSecurity, RejectsWrongVersion) {
+	auto node = makeBTreeNode<int, 3>();
+	node.header.version = 99;
+	ArrayList<char> buffer = packNode<3>(node);
+	EXPECT_THROW((FrozenBTree<int, 3>(buffer, compareInts)), BTreeCorruptError);
+}
+
+
+TEST(FrozenBTreeSecurity, RejectsNElementsOutOfRange) {
+	auto node = makeBTreeNode<int, 3>();
+	node.header.nElements = 1000;
+	ArrayList<char> buffer = packNode<3>(node);
+	EXPECT_THROW((FrozenBTree<int, 3>(buffer, compareInts)), BTreeCorruptError);
+}
+
+
+TEST(FrozenBTreeSecurity, RejectsNChildrenOutOfRange) {
+	auto node = makeBTreeNode<int, 3>();
+	node.header.nChildren = 1000;
+	ArrayList<char> buffer = packNode<3>(node);
+	EXPECT_THROW((FrozenBTree<int, 3>(buffer, compareInts)), BTreeCorruptError);
+}
+
+
+TEST(FrozenBTreeSecurity, RejectsShortMapping) {
+	ArrayList<char> buffer;
+	buffer.add(0);
+	buffer.add(1);
+	EXPECT_THROW((FrozenBTree<int, 3>(buffer, compareInts)), BTreeCorruptError);
+}
+
+
+TEST(FrozenBTreeSecurity, RejectsHugeChildOffset) {
+	auto node = makeBTreeNode<int, 3>(0, 2, 1, -1);
+	node.elements[0] = 50;
+	node.header.childOffsets[0] = (uint64_t)1 << 60;
+	node.header.childOffsets[1] = (uint64_t)1 << 60;
+	ArrayList<char> buffer = packNode<3>(node);
+
+	FrozenBTree<int, 3> tree(buffer, compareInts);
+	int q = 10;
+	EXPECT_THROW(tree.find(q), BTreeCorruptError);
+	q = 10;
+	EXPECT_THROW(tree.findNext(q), BTreeCorruptError);
 }

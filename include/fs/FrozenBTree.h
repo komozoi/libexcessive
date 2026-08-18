@@ -19,6 +19,7 @@
 #ifndef EXCESSIVE_FROZEN_BTREE_H
 #define EXCESSIVE_FROZEN_BTREE_H
 
+#include <cstring>
 #include <stdexcept>
 
 #include "ds/ArrayList.h"
@@ -36,12 +37,24 @@ template <class T, int N = 63>
 class FrozenBTree: public BTreeBase<T, N> {
 public:
 	/**
-	 * @brief Constructs a BTree with a memory region and root offset.
+	 * @brief Constructs a BTree over a sized memory region.
 	 * @param memory Pointer to the memory region to use as the BTree.
+	 * @param size Length of the memory region in bytes.  Required so child
+	 *             offsets cannot be used to read past the mapping.
 	 * @param compare Comparison function for elements.
 	 */
-	FrozenBTree(const char* memory, int (*compare) (const T&, const T&))
-		: BTreeBase<T, N>(compare), memory(memory) {
+	FrozenBTree(const char* memory, size_t size, int (*compare) (const T&, const T&))
+		: BTreeBase<T, N>(compare), memory(memory), memorySize(size) {
+		if (memory == nullptr && size != 0)
+			throw BTreeCorruptError("BTree: null mapping");
+		(void)getNode(0);
+	}
+
+	/**
+	 * @brief Constructs a FrozenBTree over an ArrayList buffer produced by build().
+	 */
+	FrozenBTree(const ArrayList<char>& buffer, int (*compare) (const T&, const T&))
+		: FrozenBTree(buffer.getMemory(), (size_t)buffer.size(), compare) {
 	}
 
 	/**
@@ -96,10 +109,8 @@ public:
 				take = N;
 
 			PendingNode pn;
-			pn.node = node_t{};
+			pn.node = makeBTreeNode<T, N>(0, 0, take, -1);
 			pn.offset = 0;
-			pn.node.header.nElements = take;
-			pn.node.header.nChildren = 0;
 			for (int j = 0; j < take; j++)
 				pn.node.elements[j] = sortedItems.get(i + j);
 			pending.add(std::move(pn));
@@ -126,10 +137,8 @@ public:
 				int childCount = (N + 1) < remaining ? (N + 1) : remaining;
 
 				PendingNode pn;
-				pn.node = node_t{};
+				pn.node = makeBTreeNode<T, N>(0, childCount, childCount - 1, -1);
 				pn.offset = 0;
-				pn.node.header.nChildren = childCount;
-				pn.node.header.nElements = childCount - 1;
 				for (int c = 0; c < childCount; c++)
 					pn.childIndices.add(currentLevel.get(idx + c));
 				for (int s = 0; s < childCount - 1; s++)
@@ -191,7 +200,11 @@ protected:
 	 * @return The node.
 	 */
 	btree_node_t<T, N> getNode(uint64_t offset) const override {
-		return *(btree_node_t<T, N>*)&memory[offset];
+		checkNodeOffset(offset);
+		btree_node_t<T, N> node{};
+		memcpy(&node, memory + offset, sizeof(node));
+		this->validateOnDiskNode(node.header);
+		return node;
 	}
 
 	/**
@@ -199,7 +212,7 @@ protected:
 	 * @return The root node.
 	 */
 	btree_node_t<T, N> getRootNode() const override {
-		return *(btree_node_t<T, N>*)memory;
+		return getNode(0);
 	}
 
 	/**
@@ -237,7 +250,16 @@ protected:
 		throw std::runtime_error("Cannot overwrite node header in frozen BTree");
 	}
 
+	void checkNodeOffset(uint64_t offset) const {
+		const uint64_t nodeSize = sizeof(btree_node_t<T, N>);
+		if (memory == nullptr)
+			throw BTreeCorruptError("BTree: null mapping");
+		if (offset > memorySize || nodeSize > memorySize - offset)
+			throw BTreeCorruptError("BTree: node offset out of range");
+	}
+
 	const char* memory;
+	size_t memorySize;
 };
 
 #endif //EXCESSIVE_FROZEN_BTREE_H
