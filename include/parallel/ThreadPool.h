@@ -144,6 +144,12 @@ public:
 	static void waitAll(const ArrayList<sp<ThreadPoolTask>>& tasks);
 
 	/**
+	 * Process-wide pool. Worker count is hardware_concurrency(), or 1
+	 * if that is 0. Same object every call. Do not shutdown() it.
+	 */
+	static ThreadPool& getDefault();
+
+	/**
 	 * Zero-alloc barrier: run `fn` on the caller (worker 0) and every pool
 	 * thread (workers 1..getPoolSize()). `nWorkers` is getPoolSize()+1.
 	 * Does not go through `submit` / `std::function`. Not nestable.

@@ -176,3 +176,15 @@ void ThreadPool::waitAll(const ArrayList<sp<ThreadPoolTask>>& tasks) {
 			task->wait();
 	}
 }
+
+static int defaultWorkerCount() {
+	unsigned hc = std::thread::hardware_concurrency();
+	if (hc < 1)
+		return 1;
+	return (int)hc;
+}
+
+ThreadPool& ThreadPool::getDefault() {
+	static ThreadPool pool(defaultWorkerCount());
+	return pool;
+}
