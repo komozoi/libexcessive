@@ -4048,6 +4048,14 @@ struct NDArray::Impl {
 					binarySet(left.uint64, i, elemBinU8(a, b, op) & 1);
 				}
 				break;
+			case INT3:
+				for (size_t i = 0; i < n; ++i) {
+					int av = int3_getSigned(left.uint64, i);
+					int bv = int3_getSigned(right.uint64, i);
+					int3_setSigned(left.uint64, i, (int)elemBinI64(av, bv, op));
+				}
+				int3_clearPadding(left.uint64, n);
+				break;
 			default:
 				throw std::runtime_error("NDArray: invalid type in element-wise binary op");
 		}
@@ -4130,6 +4138,7 @@ struct NDArray::Impl {
 		if (op == ElemBinOp::Min || op == ElemBinOp::Max) {
 			if (a.type == UINT8 && s >= 0 && s <= 255) rt = UINT8;
 			else if (a.type == INT8 && s >= -128 && s <= 127) rt = INT8;
+			else if (a.type == INT3 && s >= -4 && s <= 3) rt = INT3;
 			else if (a.type == INT32) rt = INT32;
 			else if (a.type == INT64) rt = INT64;
 			else if (a.type == UINT256 && s >= 0) rt = UINT256;
@@ -4167,6 +4176,12 @@ struct NDArray::Impl {
 				uint8_t av = binaryGet(left.uint64, i);
 				binarySet(left.uint64, i, elemBinU8(av, sb, op) & 1);
 			}
+		} else if (left.type == INT3) {
+			for (size_t i = 0; i < n; ++i) {
+				int av = int3_getSigned(left.uint64, i);
+				int3_setSigned(left.uint64, i, (int)elemBinI64(av, s, op));
+			}
+			int3_clearPadding(left.uint64, n);
 		} else {
 			throw std::runtime_error("NDArray: invalid type in scalar element-wise op");
 		}
