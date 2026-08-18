@@ -258,3 +258,78 @@ TEST(ThreadPoolTest, WaitAll_SeesAllSideEffects) {
 		EXPECT_TRUE(tasks.get(i)->isDone());
 	}
 }
+
+struct PForCtx {
+	std::atomic<int> hits[16];
+	std::atomic<int> nWorkers;
+	std::atomic<int> bad;
+	ThreadPool* pool;
+};
+
+static void pforRecord(int worker, int nWorkers, void* raw) {
+	PForCtx* c = (PForCtx*)raw;
+	c->nWorkers.store(nWorkers);
+	if (worker < 0 || worker >= nWorkers || worker >= 16) {
+		c->bad.fetch_add(1);
+		return;
+	}
+	if (c->hits[worker].fetch_add(1) != 0)
+		c->bad.fetch_add(1);
+}
+
+static void pforNested(int worker, int nWorkers, void* raw) {
+	pforRecord(worker, nWorkers, raw);
+	PForCtx* c = (PForCtx*)raw;
+	if (worker == 0 && c->pool) {
+		EXPECT_THROW(c->pool->parallelFor(pforRecord, c), std::runtime_error);
+	}
+}
+
+TEST(ThreadPoolTest, ParallelFor_UniqueWorkers) {
+	ThreadPool pool(4);
+	PForCtx ctx{};
+	ctx.nWorkers.store(0);
+	ctx.bad.store(0);
+	for (int i = 0; i < 16; ++i)
+		ctx.hits[i].store(0);
+	pool.parallelFor(pforRecord, &ctx);
+	EXPECT_EQ(ctx.nWorkers.load(), 5);
+	EXPECT_EQ(ctx.bad.load(), 0);
+	for (int i = 0; i < 5; ++i)
+		EXPECT_EQ(ctx.hits[i].load(), 1) << i;
+	for (int i = 5; i < 16; ++i)
+		EXPECT_EQ(ctx.hits[i].load(), 0);
+}
+
+TEST(ThreadPoolTest, ParallelFor_EmptyPool_Inline) {
+	ThreadPool pool(0);
+	PForCtx ctx{};
+	ctx.nWorkers.store(0);
+	ctx.bad.store(0);
+	for (int i = 0; i < 16; ++i)
+		ctx.hits[i].store(0);
+	pool.parallelFor(pforRecord, &ctx);
+	EXPECT_EQ(ctx.nWorkers.load(), 1);
+	EXPECT_EQ(ctx.hits[0].load(), 1);
+	EXPECT_EQ(ctx.bad.load(), 0);
+}
+
+TEST(ThreadPoolTest, ParallelFor_NotNestable) {
+	ThreadPool pool(2);
+	PForCtx ctx{};
+	ctx.nWorkers.store(0);
+	ctx.bad.store(0);
+	ctx.pool = &pool;
+	for (int i = 0; i < 16; ++i)
+		ctx.hits[i].store(0);
+	pool.parallelFor(pforNested, &ctx);
+	EXPECT_EQ(ctx.bad.load(), 0);
+	EXPECT_EQ(ctx.nWorkers.load(), 3);
+}
+
+TEST(ThreadPoolTest, ParallelFor_AfterShutdownThrows) {
+	ThreadPool pool(2);
+	pool.shutdown();
+	PForCtx ctx{};
+	EXPECT_THROW(pool.parallelFor(pforRecord, &ctx), std::runtime_error);
+}

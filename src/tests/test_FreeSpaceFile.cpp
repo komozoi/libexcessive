@@ -19,8 +19,8 @@
 #include <string>
 #include <cstdint>
 #include <thread>
-#include <vector>
 #include <atomic>
+#include "ds/ArrayList.h"
 #include "universaltime.h"
 #include "gtest/gtest.h"
 #include "fs/FdHandle.h"
@@ -298,11 +298,10 @@ TEST(FreeSpaceFileTest, ConcurrentAllocateAndFree) {
 	const int opsPerThread = 200;
 
 	std::atomic<bool> failed(false);
-	std::vector<std::thread> threads;
-	threads.reserve(numThreads);
+	ArrayList<std::thread> threads;
 
 	for (int t = 0; t < numThreads; t++) {
-		threads.emplace_back([&fs, &failed, t, opsPerThread]() {
+		threads.add(std::thread([&fs, &failed, t, opsPerThread]() {
 			for (int i = 0; i < opsPerThread; i++) {
 				uint32_t size = 64 + ((uint32_t)((t * 131) + (i * 17)) & 0x3FF);
 				off_t off = fs.getFreeRegion(size);
@@ -312,7 +311,7 @@ TEST(FreeSpaceFileTest, ConcurrentAllocateAndFree) {
 				}
 				fs.markFreeRegion(off, size);
 			}
-		});
+		}));
 	}
 
 	for (std::thread& th : threads)

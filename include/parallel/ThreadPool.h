@@ -143,8 +143,17 @@ public:
 	/** Block until every non-null task in `tasks` has finished. */
 	static void waitAll(const ArrayList<sp<ThreadPoolTask>>& tasks);
 
+	/**
+	 * Zero-alloc barrier: run `fn` on the caller (worker 0) and every pool
+	 * thread (workers 1..getPoolSize()). `nWorkers` is getPoolSize()+1.
+	 * Does not go through `submit` / `std::function`. Not nestable.
+	 * An empty pool runs `fn(0, 1, ctx)` on the caller only.
+	 */
+	typedef void (*ForFn)(int worker, int nWorkers, void* ctx);
+	void parallelFor(ForFn fn, void* ctx);
+
 private:
-	void workerLoop();
+	void workerLoop(int workerId);
 
 	ArrayList<std::thread> workers;
 	Queue<sp<ThreadPoolTask>> tasks;
@@ -152,6 +161,15 @@ private:
 	mutable std::mutex queueMutex;
 	std::condition_variable condition;
 	bool stop;
+
+	ForFn pforFn = nullptr;
+	void* pforCtx = nullptr;
+	int pforNWorkers = 0;
+	std::atomic<unsigned> pforEpoch{0};
+	std::atomic<int> pforDone{0};
+	bool pforBusy = false;
 };
+
+using ThreadPoolForFn = ThreadPool::ForFn;
 
 #endif // EXCESSIVE_THREADPOOL_H

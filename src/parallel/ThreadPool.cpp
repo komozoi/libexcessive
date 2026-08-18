@@ -21,7 +21,7 @@
 
 ThreadPool::ThreadPool(int threads) : stop(false) {
 	for (int i = 0; i < threads; ++i) {
-		workers.add(std::thread(&ThreadPool::workerLoop, this));
+		workers.add(std::thread(&ThreadPool::workerLoop, this, i + 1));
 	}
 }
 
@@ -29,19 +29,37 @@ ThreadPool::~ThreadPool() {
 	shutdown();
 }
 
-void ThreadPool::workerLoop() {
+void ThreadPool::workerLoop(int workerId) {
+	unsigned lastEpoch = 0;
 	for (;;) {
 		sp<ThreadPoolTask> task;
 		{
 			std::unique_lock<std::mutex> lock(queueMutex);
-			while (!stop && tasks.empty()) {
+			for (;;) {
+				const unsigned ep = pforEpoch.load(std::memory_order_relaxed);
+				if (ep != lastEpoch)
+					break;
+				if (!tasks.empty())
+					break;
+				if (stop)
+					return;
 				condition.wait(lock);
 			}
-
-			if (stop && tasks.empty()) {
-				return;
+			const unsigned ep = pforEpoch.load(std::memory_order_relaxed);
+			if (ep != lastEpoch) {
+				lastEpoch = ep;
+				ForFn fn = pforFn;
+				void* ctx = pforCtx;
+				int nw = pforNWorkers;
+				lock.unlock();
+				if (fn)
+					fn(workerId, nw, ctx);
+				if (pforDone.fetch_add(1, std::memory_order_acq_rel) + 1 >= nw - 1)
+					condition.notify_all();
+				continue;
 			}
-
+			if (stop && tasks.empty())
+				return;
 			task = tasks.pop();
 		}
 		try {
@@ -51,6 +69,40 @@ void ThreadPool::workerLoop() {
 			throw;
 		}
 		task.mut().markFinished();
+	}
+}
+
+void ThreadPool::parallelFor(ForFn fn, void* ctx) {
+	if (!fn)
+		throw std::invalid_argument("ThreadPool::parallelFor: null fn");
+	const int nPool = workers.size();
+	if (nPool == 0) {
+		fn(0, 1, ctx);
+		return;
+	}
+
+	{
+		std::lock_guard<std::mutex> lock(queueMutex);
+		if (stop)
+			throw std::runtime_error("parallelFor on stopped ThreadPool");
+		if (pforBusy)
+			throw std::runtime_error("ThreadPool::parallelFor is not nestable");
+		pforBusy = true;
+		pforFn = fn;
+		pforCtx = ctx;
+		pforNWorkers = nPool + 1;
+		pforDone.store(0, std::memory_order_relaxed);
+		pforEpoch.fetch_add(1, std::memory_order_release);
+	}
+	condition.notify_all();
+	fn(0, nPool + 1, ctx);
+	{
+		std::unique_lock<std::mutex> lock(queueMutex);
+		while (pforDone.load(std::memory_order_acquire) < nPool)
+			condition.wait(lock);
+		pforBusy = false;
+		pforFn = nullptr;
+		pforCtx = nullptr;
 	}
 }
 

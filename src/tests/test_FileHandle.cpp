@@ -23,8 +23,8 @@
 #include <string>
 #include <atomic>
 #include <thread>
-#include <vector>
 #include <unistd.h>
+#include "ds/ArrayList.h"
 #include <sys/stat.h>
 
 
@@ -396,29 +396,30 @@ TEST_F(FdHandleTest, ConcurrentPreadDistinctOffsets) {
 	const int kSlots = 4096;
 	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
 
-	std::vector<uint64_t> table(kSlots);
+	ArrayList<uint64_t> table;
+	table.resize(kSlots);
 	for (int i = 0; i < kSlots; ++i)
-		table[i] = ((uint64_t)i << 32) ^ 0xA5A5A5A5u;
-	ASSERT_EQ(h.write(table.data(), table.size() * sizeof(uint64_t)),
-			(ssize_t)(table.size() * sizeof(uint64_t)));
+		table.get(i) = ((uint64_t)i << 32) ^ 0xA5A5A5A5u;
+	ASSERT_EQ(h.write(table.getMemory(), (size_t)table.size() * sizeof(uint64_t)),
+			(ssize_t)((size_t)table.size() * sizeof(uint64_t)));
 	h.flush();
 
 	const int kThreads = 8;
 	const int kIters = 4000;
 	std::atomic<int> mismatches(0);
-	std::vector<std::thread> threads;
+	ArrayList<std::thread> threads;
 	for (int t = 0; t < kThreads; ++t) {
-		threads.emplace_back([&, t]() {
+		threads.add(std::thread([&, t]() {
 			uint32_t seed = (uint32_t)(t * 2654435761u);
 			for (int i = 0; i < kIters; ++i) {
 				seed = seed * 1664525u + 1013904223u;
 				int slot = (int)(seed % (uint32_t)kSlots);
 				uint64_t got = 0;
 				ssize_t n = h.pread(got, (off_t)(slot * sizeof(uint64_t)));
-				if (n != (ssize_t)sizeof(got) || got != table[slot])
+				if (n != (ssize_t)sizeof(got) || got != table.get(slot))
 					++mismatches;
 			}
-		});
+		}));
 	}
 	for (std::thread& th : threads) th.join();
 	EXPECT_EQ(mismatches.load(), 0);
@@ -432,20 +433,21 @@ TEST_F(FdHandleTest, ConcurrentPwriteDistinctOffsets) {
 	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
 
 	// Pre-size the file with zeros so pwrite never extends past EOF mid-test.
-	std::vector<uint64_t> zeros(kSlots, 0);
-	ASSERT_EQ(h.write(zeros.data(), zeros.size() * sizeof(uint64_t)),
-			(ssize_t)(zeros.size() * sizeof(uint64_t)));
+	ArrayList<uint64_t> zeros;
+	zeros.addCopies(0, kSlots);
+	ASSERT_EQ(h.write(zeros.getMemory(), (size_t)zeros.size() * sizeof(uint64_t)),
+			(ssize_t)((size_t)zeros.size() * sizeof(uint64_t)));
 	h.flush();
 
 	const int kThreads = 8;
-	std::vector<std::thread> threads;
+	ArrayList<std::thread> threads;
 	for (int t = 0; t < kThreads; ++t) {
-		threads.emplace_back([&, t]() {
+		threads.add(std::thread([&, t]() {
 			for (int i = t; i < kSlots; i += kThreads) {
 				uint64_t v = ((uint64_t)i << 32) ^ 0xDEADBEEFu;
 				h.pwrite(v, (off_t)(i * sizeof(uint64_t)));
 			}
-		});
+		}));
 	}
 	for (std::thread& th : threads) th.join();
 
@@ -483,9 +485,9 @@ TEST_F(FdHandleTest, ConcurrentReadersOneWriter) {
 		stop.store(true);
 	});
 
-	std::vector<std::thread> readers;
+	ArrayList<std::thread> readers;
 	for (int t = 0; t < kReaders; ++t) {
-		readers.emplace_back([&]() {
+		readers.add(std::thread([&]() {
 			while (!stop.load(std::memory_order_acquire)) {
 				uint64_t got = 0;
 				ssize_t n = h.pread(got, 0);
@@ -501,7 +503,7 @@ TEST_F(FdHandleTest, ConcurrentReadersOneWriter) {
 						++badValues;
 				}
 			}
-		});
+		}));
 	}
 
 	writer.join();
@@ -523,9 +525,10 @@ TEST_F(FdHandleTest, MixedQueueWritePwritePreadStress) {
 	const int kSlots = 256;
 	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
 
-	std::vector<uint32_t> zeros(kSlots, 0);
-	ASSERT_EQ(h.write(zeros.data(), zeros.size() * sizeof(uint32_t)),
-			(ssize_t)(zeros.size() * sizeof(uint32_t)));
+	ArrayList<uint32_t> zeros;
+	zeros.addCopies(0, kSlots);
+	ASSERT_EQ(h.write(zeros.getMemory(), (size_t)zeros.size() * sizeof(uint32_t)),
+			(ssize_t)((size_t)zeros.size() * sizeof(uint32_t)));
 	h.flush();
 
 	const int kWriterThreads = 4;
@@ -533,9 +536,9 @@ TEST_F(FdHandleTest, MixedQueueWritePwritePreadStress) {
 	const int kIters = 2000;
 	std::atomic<int> badReads(0);
 
-	std::vector<std::thread> threads;
+	ArrayList<std::thread> threads;
 	for (int t = 0; t < kWriterThreads; ++t) {
-		threads.emplace_back([&, t]() {
+		threads.add(std::thread([&, t]() {
 			uint32_t seed = (uint32_t)(t + 1) * 2654435761u;
 			for (int i = 0; i < kIters; ++i) {
 				seed = seed * 1664525u + 1013904223u;
@@ -548,11 +551,11 @@ TEST_F(FdHandleTest, MixedQueueWritePwritePreadStress) {
 				else
 					h.queueWrite(v, (off_t)(slot * sizeof(uint32_t)));
 			}
-		});
+		}));
 	}
 	std::atomic<bool> readersStop(false);
 	for (int t = 0; t < kReaderThreads; ++t) {
-		threads.emplace_back([&, t]() {
+		threads.add(std::thread([&, t]() {
 			uint32_t seed = (uint32_t)(t + 100) * 2246822519u;
 			while (!readersStop.load(std::memory_order_acquire)) {
 				seed = seed * 1664525u + 1013904223u;
@@ -567,16 +570,16 @@ TEST_F(FdHandleTest, MixedQueueWritePwritePreadStress) {
 						++badReads; // torn / invalid encoding
 				}
 			}
-		});
+		}));
 	}
 
 	// Join writers first, then stop readers.
 	for (int i = 0; i < kWriterThreads; ++i)
-		threads[i].join();
+		threads.get(i).join();
 	h.flush();
 	readersStop.store(true, std::memory_order_release);
 	for (int i = kWriterThreads; i < kWriterThreads + kReaderThreads; ++i)
-		threads[i].join();
+		threads.get(i).join();
 
 	EXPECT_EQ(badReads.load(), 0);
 
@@ -595,16 +598,18 @@ TEST_F(FdHandleTest, MixedQueueWritePwritePreadStress) {
 TEST_F(FdHandleTest, PreadPwriteLargeBlock) {
 	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
 
-	const size_t kSize = 1u << 20; // 1 MiB
-	std::vector<uint8_t> src(kSize);
-	for (size_t i = 0; i < kSize; ++i)
-		src[i] = (uint8_t)((i * 31u + 7u) & 0xFFu);
+	const int kSize = 1 << 20; // 1 MiB
+	ArrayList<uint8_t> src;
+	src.resize(kSize);
+	for (int i = 0; i < kSize; ++i)
+		src.get(i) = (uint8_t)((i * 31u + 7u) & 0xFFu);
 
-	ASSERT_EQ(h.pwrite(src.data(), kSize, 0), (ssize_t)kSize);
+	ASSERT_EQ(h.pwrite(src.getMemory(), (size_t)kSize, 0), (ssize_t)kSize);
 
-	std::vector<uint8_t> dst(kSize, 0);
-	ASSERT_EQ(h.pread(dst.data(), kSize, 0), (ssize_t)kSize);
-	EXPECT_EQ(memcmp(src.data(), dst.data(), kSize), 0);
+	ArrayList<uint8_t> dst;
+	dst.addCopies(0, kSize);
+	ASSERT_EQ(h.pread(dst.getMemory(), (size_t)kSize, 0), (ssize_t)kSize);
+	EXPECT_EQ(memcmp(src.getMemory(), dst.getMemory(), (size_t)kSize), 0);
 
 	// Reading past end-of-file returns what is available (or 0), never crashes.
 	uint64_t tail = 0xFFFFFFFFFFFFFFFFull;
@@ -657,14 +662,15 @@ TEST_F(FdHandleTest, QueuedWritesSurviveConcurrentDrain) {
 	const off_t scratch = (off_t)(kSlots * sizeof(uint32_t));
 
 	FdHandle h = FdHandle::open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
-	std::vector<uint32_t> zeros(kSlots + 1, 0);
-	ASSERT_EQ(h.write(zeros.data(), zeros.size() * sizeof(uint32_t)),
-			(ssize_t)(zeros.size() * sizeof(uint32_t)));
+	ArrayList<uint32_t> zeros;
+	zeros.addCopies(0, kSlots + 1);
+	ASSERT_EQ(h.write(zeros.getMemory(), (size_t)zeros.size() * sizeof(uint32_t)),
+			(ssize_t)((size_t)zeros.size() * sizeof(uint32_t)));
 	h.flush();
 
-	std::vector<std::thread> threads;
+	ArrayList<std::thread> threads;
 	for (int t = 0; t < kThreads; ++t) {
-		threads.emplace_back([&, t]() {
+		threads.add(std::thread([&, t]() {
 			for (int i = 1; i <= kIters; ++i) {
 				for (int s = 0; s < kSlotsPerThread; ++s) {
 					int slot = t * kSlotsPerThread + s;
@@ -672,35 +678,35 @@ TEST_F(FdHandleTest, QueuedWritesSurviveConcurrentDrain) {
 					h.queueWrite(v, (off_t)(slot * sizeof(uint32_t)));
 				}
 			}
-		});
+		}));
 	}
 	std::atomic<bool> stop(false);
-	threads.emplace_back([&]() {
+	threads.add(std::thread([&]() {
 		while (!stop.load(std::memory_order_acquire)) {
 			uint32_t got = 0;
 			h.pread(got, 0);
 		}
-	});
-	threads.emplace_back([&]() {
+	}));
+	threads.add(std::thread([&]() {
 		uint32_t v = 0xFFFFFFFFu;
 		while (!stop.load(std::memory_order_acquire))
 			h.pwrite(v, scratch);
-	});
-	threads.emplace_back([&]() {
+	}));
+	threads.add(std::thread([&]() {
 		while (!stop.load(std::memory_order_acquire)) {
 			h.seek(0, SEEK_SET);
 			uint32_t got = 0;
 			h.read(got);
 		}
-	});
+	}));
 
 	for (int t = 0; t < kThreads; ++t)
-		threads[t].join();
+		threads.get(t).join();
 	// Drain remaining queued writes while readers are still running.
 	h.flush();
 	stop.store(true, std::memory_order_release);
-	for (size_t i = kThreads; i < threads.size(); ++i)
-		threads[i].join();
+	for (int i = kThreads; i < threads.size(); ++i)
+		threads.get(i).join();
 
 	for (int slot = 0; slot < kSlots; ++slot) {
 		int t = slot / kSlotsPerThread;

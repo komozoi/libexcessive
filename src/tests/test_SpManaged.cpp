@@ -19,7 +19,7 @@
 #include <gtest/gtest.h>
 #include <alloc/pointer.h>
 #include <string>
-#include <vector>
+#include "ds/ArrayList.h"
 
 
 // ---------------------------------------------------------------------------
@@ -82,8 +82,8 @@ struct Animal : public Entity {
 	}
 
 	/** Pass self into a helper that only knows about Entity. */
-	void announce(std::vector<sp<Entity>>& out) {
-		out.push_back(ptr());
+	void announce(ArrayList<sp<Entity>>& out) {
+		out.add(ptr());
 	}
 };
 
@@ -103,9 +103,9 @@ struct Dog : public Animal {
 		return ptr();
 	}
 
-	void barkInto(std::vector<std::string>& log) {
+	void barkInto(ArrayList<std::string>& log) {
 		sp<Entity> self = ptr();
-		log.push_back(self->name() + "#" + std::to_string(self->id));
+		log.add(self->name() + "#" + std::to_string(self->id));
 	}
 };
 
@@ -148,8 +148,8 @@ struct Whale : public Mammal {
 	}
 
 	/** Multi-level: Entity <- Animal <- Mammal <- Whale */
-	void surface(std::vector<sp<Entity>>& school) {
-		school.push_back(ptr());
+	void surface(ArrayList<sp<Entity>>& school) {
+		school.add(ptr());
 	}
 };
 
@@ -196,10 +196,10 @@ TEST(SpManagedTest, DerivedUsesPtrInsteadOfThis) {
 	dog.mut().registerSelf();
 	EXPECT_EQ(dog->visitCount, 1);
 
-	std::vector<std::string> log;
+	ArrayList<std::string> log;
 	dog.mut().barkInto(log);
-	ASSERT_EQ(log.size(), 1u);
-	EXPECT_EQ(log[0], "Dog:corgi#10");
+	ASSERT_EQ(log.size(), 1);
+	EXPECT_EQ(log.get(0), "Dog:corgi#10");
 
 	// identity() returns sp<Entity> to the same object
 	sp<Entity> id = dog.mut().identity();
@@ -218,10 +218,10 @@ TEST(SpManagedTest, MultiLevelHierarchyPtr) {
 	EXPECT_EQ(e1->name(), "Whale");
 	EXPECT_EQ(e1->id, 99);
 
-	std::vector<sp<Entity>> school;
+	ArrayList<sp<Entity>> school;
 	w.mut().surface(school);
-	ASSERT_EQ(school.size(), 1u);
-	EXPECT_EQ(school[0].get(), e1.get());
+	ASSERT_EQ(school.size(), 1);
+	EXPECT_EQ(school.get(0).get(), e1.get());
 	// owner + e1 + e2 + school[0]
 	EXPECT_GE(w.numReferences(), 4);
 }
@@ -230,18 +230,18 @@ TEST(SpManagedTest, SiblingDerivedTypesShareBasePtrType) {
 	sp<Dog> dog = sp<Dog>::create(1, "lab");
 	sp<Cat> cat = sp<Cat>::create(2, true);
 
-	std::vector<sp<Entity>> zoo;
+	ArrayList<sp<Entity>> zoo;
 	dog.mut().announce(zoo);
 	// Cat inherits Animal::announce
 	cat.mut().announce(zoo);
 
-	ASSERT_EQ(zoo.size(), 2u);
-	EXPECT_EQ(zoo[0]->name(), "Dog:lab");
-	EXPECT_EQ(zoo[1]->name(), "Cat:indoor");
-	EXPECT_NE(zoo[0].get(), zoo[1].get());
+	ASSERT_EQ(zoo.size(), 2);
+	EXPECT_EQ(zoo.get(0)->name(), "Dog:lab");
+	EXPECT_EQ(zoo.get(1)->name(), "Cat:indoor");
+	EXPECT_NE(zoo.get(0).get(), zoo.get(1).get());
 
 	// Both entries are sp<Entity>, not the derived sp types
-	static_assert(std::is_same_v<decltype(zoo[0]), sp<Entity>&>, "vector holds sp<Entity>");
+	static_assert(std::is_same_v<decltype(zoo.get(0)), sp<Entity>&>, "ArrayList holds sp<Entity>");
 }
 
 TEST(SpManagedTest, ConvertDerivedSpToBaseSpKeepsPtrWorking) {
