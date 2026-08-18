@@ -12,6 +12,7 @@
 #include "ndarray_int3.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
@@ -294,6 +295,9 @@ NDArrayBuffer::NDArrayBuffer(size_t bytes, NDArrayType t) : byteSize(bytes), ele
 		bzero(data, bytes);
 }
 
+NDArrayBuffer::NDArrayBuffer(void* external, size_t bytes, NDArrayType t)
+	: data(external), byteSize(bytes), elementType(t), ownsData(false) {}
+
 NDArrayBuffer::NDArrayBuffer(const NDArrayBuffer& other)
 	: byteSize(other.byteSize), elementType(other.elementType) {
 	data = malloc(byteSize ? byteSize : 1);
@@ -302,16 +306,20 @@ NDArrayBuffer::NDArrayBuffer(const NDArrayBuffer& other)
 }
 
 NDArrayBuffer::NDArrayBuffer(NDArrayBuffer&& other) noexcept
-	: data(other.data), byteSize(other.byteSize), elementType(other.elementType) {
+	: data(other.data), byteSize(other.byteSize), elementType(other.elementType),
+	  ownsData(other.ownsData) {
 	other.data = nullptr;
 	other.byteSize = 0;
+	other.ownsData = false;
 }
 
 NDArrayBuffer& NDArrayBuffer::operator=(const NDArrayBuffer& other) {
 	if (this != &other) {
-		free(data);
+		if (ownsData)
+			free(data);
 		byteSize = other.byteSize;
 		elementType = other.elementType;
+		ownsData = true;
 		data = malloc(byteSize ? byteSize : 1);
 		if (byteSize && other.data)
 			memcpy(data, other.data, byteSize);
@@ -321,18 +329,22 @@ NDArrayBuffer& NDArrayBuffer::operator=(const NDArrayBuffer& other) {
 
 NDArrayBuffer& NDArrayBuffer::operator=(NDArrayBuffer&& other) noexcept {
 	if (this != &other) {
-		free(data);
+		if (ownsData)
+			free(data);
 		data = other.data;
 		byteSize = other.byteSize;
 		elementType = other.elementType;
+		ownsData = other.ownsData;
 		other.data = nullptr;
 		other.byteSize = 0;
+		other.ownsData = false;
 	}
 	return *this;
 }
 
 NDArrayBuffer::~NDArrayBuffer() {
-	free(data);
+	if (ownsData)
+		free(data);
 	data = nullptr;
 }
 
@@ -352,6 +364,13 @@ void NDArray::rebindPointers() {
 void NDArray::ensureWritable() {
 	if (!buffer)
 		return;
+	NDArrayBuffer* raw = buffer.get();
+	// Never CoW-detach a wrap: that would allocate a private copy and leave
+	// the caller's mmap/stack buffer unchanged. All aliases write through.
+	if (raw && !raw->ownsData) {
+		rebindPointers();
+		return;
+	}
 	// sp::mut() only detaches when pointerType()==COPY_ON_WRITE; after the first
 	// detach it marks the handle SHARED, so a later NDArray copy would share a
 	// SHARED buffer and mut() would mutate every alias. Detach on refcount alone
@@ -380,6 +399,78 @@ size_t NDArray::bufferBytesFor(NDArrayType t, size_t numElems) {
 		default:
 			return numElems;
 	}
+}
+
+static size_t wrapElementCount(const ArrayList<int>& shape) {
+	if (shape.size() == 0)
+		return 1;
+	size_t n = 1;
+	for (int i = 0; i < shape.size(); ++i)
+		n *= (size_t)(shape.get(i) > 0 ? shape.get(i) : 0);
+	return n;
+}
+
+static size_t wrapAlignment(NDArrayType t) {
+	switch (t) {
+		case BINARY:
+		case INT3:
+		case INT64:
+		case F64:
+		case UINT256:
+			return 8;
+		case INT32:
+		case F32:
+			return 4;
+		case UINT8:
+		default:
+			return 1;
+	}
+}
+
+sp<NDArrayBuffer> NDArray::makeWrapBuffer(void* data, size_t byteSize, const ArrayList<int>& shape, NDArrayType type) {
+	const size_t n = wrapElementCount(shape);
+	const size_t need = bufferBytesFor(type, n);
+	if (need > 0 && data == nullptr)
+		throw std::invalid_argument("NDArray wrap: null data");
+	if (byteSize < need)
+		throw std::invalid_argument("NDArray wrap: buffer smaller than required packed size");
+	if (data && need > 0) {
+		const size_t align = wrapAlignment(type);
+		if ((reinterpret_cast<std::uintptr_t>(data) % align) != 0)
+			throw std::invalid_argument("NDArray wrap: data is not aligned for element type");
+	}
+	return sp<NDArrayBuffer>(UNIQUE, data, byteSize, type);
+}
+
+sp<NDArrayBuffer> NDArray::makeWrapBuffer(const void* data, size_t byteSize, const ArrayList<int>& shape, NDArrayType type) {
+	const size_t n = wrapElementCount(shape);
+	const size_t need = bufferBytesFor(type, n);
+	if (need > 0 && data == nullptr)
+		throw std::invalid_argument("NDArray wrap: null data");
+	if (byteSize < need)
+		throw std::invalid_argument("NDArray wrap: buffer smaller than required packed size");
+	if (data && need > 0) {
+		const size_t align = wrapAlignment(type);
+		if ((reinterpret_cast<std::uintptr_t>(data) % align) != 0)
+			throw std::invalid_argument("NDArray wrap: data is not aligned for element type");
+	}
+
+	// This cast is OK because the buffer is returned as COW, so attempts to mutate it will force a copy.
+	return sp<NDArrayBuffer>(COPY_ON_WRITE, (void*)data, byteSize, type);
+}
+
+NDArray::NDArray(ArrayList<int> shape_, NDArrayType type_, sp<NDArrayBuffer> buf)
+	: shape(std::move(shape_)), type(type_), buffer(std::move(buf)), memory(nullptr) {
+	rebindPointers();
+}
+
+NDArray NDArray::wrap(void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type) {
+	sp<NDArrayBuffer> buf = makeWrapBuffer(data, byteSize, shape, type);
+	return NDArray(std::move(shape), type, std::move(buf));
+}
+
+bool NDArray::ownsStorage() const {
+	return buffer && buffer.get() && buffer.get()->ownsData;
 }
 
 ArrayList<size_t> NDArray::rowMajorStrides(const ArrayList<int>& shape) {
@@ -667,6 +758,12 @@ NDArrayView::NDArrayView(sp<NDArrayBuffer> buf, ArrayList<int> shape_, ArrayList
 	: shape(std::move(shape_)), strides(std::move(strides_)), offset(offset_), type(type_),
 	  buffer(std::move(buf)) {}
 
+NDArrayView NDArrayView::wrap(const void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type) {
+	sp<NDArrayBuffer> buf = NDArray::makeWrapBuffer(data, byteSize, shape, type);
+	ArrayList<size_t> st = NDArray::rowMajorStrides(shape);
+	return NDArrayView(std::move(buf), std::move(shape), std::move(st), 0, type);
+}
+
 size_t NDArrayView::numElements() const {
 	if (shape.size() == 0)
 		return 1;
@@ -801,8 +898,8 @@ NDArray NDArrayView::copy() const {
 
 namespace ndarray_detail {
 	double viewLoadDouble(const NDArrayView& v, size_t elementOffset) {
-		const void* data = v.sharedBuffer().get()->data;
-		switch (v.type) {
+		const void* data = v.sharedBuffer()->data;
+		switch (v.getType()) {
 			case BINARY: {
 				const uint64_t* words = (const uint64_t*)data;
 				return (double)((words[elementOffset >> 6] >> (elementOffset & 63)) & 1ULL);
@@ -825,7 +922,7 @@ namespace ndarray_detail {
 	}
 	uint256_t viewLoadU256(const NDArrayView& v, size_t elementOffset) {
 		const void* data = v.sharedBuffer().get()->data;
-		if (v.type == UINT256)
+		if (v.getType() == UINT256)
 			return ((const uint256_t*)data)[elementOffset];
 		return uint256_t(viewLoadDouble(v, elementOffset));
 	}

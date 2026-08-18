@@ -13,8 +13,8 @@
 TEST(NDArray_views, View_SharesData) {
 	NDArray a(ArrayList({1.0f, 2.0f, 3.0f}));
 	NDArrayView v = a.view();
-	EXPECT_EQ(v.shape.size(), 1);
-	EXPECT_EQ(v.shape.get(0), 3);
+	EXPECT_EQ(v.getShape().size(), 1);
+	EXPECT_EQ(v.getShape().get(0), 3);
 	EXPECT_FLOAT_EQ(v.get<float>(ArrayList<int>({0})), 1.0f);
 	EXPECT_FLOAT_EQ(v.getFlat<float>(2), 3.0f);
 }
@@ -66,8 +66,8 @@ TEST(NDArray_views, BroadcastTo_Trailing) {
 	// shape {2,1} broadcast to {2,3}
 	NDArray a({2, 1}, ArrayList({10.0f, 20.0f}));
 	NDArrayView v = a.broadcastTo(ArrayList<int>({2, 3}));
-	EXPECT_EQ(v.shape.get(0), 2);
-	EXPECT_EQ(v.shape.get(1), 3);
+	EXPECT_EQ(v.getShape().get(0), 2);
+	EXPECT_EQ(v.getShape().get(1), 3);
 	// all columns of row 0 are 10
 	EXPECT_FLOAT_EQ(v.get<float>(ArrayList<int>({0, 0})), 10.0f);
 	EXPECT_FLOAT_EQ(v.get<float>(ArrayList<int>({0, 1})), 10.0f);
@@ -108,8 +108,8 @@ TEST(NDArray_views, BroadcastTo_InsertMiddle) {
 TEST(NDArray_views, ReshapeView) {
 	NDArray a(ArrayList({1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}));
 	NDArrayView v = a.reshapeView(ArrayList<int>({2, 3}));
-	EXPECT_EQ(v.shape.get(0), 2);
-	EXPECT_EQ(v.shape.get(1), 3);
+	EXPECT_EQ(v.getShape().get(0), 2);
+	EXPECT_EQ(v.getShape().get(1), 3);
 	EXPECT_FLOAT_EQ(v.get<float>(ArrayList<int>({1, 2})), 6.0f);
 }
 

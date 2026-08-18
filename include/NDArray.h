@@ -58,14 +58,22 @@ enum NDArrayType {
 /**
  * Shared contiguous buffer for NDArray / NDArrayView (managed via sp<> CoW).
  * Deep-copyable so COPY_ON_WRITE detach works.
+ *
+ * When ownsData is false the pointer is a wrap of caller-owned memory (mmap,
+ * stack, JNI, …). The destructor must not free it. Copying the buffer always
+ * allocates a new owned snapshot (used only if someone explicitly copy()s it);
+ * wrap handles themselves never CoW-detach on write.
  */
 struct NDArrayBuffer {
 	void* data = nullptr;
 	size_t byteSize = 0;
 	NDArrayType elementType = F32;
+	bool ownsData = true;
 
 	NDArrayBuffer() = default;
 	NDArrayBuffer(size_t bytes, NDArrayType t);
+	/** Non-owning wrap; does not free `external`. */
+	NDArrayBuffer(void* external, size_t bytes, NDArrayType t);
 	NDArrayBuffer(const NDArrayBuffer& other);
 	NDArrayBuffer(NDArrayBuffer&& other) noexcept;
 	NDArrayBuffer& operator=(const NDArrayBuffer& other);
@@ -118,12 +126,19 @@ private:
  */
 class NDArrayView {
 public:
-	ArrayList<int> shape;
-	ArrayList<size_t> strides; // element strides; 0 = broadcast dimension
-	size_t offset = 0;         // element offset into shared buffer
-	NDArrayType type = F32;
 
 	NDArrayView() = default;
+
+	NDArrayView(sp<NDArrayBuffer> buf, ArrayList<int> shape, ArrayList<size_t> strides, size_t offset, NDArrayType type);
+
+	/**
+	 * View over caller-owned bytes (const or mutable). Does not copy or free
+	 * `data`. The view has no mutators; writes go through `NDArray::wrap(void*)`.
+	 * `data` must stay valid for the lifetime of this view and any copy of it.
+	 * `byteSize` must be at least the packed size of `shape` × `type`.
+	 * Packed types (BINARY, INT3, UINT256) require 8-byte alignment.
+	 */
+	static NDArrayView wrap(const void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type);
 
 	size_t numElements() const;
 	bool isContiguous() const;
@@ -140,15 +155,20 @@ public:
 
 	size_t computeOffset(const ArrayList<int>& indices) const;
 
+	const ArrayList<int>& getShape() const { return shape; }
+	const ArrayList<size_t>& getStrides() const { return strides; }
+	size_t getOffset() const { return offset; }
+	NDArrayType getType() const { return type; }
+
 	/** Shared storage (refcount); used by ndarray_detail load helpers. */
 	const sp<NDArrayBuffer>& sharedBuffer() const { return buffer; }
 
 private:
-	friend class NDArray;
+	ArrayList<int> shape;
+	ArrayList<size_t> strides; // element strides; 0 = broadcast dimension
+	size_t offset = 0;         // element offset into shared buffer
+	NDArrayType type = F32;
 	sp<NDArrayBuffer> buffer;
-
-	NDArrayView(sp<NDArrayBuffer> buf, ArrayList<int> shape, ArrayList<size_t> strides,
-	            size_t offset, NDArrayType type);
 };
 
 
@@ -192,6 +212,17 @@ public:
 	explicit NDArray(int value);
 	explicit NDArray(int64_t value);
 
+	/**
+	 * Wrap caller-owned bytes. Writes go to `data`; the array never CoW-detaches
+	 * this buffer (that would orphan mmap). Caller keeps `data` alive for the
+	 * lifetime of this array and any view/copy that still shares it.
+	 * Copies of a wrap alias the same bytes (not an owned snapshot).
+	 *
+	 * Takes `void*`, not `const void*`: mutation is part of the NDArray API.
+	 * Const memory is a view — use `NDArrayView::wrap`.
+	 */
+	static NDArray wrap(void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type);
+
 	NDArray(const NDArray& other);
 	NDArray(NDArray&& other) noexcept;
 	~NDArray();
@@ -230,6 +261,9 @@ public:
 	NDArrayView view() const;
 	NDArrayView broadcastTo(const ArrayList<int>& targetShape) const;
 	NDArrayView reshapeView(const ArrayList<int>& newShape) const;
+
+	/** True if this array allocated (or CoW-copied) its storage. False for wrap(). */
+	bool ownsStorage() const;
 
 	NDArrayRef operator[](int i);
 	NDArrayCRef operator[](int i) const;
@@ -893,6 +927,10 @@ private:
 	void ensureWritable();
 	static ArrayList<size_t> rowMajorStrides(const ArrayList<int>& shape);
 	static size_t bufferBytesFor(NDArrayType t, size_t numElems);
+	static sp<NDArrayBuffer> makeWrapBuffer(void* data, size_t byteSize, const ArrayList<int>& shape, NDArrayType type);
+	static sp<NDArrayBuffer> makeWrapBuffer(const void* data, size_t byteSize, const ArrayList<int>& shape, NDArrayType type);
+
+	NDArray(ArrayList<int> shape, NDArrayType type, sp<NDArrayBuffer> buf);
 
 	template <typename T>
 	T getAtOffset(size_t offset) const {
@@ -935,6 +973,23 @@ private:
 		}
 	}
 
+	/** BINARY store: 1 iff value > 0 (floats / signed ints). bool is itself.
+	 *  Matches storeFromDouble / storeFromI64. bool is special-cased so
+	 *  `value > 0` never instantiates under -Werror=bool-compare. */
+	template <typename T>
+	static bool toBinaryBit(const T& value) {
+		if constexpr (std::is_same_v<T, bool>)
+			return value;
+		else if constexpr (std::is_floating_point_v<T>)
+			return value > static_cast<T>(0);
+		else if constexpr (std::is_integral_v<T> && std::is_signed_v<T>)
+			return value > 0;
+		else if constexpr (std::is_integral_v<T>)
+			return value != 0;
+		else
+			return static_cast<bool>(value);
+	}
+
 	template <typename T>
 	void setAtOffset(size_t offset, const T& value) {
 		ensureWritable();
@@ -975,9 +1030,7 @@ private:
 		} else {
 			switch (type) {
 				case BINARY:
-					// Use contextual conversion to bool (works for bool/int/float without
-					// -Wbool-compare on `value > 0` when T is bool).
-					if (static_cast<bool>(value))
+					if (toBinaryBit(value))
 						uint64[offset >> 6] |= 1ULL << (offset & 63);
 					else
 						uint64[offset >> 6] &= ~(1ULL << (offset & 63));
