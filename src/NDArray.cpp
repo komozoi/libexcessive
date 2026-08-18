@@ -766,17 +766,41 @@ NDArray::~NDArray() {
 	memorySize = 0;
 }
 
-size_t NDArray::computeOffset(const ArrayList<int>& indices) const {
-	size_t offset = 0;
+size_t NDArray::computeOffset(const int* indices, int rank) const {
+	if (rank != shape.size())
+		throw std::out_of_range("NDArray::get - rank mismatch");
+	size_t off = 0;
 	size_t stride = 1;
-	for (int d = shape.size() - 1; d >= 0; --d) {
-		int idx = indices.get(d);
-		if (idx < 0 || idx >= shape.get(d))
+	for (int d = rank - 1; d >= 0; --d) {
+		int ix = indices[d];
+		if (ix < 0 || ix >= shape.get(d))
 			throw std::out_of_range("index out of bounds");
-		offset += (size_t)idx * stride;
+		off += (size_t)ix * stride;
 		stride *= (size_t)shape.get(d);
 	}
-	return offset;
+	return off;
+}
+
+size_t NDArray::computeOffset(const ArrayList<int>& indices) const {
+	const int r = indices.size();
+	if (r <= NDArray::kMaxRank) {
+		int tmp[NDArray::kMaxRank];
+		for (int i = 0; i < r; ++i)
+			tmp[i] = indices.get(i);
+		return computeOffset(tmp, r);
+	}
+	if (r != shape.size())
+		throw std::out_of_range("NDArray::get - rank mismatch");
+	size_t off = 0;
+	size_t stride = 1;
+	for (int d = r - 1; d >= 0; --d) {
+		int ix = indices.get(d);
+		if (ix < 0 || ix >= shape.get(d))
+			throw std::out_of_range("index out of bounds");
+		off += (size_t)ix * stride;
+		stride *= (size_t)shape.get(d);
+	}
+	return off;
 }
 
 void NDArray::stealFrom(NDArray& result) {
@@ -854,37 +878,41 @@ NDArrayView NDArray::reshapeView(const ArrayList<int>& newShape) const {
 	return view().reshape(newShape);
 }
 
-NDArrayRef NDArray::operator[](int i) {
-	ArrayList<int> idx;
-	idx.add(i);
-	return NDArrayRef(this, std::move(idx));
+NDArray::Ref NDArray::operator[](int i) {
+	return Ref(this, i);
 }
 
-NDArrayCRef NDArray::operator[](int i) const {
-	ArrayList<int> idx;
-	idx.add(i);
-	return NDArrayCRef(this, std::move(idx));
+NDArray::CRef NDArray::operator[](int i) const {
+	return CRef(this, i);
 }
 
 
-// ---- NDArrayRef / NDArrayCRef ----------------------------------------------
+// ---- NDArray::Ref / CRef ----------------------------------------------
 
-NDArrayRef::NDArrayRef(NDArray* parent, ArrayList<int> indices)
-	: parent(parent), indices(std::move(indices)) {}
-
-NDArrayRef NDArrayRef::operator[](int i) {
-	ArrayList<int> next = indices;
-	next.add(i);
-	return NDArrayRef(parent, std::move(next));
+NDArray::Ref::Ref(NDArray* parent_, int first)
+	: parent(parent_), rank(1) {
+	idx[0] = first;
 }
 
-NDArrayCRef::NDArrayCRef(const NDArray* parent, ArrayList<int> indices)
-	: parent(parent), indices(std::move(indices)) {}
+NDArray::Ref NDArray::Ref::operator[](int i) {
+	if (rank >= kMaxRank)
+		throw std::out_of_range("NDArray: rank exceeds kMaxRank");
+	Ref next = *this;
+	next.idx[next.rank++] = i;
+	return next;
+}
 
-NDArrayCRef NDArrayCRef::operator[](int i) const {
-	ArrayList<int> next = indices;
-	next.add(i);
-	return NDArrayCRef(parent, std::move(next));
+NDArray::CRef::CRef(const NDArray* parent_, int first)
+	: parent(parent_), rank(1) {
+	idx[0] = first;
+}
+
+NDArray::CRef NDArray::CRef::operator[](int i) const {
+	if (rank >= kMaxRank)
+		throw std::out_of_range("NDArray: rank exceeds kMaxRank");
+	CRef next = *this;
+	next.idx[next.rank++] = i;
+	return next;
 }
 
 
@@ -903,18 +931,6 @@ NDArrayView NDArrayView::wrap(const void* data, size_t byteSize, ArrayList<int> 
 
 size_t NDArrayView::numElements() const {
 	return shapeElementCount(shape);
-}
-
-bool NDArrayView::isContiguous() const {
-	size_t expect = 1;
-	for (int d = shape.size() - 1; d >= 0; --d) {
-		if (shape.get(d) <= 1)
-			continue;
-		if (d >= strides.size() || strides.get(d) != expect)
-			return false;
-		expect *= (size_t)shape.get(d);
-	}
-	return offset == 0;
 }
 
 size_t NDArrayView::computeOffset(const ArrayList<int>& indices) const {
@@ -973,58 +989,112 @@ NDArrayView NDArrayView::reshape(const ArrayList<int>& newShape) const {
 	return NDArrayView(buffer, newShape, NDArray::rowMajorStrides(newShape), offset, type);
 }
 
+static size_t unpackedElemSize(NDArrayType t) {
+	switch (t) {
+		case F32:
+		case INT32:
+			return 4;
+		case F64:
+		case INT64:
+			return 8;
+		case UINT8:
+		case INT8:
+			return 1;
+		case UINT256:
+			return 32;
+		default:
+			return 0;
+	}
+}
+
+static void viewStoreLane(NDArray& out, size_t dst, const void* data, NDArrayType t, size_t srcOff) {
+	switch (t) {
+		case F32:
+			out.setFlat(dst, ((const float*)data)[srcOff]);
+			break;
+		case F64:
+			out.setFlat(dst, ((const double*)data)[srcOff]);
+			break;
+		case UINT8:
+			out.setFlat(dst, ((const uint8_t*)data)[srcOff]);
+			break;
+		case INT8:
+			out.setFlat(dst, ((const int8_t*)data)[srcOff]);
+			break;
+		case INT32:
+			out.setFlat(dst, ((const int32_t*)data)[srcOff]);
+			break;
+		case INT64:
+			out.setFlat(dst, ((const int64_t*)data)[srcOff]);
+			break;
+		case UINT256:
+			out.setFlat(dst, ((const uint256_t*)data)[srcOff]);
+			break;
+		case BINARY:
+			out.setFlat(dst, (int)binaryGet((const uint64_t*)data, srcOff));
+			break;
+		case INT3:
+			out.setFlat(dst, int3_getSigned((const uint64_t*)data, srcOff));
+			break;
+		default:
+			throw std::runtime_error("NDArrayView::copy: invalid type");
+	}
+}
+
 NDArray NDArrayView::copy() const {
 	NDArray out(shape, type);
 	const size_t n = numElements();
-	for (size_t i = 0; i < n; ++i) {
-		ArrayList<int> coords;
-		for (int d = 0; d < shape.size(); ++d)
-			coords.add(0);
-		size_t r = i;
-		for (int d = shape.size() - 1; d >= 0; --d) {
-			int dim = shape.get(d);
-			int c = dim > 0 ? (int)(r % (size_t)dim) : 0;
-			coords.set(d, c);
-			if (dim > 0)
-				r /= (size_t)dim;
-		}
-		size_t srcOff = computeOffset(coords);
-		const void* data = sharedBuffer().get()->data;
-		switch (type) {
-			case F32:
-				out.setFlat(i, ((const float*)data)[srcOff]);
-				break;
-			case F64:
-				out.setFlat(i, ((const double*)data)[srcOff]);
-				break;
-			case UINT8:
-				out.setFlat(i, ((const uint8_t*)data)[srcOff]);
-				break;
-			case INT8:
-				out.setFlat(i, ((const int8_t*)data)[srcOff]);
-				break;
-			case INT32:
-				out.setFlat(i, ((const int32_t*)data)[srcOff]);
-				break;
-			case INT64:
-				out.setFlat(i, ((const int64_t*)data)[srcOff]);
-				break;
-			case UINT256:
-				out.setFlat(i, ((const uint256_t*)data)[srcOff]);
-				break;
-			case BINARY: {
-				const uint64_t* words = (const uint64_t*)data;
-				uint8_t bit = (uint8_t)((words[srcOff >> 6] >> (srcOff & 63)) & 1ULL);
-				out.setFlat(i, bit);
-				break;
-			}
-			case INT3: {
-				const uint64_t* words = (const uint64_t*)data;
-				out.setFlat(i, int3_getSigned(words, srcOff));
-				break;
-			}
-		}
+	if (n == 0 || !sharedBuffer() || !sharedBuffer().get() || !sharedBuffer().get()->data)
+		return out;
+	const void* data = sharedBuffer().get()->data;
+	const size_t esize = unpackedElemSize(type);
+	if (isContiguous() && esize != 0) {
+		memcpy(out.data(), (const char*)data + offset * esize, n * esize);
+		return out;
 	}
+
+	const int rank = shape.size();
+	if (rank == 0) {
+		viewStoreLane(out, 0, data, type, offset);
+		return out;
+	}
+	if (rank <= NDArray::kMaxRank) {
+		int coord[NDArray::kMaxRank] = {};
+		size_t srcOff = offset;
+		size_t dst = 0;
+		const int last = rank - 1;
+		const int nLast = shape.get(last);
+		const size_t stLast = (last < strides.size()) ? strides.get(last) : (size_t)0;
+		while (true) {
+			if (esize != 0 && stLast == 1 && nLast > 0) {
+				memcpy((char*)out.data() + dst * esize,
+				       (const char*)data + srcOff * esize,
+				       (size_t)nLast * esize);
+				dst += (size_t)nLast;
+			} else {
+				size_t o = srcOff;
+				for (int j = 0; j < nLast; ++j) {
+					viewStoreLane(out, dst++, data, type, o);
+					o += stLast;
+				}
+			}
+			int d = last - 1;
+			for (; d >= 0; --d) {
+				coord[d]++;
+				srcOff += strides.get(d);
+				if (coord[d] < shape.get(d))
+					break;
+				srcOff -= (size_t)shape.get(d) * strides.get(d);
+				coord[d] = 0;
+			}
+			if (d < 0)
+				break;
+		}
+		return out;
+	}
+
+	for (size_t i = 0; i < n; ++i)
+		viewStoreLane(out, i, data, type, elementOffset(i));
 	return out;
 }
 
@@ -1035,34 +1105,11 @@ NDArray NDArrayView::copy() const {
 // Packed ints widen into Acc (INT3 3*3 → 9). operator* wrap-mul is unchanged.
 
 static bool viewIsPacked(const NDArrayView& v) {
-	const ArrayList<int>& shape = v.getShape();
-	const ArrayList<size_t>& strides = v.getStrides();
-	size_t expect = 1;
-	for (int d = shape.size() - 1; d >= 0; --d) {
-		if (shape.get(d) <= 1)
-			continue;
-		if (d >= strides.size() || strides.get(d) != expect)
-			return false;
-		expect *= (size_t)shape.get(d);
-	}
-	return true;
+	return v.isContiguous();
 }
 
 static size_t viewElemOffset(const NDArrayView& v, size_t flat) {
-	if (viewIsPacked(v))
-		return v.getOffset() + flat;
-	const ArrayList<int>& shape = v.getShape();
-	const ArrayList<size_t>& strides = v.getStrides();
-	size_t o = v.getOffset();
-	size_t r = flat;
-	for (int d = shape.size() - 1; d >= 0; --d) {
-		int dim = shape.get(d);
-		size_t c = (dim > 0) ? (r % (size_t)dim) : 0;
-		if (dim > 0)
-			r /= (size_t)dim;
-		o += c * ((d < strides.size()) ? strides.get(d) : (size_t)0);
-	}
-	return o;
+	return v.elementOffset(flat);
 }
 
 static void requireScoreLength(const NDArrayView& a, const NDArrayView& b, const char* what) {

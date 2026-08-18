@@ -213,13 +213,24 @@ static void advisePanel(const void* base, size_t elemBytes, int lda,
 	memoryAdviseWillNeed((void*)p, bytes);
 }
 
-// Contiguous packed [rows, cols] (offset 0, unit last stride). lda == cols.
+// Contiguous packed [rows, cols] (unit last stride; nonzero element offset ok).
 static bool isPackedContig2d(const NDArrayView& v, int rows, int cols) {
 	if (!v.data() || v.getShape().size() != 2)
 		return false;
 	if (v.getShape().get(0) != rows || v.getShape().get(1) != cols)
 		return false;
 	return v.isContiguous();
+}
+
+/** First logical element of a contiguous view. Packed types only if offset == 0. */
+static const void* contigElemPtr(const NDArrayView& v) {
+	const void* base = v.data();
+	if (!base)
+		return nullptr;
+	const size_t es = denseElemSize(v.getType());
+	if (es == 0)
+		return v.getOffset() == 0 ? base : nullptr;
+	return (const char*)base + v.getOffset() * es;
 }
 
 
@@ -1891,8 +1902,12 @@ static NDArray gemmRaw(NDArrayType type, const void* ap, int lda, const void* bp
 
 static NDArray gemmViews2d(const NDArrayView& a, const NDArrayView& b, int M, int N, int K,
                            bool wrapA, bool wrapB) {
-	if (isPackedContig2d(a, M, K) && isPackedContig2d(b, K, N))
-		return gemmRaw(a.getType(), a.data(), K, b.data(), N, M, N, K, wrapA, wrapB);
+	if (isPackedContig2d(a, M, K) && isPackedContig2d(b, K, N)) {
+		const void* ap = contigElemPtr(a);
+		const void* bp = contigElemPtr(b);
+		if (ap && bp)
+			return gemmRaw(a.getType(), ap, K, bp, N, M, N, K, wrapA, wrapB);
+	}
 	NDArray ad = dense2d(a, M, K, 1, 0);
 	NDArray bd = dense2d(b, K, N, 1, 0);
 	return gemmRaw(a.getType(), ad.data(), K, bd.data(), N, M, N, K, false, false);
@@ -2065,14 +2080,14 @@ NDArray ndmatmul(const NDArrayView& a, const NDArrayView& b) {
 		const void* bp;
 		if (aPlane) {
 			ap = (const char*)a.data() +
-			     (size_t)ab * (size_t)g.M * (size_t)g.K * es;
+			     (a.getOffset() + (size_t)ab * (size_t)g.M * (size_t)g.K) * es;
 		} else {
 			ad = dense2d(a, g.M, g.K, aBatchDim, ab);
 			ap = ad.data();
 		}
 		if (bPlane) {
 			bp = (const char*)b.data() +
-			     (size_t)bb * (size_t)g.K * (size_t)g.N * es;
+			     (b.getOffset() + (size_t)bb * (size_t)g.K * (size_t)g.N) * es;
 		} else {
 			bd = dense2d(b, g.K, g.N, bBatchDim, bb);
 			bp = bd.data();

@@ -87,39 +87,6 @@ class NDArray;
 class NDArrayView;
 
 
-/** Mutable chained index proxy: a[i][j] = v / T(a[i][j]). Full rank required for R/W. */
-class NDArrayRef {
-public:
-	NDArrayRef(NDArray* parent, ArrayList<int> indices);
-	NDArrayRef operator[](int i);
-
-	template <typename T>
-	operator T() const;
-
-	template <typename T>
-	NDArrayRef& operator=(const T& value);
-
-private:
-	NDArray* parent;
-	ArrayList<int> indices;
-};
-
-
-/** Const chained index proxy. */
-class NDArrayCRef {
-public:
-	NDArrayCRef(const NDArray* parent, ArrayList<int> indices);
-	NDArrayCRef operator[](int i) const;
-
-	template <typename T>
-	operator T() const;
-
-private:
-	const NDArray* parent;
-	ArrayList<int> indices;
-};
-
-
 /**
  * Non-owning (shared-buffer) view with independent shape/strides.
  * Survives destruction of the original NDArray via sp<> refcount.
@@ -143,7 +110,36 @@ public:
 	static NDArrayView wrap(const void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type);
 
 	size_t numElements() const;
-	bool isContiguous() const;
+	/**
+	 * Dense row-major unit strides. A nonzero element `offset` is allowed
+	 * (contiguous row slice). Broadcast (stride 0) and gaps are not.
+	 */
+	bool isContiguous() const {
+		size_t expect = 1;
+		for (int d = shape.size() - 1; d >= 0; --d) {
+			if (shape.get(d) <= 1)
+				continue;
+			if (d >= strides.size() || strides.get(d) != expect)
+				return false;
+			expect *= (size_t)shape.get(d);
+		}
+		return true;
+	}
+	/** Buffer element index of dense flat `i` (offset + i when contiguous). */
+	size_t elementOffset(size_t flat) const {
+		if (isContiguous())
+			return offset + flat;
+		size_t o = offset;
+		size_t r = flat;
+		for (int d = shape.size() - 1; d >= 0; --d) {
+			int dim = shape.get(d);
+			size_t c = (dim > 0) ? (r % (size_t)dim) : 0;
+			if (dim > 0)
+				r /= (size_t)dim;
+			o += c * ((d < strides.size()) ? strides.get(d) : (size_t)0);
+		}
+		return o;
+	}
 	bool isBroadcastableTo(const ArrayList<int>& targetShape) const;
 	NDArrayView broadcastTo(const ArrayList<int>& targetShape) const;
 	/** Contiguous reshape when product matches; otherwise throws. */
@@ -234,6 +230,42 @@ private:
 
 class NDArray {
 public:
+	/** Max rank for [] / initializer-list get/set; higher rank uses ArrayList overloads. */
+	static constexpr int kMaxRank = 16;
+
+	/** Mutable chained index proxy: a[i][j] = v / T(a[i][j]). Full rank required for R/W. */
+	class Ref {
+	public:
+		Ref(NDArray* parent, int first);
+		Ref operator[](int i);
+
+		template <typename T>
+		operator T() const;
+
+		template <typename T>
+		Ref& operator=(const T& value);
+
+	private:
+		NDArray* parent;
+		int idx[kMaxRank];
+		int rank;
+	};
+
+	/** Const chained index proxy. */
+	class CRef {
+	public:
+		CRef(const NDArray* parent, int first);
+		CRef operator[](int i) const;
+
+		template <typename T>
+		operator T() const;
+
+	private:
+		const NDArray* parent;
+		int idx[kMaxRank];
+		int rank;
+	};
+
 	/** Empty: shape {0}, type F32, no heap buffer. */
 	NDArray();
 	NDArray(ArrayList<int> shape, NDArrayType type);
@@ -399,8 +431,8 @@ public:
 	NDArray gemv(const NDArray& x) const;
 	NDArray gemv(const NDArrayView& x) const;
 
-	NDArrayRef operator[](int i);
-	NDArrayCRef operator[](int i) const;
+	Ref operator[](int i);
+	CRef operator[](int i) const;
 
 	/** Runtime multi-index (rank = shape.size()). */
 	template <typename T>
@@ -419,12 +451,26 @@ public:
 
 	template <typename T>
 	T get(std::initializer_list<int> indices) const {
-		return get<T>(ArrayList<int>(indices));
+		const int r = (int)indices.size();
+		if (r > kMaxRank)
+			throw std::out_of_range("NDArray::get - rank exceeds kMaxRank");
+		int tmp[kMaxRank];
+		int n = 0;
+		for (int x : indices)
+			tmp[n++] = x;
+		return getAtOffset<T>(computeOffset(tmp, n));
 	}
 
 	template <typename T>
 	void set(std::initializer_list<int> indices, const T& value) {
-		set(ArrayList<int>(indices), value);
+		const int r = (int)indices.size();
+		if (r > kMaxRank)
+			throw std::out_of_range("NDArray::set - rank exceeds kMaxRank");
+		int tmp[kMaxRank];
+		int n = 0;
+		for (int x : indices)
+			tmp[n++] = x;
+		setAtOffset(computeOffset(tmp, n), value);
 	}
 
 	/** Flat element index in dense row-major order. */
@@ -1070,12 +1116,11 @@ private:
 	/** .cpp-only helpers that need access to storage pointers. */
 	struct Impl;
 	friend struct Impl;
-	friend class NDArrayRef;
-	friend class NDArrayCRef;
 	friend class NDArrayView;
 
 	size_t initialize();
 	size_t computeOffset(const ArrayList<int>& indices) const;
+	size_t computeOffset(const int* indices, int rank) const;
 	void rebindPointers();
 	void ensureWritable();
 	static ArrayList<size_t> rowMajorStrides(const ArrayList<int>& shape);
@@ -1343,6 +1388,9 @@ private:
 	};
 };
 
+using NDArrayRef = NDArray::Ref;
+using NDArrayCRef = NDArray::CRef;
+
 
 template <typename T>
 static bool ndarrayDataTypeMatches(NDArrayType t) {
@@ -1383,19 +1431,19 @@ T* NDArray::data() {
 // ---- proxy template methods (need NDArray complete) -------------------------
 
 template <typename T>
-NDArrayRef::operator T() const {
-	return parent->get<T>(indices);
+NDArray::Ref::operator T() const {
+	return parent->getAtOffset<T>(parent->computeOffset(idx, rank));
 }
 
 template <typename T>
-NDArrayRef& NDArrayRef::operator=(const T& value) {
-	parent->set(indices, value);
+NDArray::Ref& NDArray::Ref::operator=(const T& value) {
+	parent->setAtOffset(parent->computeOffset(idx, rank), value);
 	return *this;
 }
 
 template <typename T>
-NDArrayCRef::operator T() const {
-	return parent->get<T>(indices);
+NDArray::CRef::operator T() const {
+	return parent->getAtOffset<T>(parent->computeOffset(idx, rank));
 }
 
 // View element access: defined in NDArray.cpp (uses shared buffer load helpers)
@@ -1410,19 +1458,7 @@ template <typename T>
 T NDArrayView::getFlat(size_t flat) const {
 	if (flat >= numElements())
 		throw std::out_of_range("NDArrayView::getFlat - index out of range");
-	// Map dense flat index of *view shape* to buffer element offset via multi-index
-	ArrayList<int> coords;
-	for (int i = 0; i < shape.size(); ++i)
-		coords.add(0);
-	size_t r = flat;
-	for (int d = shape.size() - 1; d >= 0; --d) {
-		int dim = shape.get(d);
-		int c = dim > 0 ? (int)(r % (size_t)dim) : 0;
-		coords.set(d, c);
-		if (dim > 0)
-			r /= (size_t)dim;
-	}
-	size_t elemOff = computeOffset(coords);
+	const size_t elemOff = elementOffset(flat);
 	if constexpr (std::is_same_v<T, uint256_t>)
 		return ndarray_detail::viewLoadU256(*this, elemOff);
 	else if constexpr (std::is_floating_point_v<T>)

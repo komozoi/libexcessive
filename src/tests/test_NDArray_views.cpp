@@ -4,6 +4,7 @@
 //
 // All rights reserved.
 
+#include <cstring>
 #include <gtest/gtest.h>
 #include <stdexcept>
 
@@ -147,4 +148,67 @@ TEST(NDArray_views, BroadcastProductOverflow_Throws) {
 	NDArray s({}, F32);
 	EXPECT_THROW(s.broadcastTo(ArrayList<int>({1 << 30, 1 << 30, 1 << 10})),
 	             std::invalid_argument);
+}
+
+TEST(NDArray_views, RowSlice_OffsetNonzero_IsContiguous) {
+	NDArray m({3, 4}, ArrayList({
+		0.0f, 1.0f, 2.0f, 3.0f,
+		4.0f, 5.0f, 6.0f, 7.0f,
+		8.0f, 9.0f, 10.0f, 11.0f
+	}));
+	NDArrayView row(m.view().sharedBuffer(), ArrayList<int>({4}),
+	                ArrayList<size_t>({(size_t)1}), 4, F32);
+	EXPECT_TRUE(row.isContiguous());
+	EXPECT_EQ(row.getOffset(), 4u);
+	EXPECT_FLOAT_EQ(row.getFlat<float>(0), 4.0f);
+	EXPECT_FLOAT_EQ(row.getFlat<float>(3), 7.0f);
+
+	NDArrayView reshaped = row.reshape(ArrayList<int>({2, 2}));
+	EXPECT_TRUE(reshaped.isContiguous());
+	EXPECT_EQ(reshaped.getOffset(), 4u);
+	EXPECT_FLOAT_EQ(reshaped.get<float>(ArrayList<int>({0, 0})), 4.0f);
+	EXPECT_FLOAT_EQ(reshaped.get<float>(ArrayList<int>({1, 1})), 7.0f);
+}
+
+TEST(NDArray_views, ContiguousCopy_MatchesOwnerBytes) {
+	NDArray m({2, 4}, ArrayList({
+		1.0f, 2.0f, 3.0f, 4.0f,
+		5.0f, 6.0f, 7.0f, 8.0f
+	}));
+	NDArrayView row(m.view().sharedBuffer(), ArrayList<int>({4}),
+	                ArrayList<size_t>({(size_t)1}), 4, F32);
+	NDArray c = row.copy();
+	EXPECT_TRUE(c.ownsStorage());
+	EXPECT_EQ(c.byteSize(), 4 * sizeof(float));
+	EXPECT_EQ(memcmp(c.data(), (const float*)m.data() + 4, 4 * sizeof(float)), 0);
+	EXPECT_FLOAT_EQ(c.getFlat<float>(0), 5.0f);
+	EXPECT_FLOAT_EQ(c.getFlat<float>(3), 8.0f);
+	c.setFlat(0, 99.0f);
+	EXPECT_FLOAT_EQ(m.get<float>({1, 0}), 5.0f);
+}
+
+TEST(NDArray_views, ColumnSlice_NotContiguous) {
+	NDArray m({2, 3}, ArrayList({
+		1.0f, 2.0f, 3.0f,
+		4.0f, 5.0f, 6.0f
+	}));
+	NDArrayView col(m.view().sharedBuffer(), ArrayList<int>({2}),
+	                ArrayList<size_t>({(size_t)3}), 1, F32);
+	EXPECT_FALSE(col.isContiguous());
+	EXPECT_THROW(col.reshape(ArrayList<int>({2})), std::invalid_argument);
+	NDArray c = col.copy();
+	EXPECT_FLOAT_EQ(c.getFlat<float>(0), 2.0f);
+	EXPECT_FLOAT_EQ(c.getFlat<float>(1), 5.0f);
+}
+
+TEST(NDArray_views, GetFlat_StridedNoHeapCoords) {
+	NDArray m({2, 3}, ArrayList({
+		1.0f, 2.0f, 3.0f,
+		4.0f, 5.0f, 6.0f
+	}));
+	NDArrayView col(m.view().sharedBuffer(), ArrayList<int>({2}),
+	                ArrayList<size_t>({(size_t)3}), 1, F32);
+	EXPECT_FALSE(col.isContiguous());
+	EXPECT_FLOAT_EQ(col.getFlat<float>(0), 2.0f);
+	EXPECT_FLOAT_EQ(col.getFlat<float>(1), 5.0f);
 }

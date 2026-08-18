@@ -61,3 +61,13 @@ TEST(NDArray_indexing, Scalar_EmptyIndices) {
 	s.set(empty, 2.5f);
 	EXPECT_FLOAT_EQ(s.get<float>({}), 2.5f);
 }
+
+TEST(NDArray_indexing, InitializerList_NoArrayList) {
+	NDArray m({2, 3}, F32);
+	m.set({1, 2}, 9.0f);
+	EXPECT_FLOAT_EQ(m.get<float>({1, 2}), 9.0f);
+	m[0][0] = 1.0f;
+	m[1][1] = 2.0f;
+	EXPECT_FLOAT_EQ((float)m[0][0], 1.0f);
+	EXPECT_FLOAT_EQ((float)m[1][1], 2.0f);
+}

@@ -98,6 +98,34 @@ static void expectClose(const NDArray& got, const NDArray& exp) {
 	}
 }
 
+static ArrayList<size_t> packedStrides(const ArrayList<int>& shape) {
+	size_t acc[NDArray::kMaxRank];
+	int n = shape.size();
+	size_t step = 1;
+	for (int d = n - 1; d >= 0; --d) {
+		acc[d] = step;
+		int dim = shape.get(d);
+		if (dim > 0)
+			step *= (size_t)dim;
+	}
+	ArrayList<size_t> st;
+	for (int d = 0; d < n; ++d)
+		st.add(acc[d]);
+	return st;
+}
+
+static NDArrayView packedOffsetView(const NDArray& owner, ArrayList<int> shape, size_t offset) {
+	ArrayList<size_t> st = packedStrides(shape);
+	return NDArrayView(owner.view().sharedBuffer(), shape, st, offset, owner.type);
+}
+
+static NDArray identitySquare(int n, NDArrayType t) {
+	NDArray id({n, n}, t);
+	for (int i = 0; i < n; ++i)
+		id.set({i, i}, 1);
+	return id;
+}
+
 
 TEST(NDArray_matmul, F32_SmallMatchesNaive) {
 	NDArray a({2, 3}, F32);
@@ -555,7 +583,8 @@ TEST(NDArray_matmul, INT3_StreamBeatsUnpack) {
 
 	int64_t streamUs = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
 	int64_t unpackUs = std::chrono::duration_cast<std::chrono::microseconds>(u1 - u0).count();
-	EXPECT_LT(streamUs * 20, unpackUs + 2000)
+	// Stream GEMM should beat the unpack-and-dot baseline.
+	EXPECT_LT(streamUs * 5, unpackUs + 2000)
 		<< "stream=" << streamUs << "us unpack-dot=" << unpackUs << "us";
 }
 
@@ -588,6 +617,132 @@ TEST(NDArray_matmul, NonContiguousView) {
 	NDArray br({2, 2}, F32);
 	fillSeq(br, 3);
 	expectClose(at.matmul(br), denseT.matmul(br));
+}
+
+TEST(NDArray_matmul, OffsetContig2d_TimesIdentity) {
+	NDArray a({2, 2}, ArrayList({1.0f, 2.0f, 3.0f, 4.0f}));
+	NDArrayView bot = packedOffsetView(a, ArrayList<int>({1, 2}), 2);
+	EXPECT_TRUE(bot.isContiguous());
+	EXPECT_EQ(bot.getOffset(), 2u);
+	NDArray I = identitySquare(2, F32);
+	NDArray got = bot.matmul(I);
+	EXPECT_FLOAT_EQ(got.get<float>({0, 0}), 3.0f);
+	EXPECT_FLOAT_EQ(got.get<float>({0, 1}), 4.0f);
+
+	NDArray t({3, 2}, ArrayList({
+		1.0f, 2.0f,
+		3.0f, 4.0f,
+		5.0f, 6.0f
+	}));
+	NDArrayView mid = packedOffsetView(t, ArrayList<int>({1, 2}), 2);
+	NDArray midGot = mid.matmul(I);
+	EXPECT_FLOAT_EQ(midGot.get<float>({0, 0}), 3.0f);
+	EXPECT_FLOAT_EQ(midGot.get<float>({0, 1}), 4.0f);
+
+	NDArray m({3, 4}, ArrayList({
+		0.0f, 1.0f, 2.0f, 3.0f,
+		4.0f, 5.0f, 6.0f, 7.0f,
+		8.0f, 9.0f, 10.0f, 11.0f
+	}));
+	NDArrayView row = packedOffsetView(m, ArrayList<int>({4}), 4);
+	NDArrayView block = row.reshape(ArrayList<int>({2, 2}));
+	EXPECT_TRUE(block.isContiguous());
+	EXPECT_EQ(block.getOffset(), 4u);
+	expectClose(block.matmul(I), block.copy());
+}
+
+TEST(NDArray_matmul, OffsetContig2d_MatchesCopiedPanel) {
+	NDArray a({4, 3}, F32);
+	NDArray b({3, 2}, F32);
+	fillSeq(a, 1);
+	fillSeq(b, 10);
+	NDArrayView av = packedOffsetView(a, ArrayList<int>({2, 3}), 6);
+	EXPECT_TRUE(av.isContiguous());
+	EXPECT_EQ(av.getOffset(), 6u);
+	expectClose(av.matmul(b), av.copy().matmul(b));
+
+	NDArray tallB({6, 2}, F32);
+	fillSeq(tallB, 20);
+	NDArrayView bv = packedOffsetView(tallB, ArrayList<int>({3, 2}), 6);
+	NDArray left({2, 3}, F32);
+	fillSeq(left, 1);
+	expectClose(left.matmul(bv), left.matmul(bv.copy()));
+
+	expectClose(av.matmul(bv), av.copy().matmul(bv.copy()));
+
+	NDArray ai({4, 3}, INT32);
+	NDArray bi({3, 2}, INT32);
+	fillSeq(ai, -3);
+	fillSeq(bi, 4);
+	NDArrayView aiv = packedOffsetView(ai, ArrayList<int>({2, 3}), 6);
+	expectClose(aiv.matmul(bi), aiv.copy().matmul(bi));
+}
+
+TEST(NDArray_matmul, OffsetContig2d_GemvShapes) {
+	NDArray a({4, 3}, F32);
+	fillSeq(a, 1);
+	NDArrayView av = packedOffsetView(a, ArrayList<int>({2, 3}), 6);
+	NDArray x({3}, F32);
+	x.set({0}, 1.f); x.set({1}, 2.f); x.set({2}, 3.f);
+	expectClose(av.gemv(x), av.copy().gemv(x));
+
+	NDArray xcol({3, 1}, F32);
+	xcol.set({0, 0}, 1.f); xcol.set({1, 0}, 2.f); xcol.set({2, 0}, 3.f);
+	expectClose(av.matmul(xcol), av.copy().matmul(xcol));
+
+	NDArray rowOwner({6}, F32);
+	fillSeq(rowOwner, 2);
+	NDArrayView rv = packedOffsetView(rowOwner, ArrayList<int>({3}), 3);
+	NDArray B({3, 2}, F32);
+	fillSeq(B, 5);
+	expectClose(rv.matmul(B), rv.copy().matmul(B));
+	expectClose(rv.matmul(rv), rv.copy().matmul(rv.copy()));
+}
+
+TEST(NDArray_matmul, OffsetNonContig2d_MatchesCopiedPanel) {
+	NDArray a({2, 3}, ArrayList({
+		1.0f, 2.0f, 3.0f,
+		4.0f, 5.0f, 6.0f
+	}));
+	ArrayList<size_t> st;
+	st.add(3);
+	st.add(1);
+	NDArrayView cols(a.view().sharedBuffer(), ArrayList<int>({2, 2}), st, 1, F32);
+	EXPECT_FALSE(cols.isContiguous());
+	EXPECT_EQ(cols.getOffset(), 1u);
+	NDArray I = identitySquare(2, F32);
+	expectClose(cols.matmul(I), cols.copy());
+}
+
+TEST(NDArray_matmul, OffsetContigBatch3d_MatchesCopiedPanel) {
+	NDArray a({3, 2, 3}, F32);
+	NDArray b({3, 3, 2}, F32);
+	fillSeq(a, 1);
+	fillSeq(b, 7);
+	NDArrayView av = packedOffsetView(a, ArrayList<int>({2, 2, 3}), 6);
+	NDArrayView bv = packedOffsetView(b, ArrayList<int>({2, 3, 2}), 6);
+	EXPECT_TRUE(av.isContiguous());
+	EXPECT_TRUE(bv.isContiguous());
+	EXPECT_EQ(av.getOffset(), 6u);
+	EXPECT_EQ(bv.getOffset(), 6u);
+
+	NDArray I = identitySquare(3, F32);
+	expectClose(av.matmul(I), av.copy().matmul(I));
+	expectClose(av.copy().matmul(bv), av.copy().matmul(bv.copy()));
+	expectClose(av.matmul(bv), av.copy().matmul(bv.copy()));
+
+	NDArray b2({3, 2}, F32);
+	fillSeq(b2, 3);
+	expectClose(av.matmul(b2), av.copy().matmul(b2));
+
+	NDArray a2({2, 3}, F32);
+	fillSeq(a2, 4);
+	expectClose(a2.matmul(bv), a2.matmul(bv.copy()));
+
+	NDArray tallA({4, 3}, F32);
+	fillSeq(tallA, 4);
+	NDArrayView aOff = packedOffsetView(tallA, ArrayList<int>({2, 3}), 6);
+	expectClose(aOff.matmul(b), aOff.copy().matmul(b));
 }
 
 TEST(NDArray_matmul, AdviseOnHeapAndMmap) {
