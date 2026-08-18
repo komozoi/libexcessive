@@ -147,6 +147,22 @@ struct is_sp<sp<T>> : std::true_type {};
  *
  * Const/volatile may be added but not removed.
  */
+// is_polymorphic / is_base_of need complete types. Do not instantiate them
+// when From and To are the same (self-referential `struct N { sp<N> next; }`).
+template<typename From, typename To, bool Enable>
+struct sp_can_downcast : std::false_type {};
+
+template<typename From, typename To>
+struct sp_can_downcast<From, To, true> {
+	using FromBare = std::remove_cv_t<From>;
+	using ToBare = std::remove_cv_t<To>;
+	static constexpr bool value =
+		std::is_base_of<FromBare, ToBare>::value &&
+		std::is_polymorphic<FromBare>::value &&
+		(std::is_const<From>::value ? std::is_const<To>::value : true) &&
+		(std::is_volatile<From>::value ? std::is_volatile<To>::value : true);
+};
+
 template<typename From, typename To>
 struct sp_can_cast {
 private:
@@ -158,11 +174,7 @@ public:
 
 	static constexpr bool downcast =
 		!upcast &&
-		std::is_base_of<FromBare, ToBare>::value &&
-		!std::is_same<FromBare, ToBare>::value &&
-		std::is_polymorphic<FromBare>::value &&
-		(std::is_const<From>::value ? std::is_const<To>::value : true) &&
-		(std::is_volatile<From>::value ? std::is_volatile<To>::value : true);
+		sp_can_downcast<From, To, !std::is_same<FromBare, ToBare>::value>::value;
 
 	static constexpr bool value = upcast || downcast;
 };
