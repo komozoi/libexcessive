@@ -13,6 +13,15 @@
 #include "alloc/pointer.h"
 
 
+TEST(NDArray_views, DefaultView_IsEmpty) {
+	NDArrayView v;
+	EXPECT_EQ(v.numElements(), (size_t)0);
+	EXPECT_EQ(v.getShape().size(), 1);
+	EXPECT_EQ(v.getShape().get(0), 0);
+	EXPECT_EQ(v.sharedBuffer().get(), nullptr);
+	EXPECT_THROW(v.getFlat<float>(0), std::out_of_range);
+}
+
 TEST(NDArray_views, GetFlat_INT64_PreservesAbove2p53) {
 	const int64_t big = (int64_t)1 << 60;
 	NDArray a({2}, INT64);

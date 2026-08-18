@@ -113,6 +113,24 @@ TEST(NDArray_int3, MinimumMaximumPowMod_StayINT3) {
 	EXPECT_THROW(one.mod(z), std::invalid_argument);
 }
 
+TEST(NDArray_int3, DivAllPairs_TowardZero) {
+	for (int av = -4; av <= 3; ++av) {
+		for (int bv = -4; bv <= 3; ++bv) {
+			NDArray a({1}, INT3);
+			NDArray b({1}, INT3);
+			a.set({0}, av);
+			b.set({0}, bv);
+			if (bv == 0) {
+				EXPECT_THROW(a / b, std::invalid_argument);
+				continue;
+			}
+			int q = av / bv;
+			EXPECT_EQ((a / b).get<int>({0}), wrap3(q))
+				<< av << " / " << bv;
+		}
+	}
+}
+
 TEST(NDArray_int3, DivByZero_Throws) {
 	NDArray a({2}, INT3);
 	NDArray b({2}, INT3);
