@@ -22,6 +22,7 @@
 
 #include "fs/FdHandle.h"
 #include "ds/Bytestring.h"
+#include "ds/ArrayList.h"
 #include "universaltime.h"
 
 
@@ -79,7 +80,7 @@ TEST(BytestringTest, WriteAndReadBackFromFile) {
 
 TEST(BytestringTest, WriteAndReadBackFromFileMany) {
 	int count = 1000;
-	std::vector<Bytestring> strings;
+	ArrayList<Bytestring> strings;
 
 	std::minstd_rand rng(1234);
 	std::uniform_real_distribution<double> lengthDistLog(0.0, 20.0);
@@ -87,13 +88,14 @@ TEST(BytestringTest, WriteAndReadBackFromFileMany) {
 
 	for (int i = 0; i < count; i++) {
 		size_t len = (size_t)pow(2, lengthDistLog(rng));
-		std::vector<uint8_t> buffer(len);
-		for (size_t j = 0; j < len; ++j) {
-			buffer[j] = fastEntropy & 0xFF;
+		ArrayList<uint8_t> buffer;
+		buffer.resize((int)len);
+		for (int j = 0; j < (int)len; ++j) {
+			buffer.get(j) = (uint8_t)(fastEntropy & 0xFF);
 			fastEntropy = ((fastEntropy >> 13) ^ (fastEntropy * 991)) + 7;
 		}
 
-		strings.emplace_back(Bytestring(buffer.data(), buffer.size()));
+		strings.add(Bytestring(buffer.getMemory(), (size_t)buffer.size()));
 	}
 
 	const char* path = TEST_FILE_PATH "WriteAndReadBackFromFileMany.bin";

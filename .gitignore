@@ -5,3 +5,4 @@
 # Object files and build directory
 *.o
 cmake-build-debug
+/cmake-build-rel/

@@ -638,7 +638,7 @@ TEST_F(BTreeIteratorTest, MultipleElements) {
 	tree.insert(20);
 	tree.insert(15);
 
-	std::vector<int> expected = {5, 10, 15, 20};
+	ArrayList<int> expected({5, 10, 15, 20});
 	auto it = tree.begin();
 	for (int val : expected) {
 		EXPECT_EQ(*it, val);

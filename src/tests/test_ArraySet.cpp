@@ -59,7 +59,7 @@ TEST(ArraySetTest, CapacityConstructor) {
 
 TEST(ArraySetTest, ArrayConstructor) {
 	int arr[] = {5, 3, 4, 3};
-	ArraySet<int> s(arr, 4);
+	ArraySet s(arr, 4);
 	EXPECT_EQ(s.size(), 3);
 	EXPECT_EQ(s.get(0), 3);
 	EXPECT_EQ(s.get(1), 4);
@@ -163,7 +163,7 @@ TEST(ArraySetTest, Clear) {
 
 TEST(ArraySetTest, AddFromGeneric) {
 	ArraySet<int> s;
-	ArrayList<int> list{1, 2, 3};
+	ArrayList list{1, 2, 3};
 	s.addFrom(list);
 	EXPECT_EQ(s.size(), 3);
 	EXPECT_EQ(s.get(0), 1);
@@ -222,12 +222,12 @@ TEST(ArraySetTest, GetMemory) {
 
 TEST(ArraySetTest, ReverseIteration) {
 	int arr[] = {1, 2, 3};
-	ArraySet<int> set(arr, 3);
-	std::vector<int> expected{3, 2, 1};
+	ArraySet set(arr, 3);
+	ArrayList expected({3, 2, 1});
 
 	int count = 0;
 	for (int element: set.reverse()) {
-		EXPECT_EQ(element, expected[count]);
+		EXPECT_EQ(element, expected.get(count));
 		count++;
 	}
 	EXPECT_EQ(count, 3);
@@ -279,10 +279,10 @@ TEST(ArraySetTest, ResizeNoDestructor) {
 
 TEST(ArraySetTest, ConstReverseIteration) {
 	int arr[] = {1, 2, 3};
-	ArraySet<int> set(arr, 3);
+	ArraySet set(arr, 3);
 	const ArraySet<int>& cset = set;
 
-	ArrayList<int> expected{3, 2, 1};
+	ArrayList expected{3, 2, 1};
 	int count = 0;
 	for (int element: cset.reverse()) {
 		EXPECT_EQ(element, expected.get(count));

@@ -22,12 +22,12 @@
 #include <mutex>
 #include <atomic>
 #include <condition_variable>
-#include <unordered_set>
 #include <sys/poll.h>
 #include "fcntl.h"
 #include "unistd.h"
 
 #include "ds/HashMap.h"
+#include "ds/HashSet.h"
 #include "ds/Queue.h"
 
 
@@ -45,7 +45,7 @@ public:
 	HashMap<int, FdHandleData*>* fileDescriptors = nullptr;
 	std::mutex mutex;
 	std::condition_variable cv;
-	std::unordered_set<int> closing;
+	HashSet<int> closing = HashSet<int>(16);
 
 	Map<int, FdHandleData*>* getFds() {
 		if (fileDescriptors == nullptr)
@@ -87,12 +87,12 @@ public:
 			if (refs > 0 || key < 0)
 				return;
 			state.getFds()->remove(key);
-			state.closing.insert(key);
+			state.closing.add(key);
 		}
 		destroy();
 		{
 			std::lock_guard<std::mutex> lock(state.mutex);
-			state.closing.erase(key);
+			state.closing.remove(key);
 			state.cv.notify_all();
 		}
 	}
@@ -417,7 +417,7 @@ static FdHandleData& getHandleData(int fd) {
 }
 
 static void waitFdNotClosing(std::unique_lock<std::mutex>& lock, int fd) {
-	while (state.closing.count(fd) != 0)
+	while (state.closing.contains(fd))
 		state.cv.wait(lock);
 }
 

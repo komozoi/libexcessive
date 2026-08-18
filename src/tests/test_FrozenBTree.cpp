@@ -22,6 +22,7 @@
 
 #include "fs/FrozenBTree.h"
 #include "ds/ArrayList.h"
+#include "ds/HashSet.h"
 
 
 namespace {
@@ -212,11 +213,11 @@ TEST(FrozenBTreeTest, BuildRandomizedThenSorted) {
 	std::uniform_int_distribution<int> dist(-100000, 100000);
 
 	ArrayList<int> items;
-	std::vector<int> seen;
+	HashSet<int> seen(2048);
 	while (items.size() < 1500) {
 		int v = dist(rng);
-		if (std::find(seen.begin(), seen.end(), v) == seen.end()) {
-			seen.push_back(v);
+		if (!seen.contains(v)) {
+			seen.add(v);
 			items.add(v);
 		}
 	}
