@@ -44,16 +44,36 @@ target_include_directories(excessive
         $<INSTALL_INTERFACE:include>
 )
 
-# INT3 mul/div (inlined from src/ndarray_int3.h into NDArray.cpp): enable
-# AVX-512 VPERMB path when the toolchain supports it.
+# INT3 mul/div (NDArray.cpp) and packed score kernels (ndarray_score.cpp):
+# compile with the best ISA the toolchain can emit. Runtime dispatch is
+# compile-time via __AVX512F__ / __AVX2__ / __SSE2__ / __ARM_NEON.
 include(CheckCXXCompilerFlag)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64|i.86")
     check_cxx_compiler_flag("-mavx512f"             LIBEXCESSIVE_HAS_AVX512F)
     check_cxx_compiler_flag("-mavx512bw"            LIBEXCESSIVE_HAS_AVX512BW)
     check_cxx_compiler_flag("-mavx512vbmi"          LIBEXCESSIVE_HAS_AVX512VBMI)
+    check_cxx_compiler_flag("-mavx512dq"            LIBEXCESSIVE_HAS_AVX512DQ)
+    check_cxx_compiler_flag("-mavx512vpopcntdq"     LIBEXCESSIVE_HAS_AVX512VPOPCNT)
+    check_cxx_compiler_flag("-mavx2"                LIBEXCESSIVE_HAS_AVX2)
+    check_cxx_compiler_flag("-mfma"                 LIBEXCESSIVE_HAS_FMA)
+    set(_ndscore_flags "")
     if(LIBEXCESSIVE_HAS_AVX512F AND LIBEXCESSIVE_HAS_AVX512BW AND LIBEXCESSIVE_HAS_AVX512VBMI)
-        set_source_files_properties(src/NDArray.cpp PROPERTIES
-            COMPILE_FLAGS "-mavx512f -mavx512bw -mavx512vbmi")
+        set(_ndscore_flags "-mavx512f -mavx512bw -mavx512vbmi")
+        if(LIBEXCESSIVE_HAS_AVX512DQ)
+            set(_ndscore_flags "${_ndscore_flags} -mavx512dq")
+        endif()
+        if(LIBEXCESSIVE_HAS_AVX512VPOPCNT)
+            set(_ndscore_flags "${_ndscore_flags} -mavx512vpopcntdq")
+        endif()
+        set_source_files_properties(src/NDArray.cpp PROPERTIES COMPILE_FLAGS "${_ndscore_flags}")
+    elseif(LIBEXCESSIVE_HAS_AVX2)
+        set(_ndscore_flags "-mavx2")
+        if(LIBEXCESSIVE_HAS_FMA)
+            set(_ndscore_flags "${_ndscore_flags} -mfma")
+        endif()
+    endif()
+    if(_ndscore_flags)
+        set_source_files_properties(src/ndarray_score.cpp PROPERTIES COMPILE_FLAGS "${_ndscore_flags}")
     endif()
 endif()
 

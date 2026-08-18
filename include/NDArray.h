@@ -148,6 +148,34 @@ public:
 	NDArrayView reshape(const ArrayList<int>& newShape) const;
 	NDArray copy() const;
 
+	/**
+	 * Widening scores. Accumulator type is the template argument — not a
+	 * separate function per storage dtype. Products are widened into Acc
+	 * (INT3 3·3 is 9, not wrap-mul 1). No intermediate length-n array.
+	 *
+	 * Pair ops require equal numElements() (flat pairing). Broadcast first
+	 * if you need it. Contiguous same-type views take the packed fast path.
+	 *
+	 * Instantiated Acc: float, double, int32_t, int64_t, uint256_t.
+	 */
+	template <typename Acc>
+	Acc dot(const NDArrayView& other) const;
+	/** ||*this||² (widened). */
+	template <typename Acc>
+	Acc l2Squared() const;
+	/** ||*this − other||² (widened diffs). */
+	template <typename Acc>
+	Acc l2Squared(const NDArrayView& other) const;
+	/** sqrt(||*this||²) as Acc. */
+	template <typename Acc>
+	Acc l2Norm() const;
+	/** sqrt(||*this − other||²) as Acc. */
+	template <typename Acc>
+	Acc l2Norm(const NDArrayView& other) const;
+	/** Hamming distance. Both views must be BINARY. */
+	template <typename Acc>
+	Acc hamming(const NDArrayView& other) const;
+
 	template <typename T>
 	T get(const ArrayList<int>& indices) const;
 	template <typename T>
@@ -264,6 +292,27 @@ public:
 
 	/** True if this array allocated (or CoW-copied) its storage. False for wrap(). */
 	bool ownsStorage() const;
+
+	template <typename Acc>
+	Acc dot(const NDArray& other) const { return view().dot<Acc>(other.view()); }
+	template <typename Acc>
+	Acc dot(const NDArrayView& other) const { return view().dot<Acc>(other); }
+	template <typename Acc>
+	Acc l2Squared() const { return view().l2Squared<Acc>(); }
+	template <typename Acc>
+	Acc l2Squared(const NDArray& other) const { return view().l2Squared<Acc>(other.view()); }
+	template <typename Acc>
+	Acc l2Squared(const NDArrayView& other) const { return view().l2Squared<Acc>(other); }
+	template <typename Acc>
+	Acc l2Norm() const { return view().l2Norm<Acc>(); }
+	template <typename Acc>
+	Acc l2Norm(const NDArray& other) const { return view().l2Norm<Acc>(other.view()); }
+	template <typename Acc>
+	Acc l2Norm(const NDArrayView& other) const { return view().l2Norm<Acc>(other); }
+	template <typename Acc>
+	Acc hamming(const NDArray& other) const { return view().hamming<Acc>(other.view()); }
+	template <typename Acc>
+	Acc hamming(const NDArrayView& other) const { return view().hamming<Acc>(other); }
 
 	NDArrayRef operator[](int i);
 	NDArrayCRef operator[](int i) const;

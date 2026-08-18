@@ -10,12 +10,14 @@
 
 #include "../include/NDArray.h"
 #include "ndarray_int3.h"
+#include "ndarray_score.h"
 
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 #if defined(__AVX512F__)
@@ -895,6 +897,303 @@ NDArray NDArrayView::copy() const {
 	}
 	return out;
 }
+
+
+// ---- view scores: dot / L2 / Hamming ---------------------------------------
+// Fast path: same storage type, packed row-major (offset may be nonzero).
+// Generic path: per-element load via viewLoad*, still no length-n allocation.
+// Packed ints widen into Acc (INT3 3*3 → 9). operator* wrap-mul is unchanged.
+
+static bool viewIsPacked(const NDArrayView& v) {
+	const ArrayList<int>& shape = v.getShape();
+	const ArrayList<size_t>& strides = v.getStrides();
+	size_t expect = 1;
+	for (int d = shape.size() - 1; d >= 0; --d) {
+		if (shape.get(d) <= 1)
+			continue;
+		if (d >= strides.size() || strides.get(d) != expect)
+			return false;
+		expect *= (size_t)shape.get(d);
+	}
+	return true;
+}
+
+static size_t viewElemOffset(const NDArrayView& v, size_t flat) {
+	if (viewIsPacked(v))
+		return v.getOffset() + flat;
+	const ArrayList<int>& shape = v.getShape();
+	const ArrayList<size_t>& strides = v.getStrides();
+	size_t o = v.getOffset();
+	size_t r = flat;
+	for (int d = shape.size() - 1; d >= 0; --d) {
+		int dim = shape.get(d);
+		size_t c = (dim > 0) ? (r % (size_t)dim) : 0;
+		if (dim > 0)
+			r /= (size_t)dim;
+		o += c * ((d < strides.size()) ? strides.get(d) : (size_t)0);
+	}
+	return o;
+}
+
+static void requireScoreLength(const NDArrayView& a, const NDArrayView& b, const char* what) {
+	if (a.numElements() != b.numElements())
+		throw std::invalid_argument(std::string(what) + ": length mismatch");
+}
+
+template <typename Acc>
+static Acc accFromI64(int64_t v) {
+	if constexpr (std::is_same_v<Acc, uint256_t>)
+		return v < 0 ? uint256_t((int)v) : uint256_t((uint64_t)v);
+	else
+		return static_cast<Acc>(v);
+}
+
+template <typename Acc>
+static Acc accFromDouble(double v) {
+	if constexpr (std::is_same_v<Acc, uint256_t>)
+		return uint256_t(v);
+	else
+		return static_cast<Acc>(v);
+}
+
+template <typename Acc>
+static Acc accSqrt(Acc s) {
+	if constexpr (std::is_same_v<Acc, uint256_t>)
+		return uint256_t(std::sqrt(s.toDouble()));
+	else
+		return static_cast<Acc>(std::sqrt(static_cast<double>(s)));
+}
+
+enum class ScoreKind { Dot, L2Self, L2Pair };
+
+static NDScoreOp toNDScoreOp(ScoreKind kind) {
+	if (kind == ScoreKind::Dot)
+		return NDScoreOp::Dot;
+	if (kind == ScoreKind::L2Self)
+		return NDScoreOp::L2Self;
+	return NDScoreOp::L2Pair;
+}
+
+template <typename Acc>
+static Acc accFromKernelF32(float v) {
+	if constexpr (std::is_same_v<Acc, uint256_t>)
+		return uint256_t((double)v);
+	else
+		return static_cast<Acc>(v);
+}
+
+template <typename Acc>
+static Acc accFromKernelF64(double v) {
+	if constexpr (std::is_same_v<Acc, uint256_t>)
+		return uint256_t(v);
+	else
+		return static_cast<Acc>(v);
+}
+
+template <typename Acc>
+static Acc accFromKernelI64(int64_t v) {
+	return accFromI64<Acc>(v);
+}
+
+template <typename Acc>
+static Acc scoreGeneric(const NDArrayView& a, const NDArrayView* b, size_t n, ScoreKind kind) {
+	Acc acc{};
+	for (size_t i = 0; i < n; ++i) {
+		const size_t oa = viewElemOffset(a, i);
+		if (kind == ScoreKind::L2Self) {
+			if constexpr (std::is_floating_point_v<Acc>) {
+				Acc v = accFromDouble<Acc>(ndarray_detail::viewLoadDouble(a, oa));
+				acc += v * v;
+			} else {
+				Acc v = accFromI64<Acc>(ndarray_detail::viewLoadI64(a, oa));
+				acc += v * v;
+			}
+			continue;
+		}
+		const size_t ob = viewElemOffset(*b, i);
+		if constexpr (std::is_floating_point_v<Acc>) {
+			Acc va = accFromDouble<Acc>(ndarray_detail::viewLoadDouble(a, oa));
+			Acc vb = accFromDouble<Acc>(ndarray_detail::viewLoadDouble(*b, ob));
+			if (kind == ScoreKind::Dot)
+				acc += va * vb;
+			else {
+				Acc d = va - vb;
+				acc += d * d;
+			}
+		} else {
+			Acc va = accFromI64<Acc>(ndarray_detail::viewLoadI64(a, oa));
+			Acc vb = accFromI64<Acc>(ndarray_detail::viewLoadI64(*b, ob));
+			if (kind == ScoreKind::Dot)
+				acc += va * vb;
+			else {
+				Acc d = va - vb;
+				acc += d * d;
+			}
+		}
+	}
+	return acc;
+}
+
+template <typename Acc>
+static Acc scorePackedSameType(const NDArrayView& a, const NDArrayView* b, size_t n, ScoreKind kind) {
+	const void* da = a.sharedBuffer().get()->data;
+	const size_t oa = a.getOffset();
+	const NDArrayType t = a.getType();
+	const NDScoreOp op = toNDScoreOp(kind);
+	const void* db = (kind == ScoreKind::L2Self) ? nullptr : b->sharedBuffer().get()->data;
+	const size_t ob = (kind == ScoreKind::L2Self) ? 0 : b->getOffset();
+	switch (t) {
+		case F32: {
+			const float* pa = (const float*)da + oa;
+			const float* pb = db ? (const float*)db + ob : pa;
+			return accFromKernelF32<Acc>(ndscore_f32(pa, pb, n, op));
+		}
+		case F64: {
+			const double* pa = (const double*)da + oa;
+			const double* pb = db ? (const double*)db + ob : pa;
+			return accFromKernelF64<Acc>(ndscore_f64(pa, pb, n, op));
+		}
+		case UINT8: {
+			const uint8_t* pa = (const uint8_t*)da + oa;
+			const uint8_t* pb = db ? (const uint8_t*)db + ob : pa;
+			if constexpr (std::is_same_v<Acc, int64_t> || std::is_same_v<Acc, uint256_t>)
+				return accFromKernelI64<Acc>(ndscore_u8_i64(pa, pb, n, op));
+			return accFromKernelI64<Acc>(ndscore_u8_i32(pa, pb, n, op));
+		}
+		case INT32: {
+			const int32_t* pa = (const int32_t*)da + oa;
+			const int32_t* pb = db ? (const int32_t*)db + ob : pa;
+			return accFromKernelI64<Acc>(ndscore_i32(pa, pb, n, op));
+		}
+		case INT64: {
+			const int64_t* pa = (const int64_t*)da + oa;
+			const int64_t* pb = db ? (const int64_t*)db + ob : pa;
+			return accFromKernelI64<Acc>(ndscore_i64(pa, pb, n, op));
+		}
+		case INT3: {
+			const uint64_t* wa = (const uint64_t*)da;
+			const uint64_t* wb = db ? (const uint64_t*)db : wa;
+			return accFromKernelI64<Acc>(ndscore_int3_i64(wa, oa, wb, ob, n, op));
+		}
+		case BINARY: {
+			const uint64_t* wa = (const uint64_t*)da;
+			const uint64_t* wb = db ? (const uint64_t*)db : wa;
+			return accFromKernelI64<Acc>(ndscore_binary_i64(wa, oa, wb, ob, n, op));
+		}
+		case UINT256: {
+			const uint256_t* pa = (const uint256_t*)da + oa;
+			Acc acc{};
+			if (kind == ScoreKind::L2Self) {
+				for (size_t i = 0; i < n; ++i) {
+					Acc v = accFromDouble<Acc>(pa[i].toDouble());
+					if constexpr (std::is_same_v<Acc, uint256_t>)
+						v = pa[i];
+					acc += v * v;
+				}
+				return acc;
+			}
+			const uint256_t* pb = (const uint256_t*)b->sharedBuffer().get()->data + b->getOffset();
+			for (size_t i = 0; i < n; ++i) {
+				Acc va, vb;
+				if constexpr (std::is_same_v<Acc, uint256_t>) {
+					va = pa[i];
+					vb = pb[i];
+				} else {
+					va = accFromDouble<Acc>(pa[i].toDouble());
+					vb = accFromDouble<Acc>(pb[i].toDouble());
+				}
+				if (kind == ScoreKind::Dot)
+					acc += va * vb;
+				else {
+					Acc d = va - vb;
+					acc += d * d;
+				}
+			}
+			return acc;
+		}
+		default:
+			return scoreGeneric<Acc>(a, b, n, kind);
+	}
+}
+
+template <typename Acc>
+static Acc scoreViews(const NDArrayView& a, const NDArrayView* b, ScoreKind kind) {
+	const size_t n = a.numElements();
+	if (kind != ScoreKind::L2Self) {
+		requireScoreLength(a, *b, kind == ScoreKind::Dot ? "NDArrayView::dot" : "NDArrayView::l2Squared");
+	}
+	if (n == 0)
+		return Acc{};
+	const bool packed = viewIsPacked(a) && a.sharedBuffer() && a.sharedBuffer().get()
+	                    && (kind == ScoreKind::L2Self
+	                        || (viewIsPacked(*b) && a.getType() == b->getType()));
+	if (packed)
+		return scorePackedSameType<Acc>(a, b, n, kind);
+	return scoreGeneric<Acc>(a, b, n, kind);
+}
+
+template <typename Acc>
+Acc NDArrayView::dot(const NDArrayView& other) const {
+	return scoreViews<Acc>(*this, &other, ScoreKind::Dot);
+}
+
+template <typename Acc>
+Acc NDArrayView::l2Squared() const {
+	return scoreViews<Acc>(*this, nullptr, ScoreKind::L2Self);
+}
+
+template <typename Acc>
+Acc NDArrayView::l2Squared(const NDArrayView& other) const {
+	return scoreViews<Acc>(*this, &other, ScoreKind::L2Pair);
+}
+
+template <typename Acc>
+Acc NDArrayView::l2Norm() const {
+	return accSqrt<Acc>(l2Squared<Acc>());
+}
+
+template <typename Acc>
+Acc NDArrayView::l2Norm(const NDArrayView& other) const {
+	return accSqrt<Acc>(l2Squared<Acc>(other));
+}
+
+template <typename Acc>
+Acc NDArrayView::hamming(const NDArrayView& other) const {
+	if (getType() != BINARY || other.getType() != BINARY)
+		throw std::invalid_argument("NDArrayView::hamming: both views must be BINARY");
+	requireScoreLength(*this, other, "NDArrayView::hamming");
+	const size_t n = numElements();
+	if (n == 0)
+		return Acc{};
+	if (viewIsPacked(*this) && viewIsPacked(other)) {
+		const uint64_t* wa = (const uint64_t*)sharedBuffer().get()->data;
+		const uint64_t* wb = (const uint64_t*)other.sharedBuffer().get()->data;
+		return accFromKernelI64<Acc>(ndscore_binary_i64(
+			wa, getOffset(), wb, other.getOffset(), n, NDScoreOp::L2Pair));
+	}
+	Acc acc{};
+	for (size_t i = 0; i < n; ++i) {
+		const int64_t ba = ndarray_detail::viewLoadI64(*this, viewElemOffset(*this, i));
+		const int64_t bb = ndarray_detail::viewLoadI64(other, viewElemOffset(other, i));
+		acc += accFromI64<Acc>(ba != bb ? 1 : 0);
+	}
+	return acc;
+}
+
+#define LIBEXCESSIVE_INSTANTIATE_SCORE(Acc) \
+	template Acc NDArrayView::dot<Acc>(const NDArrayView&) const; \
+	template Acc NDArrayView::l2Squared<Acc>() const; \
+	template Acc NDArrayView::l2Squared<Acc>(const NDArrayView&) const; \
+	template Acc NDArrayView::l2Norm<Acc>() const; \
+	template Acc NDArrayView::l2Norm<Acc>(const NDArrayView&) const; \
+	template Acc NDArrayView::hamming<Acc>(const NDArrayView&) const;
+
+LIBEXCESSIVE_INSTANTIATE_SCORE(float)
+LIBEXCESSIVE_INSTANTIATE_SCORE(double)
+LIBEXCESSIVE_INSTANTIATE_SCORE(int32_t)
+LIBEXCESSIVE_INSTANTIATE_SCORE(int64_t)
+LIBEXCESSIVE_INSTANTIATE_SCORE(uint256_t)
+#undef LIBEXCESSIVE_INSTANTIATE_SCORE
 
 namespace ndarray_detail {
 	double viewLoadDouble(const NDArrayView& v, size_t elementOffset) {
