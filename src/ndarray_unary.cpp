@@ -138,3 +138,133 @@ void ndunary_f16(uint16_t* p, size_t n, NDUnaryOp op) {
 void ndunary_bf16(uint16_t* p, size_t n, NDUnaryOp op) {
 	ndunary_half(p, n, op, false);
 }
+
+#if defined(__AVX512F__)
+#define NDACT_AVX512 1
+#include <immintrin.h>
+#else
+#define NDACT_AVX512 0
+#endif
+
+void ndact_softmax_f32(float* NDU_RESTRICT p, size_t n) {
+	if (n == 0)
+		return;
+	if (n == 1) {
+		p[0] = 1.0f;
+		return;
+	}
+	float m = p[0];
+#if NDACT_AVX512
+	if (n >= 16) {
+		__m512 vmax = _mm512_loadu_ps(p);
+		size_t i = 16;
+		for (; i + 16 <= n; i += 16)
+			vmax = _mm512_max_ps(vmax, _mm512_loadu_ps(p + i));
+		m = _mm512_reduce_max_ps(vmax);
+		for (; i < n; ++i)
+			if (p[i] > m)
+				m = p[i];
+	} else
+#endif
+	{
+		for (size_t i = 1; i < n; ++i)
+			if (p[i] > m)
+				m = p[i];
+	}
+
+#pragma omp simd
+	for (size_t i = 0; i < n; ++i)
+		p[i] = std::exp(p[i] - m);
+
+	float s = 0.0f;
+#if NDACT_AVX512
+	if (n >= 16) {
+		__m512 acc = _mm512_setzero_ps();
+		size_t i = 0;
+		for (; i + 16 <= n; i += 16)
+			acc = _mm512_add_ps(acc, _mm512_loadu_ps(p + i));
+		s = _mm512_reduce_add_ps(acc);
+		for (; i < n; ++i)
+			s += p[i];
+	} else
+#endif
+	{
+		for (size_t i = 0; i < n; ++i)
+			s += p[i];
+	}
+	const float inv = s == 0.0f ? 0.0f : 1.0f / s;
+#if NDACT_AVX512
+	if (n >= 16) {
+		__m512 vinv = _mm512_set1_ps(inv);
+		size_t i = 0;
+		for (; i + 16 <= n; i += 16)
+			_mm512_storeu_ps(p + i, _mm512_mul_ps(_mm512_loadu_ps(p + i), vinv));
+		for (; i < n; ++i)
+			p[i] *= inv;
+		return;
+	}
+#endif
+	for (size_t i = 0; i < n; ++i)
+		p[i] *= inv;
+}
+
+void ndact_rmsnorm_f32(float* NDU_RESTRICT x, const float* NDU_RESTRICT w, size_t n, float eps) {
+	if (n == 0)
+		return;
+	float ss = 0.0f;
+#if NDACT_AVX512
+	if (n >= 16) {
+		__m512 acc = _mm512_setzero_ps();
+		size_t i = 0;
+		for (; i + 16 <= n; i += 16) {
+			__m512 v = _mm512_loadu_ps(x + i);
+			acc = _mm512_fmadd_ps(v, v, acc);
+		}
+		ss = _mm512_reduce_add_ps(acc);
+		for (; i < n; ++i)
+			ss += x[i] * x[i];
+	} else
+#endif
+	{
+		float s0 = 0.0f, s1 = 0.0f, s2 = 0.0f, s3 = 0.0f;
+		size_t i = 0;
+		for (; i + 4 <= n; i += 4) {
+			s0 += x[i] * x[i];
+			s1 += x[i + 1] * x[i + 1];
+			s2 += x[i + 2] * x[i + 2];
+			s3 += x[i + 3] * x[i + 3];
+		}
+		ss = (s0 + s1) + (s2 + s3);
+		for (; i < n; ++i)
+			ss += x[i] * x[i];
+	}
+	const float inv = 1.0f / std::sqrt(ss / (float)n + eps);
+#if NDACT_AVX512
+	if (n >= 16) {
+		__m512 vinv = _mm512_set1_ps(inv);
+		size_t i = 0;
+		for (; i + 16 <= n; i += 16) {
+			__m512 vx = _mm512_loadu_ps(x + i);
+			__m512 vw = _mm512_loadu_ps(w + i);
+			_mm512_storeu_ps(x + i, _mm512_mul_ps(_mm512_mul_ps(vx, vw), vinv));
+		}
+		for (; i < n; ++i)
+			x[i] = x[i] * w[i] * inv;
+		return;
+	}
+#endif
+	for (size_t i = 0; i < n; ++i)
+		x[i] = x[i] * w[i] * inv;
+}
+
+void ndact_silu_f32(float* NDU_RESTRICT p, size_t n) {
+#pragma omp simd
+	for (size_t i = 0; i < n; ++i)
+		p[i] = p[i] / (1.0f + std::exp(-p[i]));
+}
+
+void ndact_silu_mul_f32(float* NDU_RESTRICT p, const float* NDU_RESTRICT g, size_t n) {
+#pragma omp simd
+	for (size_t i = 0; i < n; ++i)
+		p[i] = p[i] / (1.0f + std::exp(-p[i])) * g[i];
+}

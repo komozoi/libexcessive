@@ -19,4 +19,9 @@ void ndunary_f64(double* p, size_t n, NDUnaryOp op);
 void ndunary_f16(uint16_t* p, size_t n, NDUnaryOp op);
 void ndunary_bf16(uint16_t* p, size_t n, NDUnaryOp op);
 
+void ndact_softmax_f32(float* p, size_t n);
+void ndact_rmsnorm_f32(float* x, const float* w, size_t n, float eps);
+void ndact_silu_f32(float* p, size_t n);
+void ndact_silu_mul_f32(float* p, const float* g, size_t n);
+
 #endif

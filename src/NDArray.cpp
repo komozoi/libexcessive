@@ -3825,9 +3825,6 @@ static void actAxisGeom(const ArrayList<int>& shape, int axis,
 		outer *= (size_t)shape.get(d);
 }
 
-static float siluF32(float x) {
-	return x / (1.0f + std::exp(-x));
-}
 static double siluF64(double x) {
 	return x / (1.0 + std::exp(-x));
 }
@@ -3847,9 +3844,14 @@ NDArray& NDArray::softmax(int axis) {
 		return *this;
 
 	if (type == F32) {
-		for (size_t o = 0; o < outer; ++o)
-			for (size_t j = 0; j < inner; ++j)
-				softmaxF32Row(float32 + o * len * inner + j, len, inner);
+		if (inner == 1) {
+			for (size_t o = 0; o < outer; ++o)
+				ndact_softmax_f32(float32 + o * len, len);
+		} else {
+			for (size_t o = 0; o < outer; ++o)
+				for (size_t j = 0; j < inner; ++j)
+					softmaxF32Row(float32 + o * len * inner + j, len, inner);
+		}
 		return *this;
 	}
 	if (type == F64) {
@@ -3869,7 +3871,7 @@ NDArray& NDArray::softmax(int axis) {
 						ndhalf_f16_to_f32(p, u16 + o * len, len);
 					else
 						ndhalf_bf16_to_f32(p, u16 + o * len, len);
-					softmaxF32Row(p, len, 1);
+					ndact_softmax_f32(p, len);
 					if (type == F16)
 						ndhalf_f32_to_f16(u16 + o * len, p, len);
 					else
@@ -3942,24 +3944,27 @@ NDArray NDArray::rmsnorm(const NDArray& weight, int axis, float eps) const {
 	xrow.resize((int)len);
 	float* wp = wrow.getMemory();
 	float* xp = xrow.getMemory();
-	const float invL = 1.0f / (float)len;
 	const bool last = inner == 1;
+	if (weight1d)
+		loadWeightF32(weight, wp, len, 0, 1);
 
 	for (size_t o = 0; o < outer; ++o) {
 		for (size_t j = 0; j < inner; ++j) {
-			if (weight1d)
-				loadWeightF32(weight, wp, len, 0, 1);
-			else
+			if (!weight1d)
 				loadWeightF32(weight, wp, len, o * len * inner + j, inner);
 
 			if (x.type == F32 && last) {
-				float* row = x.float32 + o * len;
-				float ss = 0.0f;
-				for (size_t k = 0; k < len; ++k)
-					ss += row[k] * row[k];
-				const float inv = 1.0f / std::sqrt(ss * invL + eps);
-				for (size_t k = 0; k < len; ++k)
-					row[k] = row[k] * wp[k] * inv;
+				ndact_rmsnorm_f32(x.float32 + o * len, wp, len, eps);
+			} else if ((x.type == F16 || x.type == BF16) && last) {
+				if (x.type == F16)
+					ndhalf_f16_to_f32(xp, x.u16 + o * len, len);
+				else
+					ndhalf_bf16_to_f32(xp, x.u16 + o * len, len);
+				ndact_rmsnorm_f32(xp, wp, len, eps);
+				if (x.type == F16)
+					ndhalf_f32_to_f16(x.u16 + o * len, xp, len);
+				else
+					ndhalf_f32_to_bf16(x.u16 + o * len, xp, len);
 			} else if (x.type == F64 && last) {
 				double* row = x.float64 + o * len;
 				double ss = 0.0;
@@ -3974,7 +3979,7 @@ NDArray NDArray::rmsnorm(const NDArray& weight, int axis, float eps) const {
 				float ss = 0.0f;
 				for (size_t k = 0; k < len; ++k)
 					ss += xp[k] * xp[k];
-				const float inv = 1.0f / std::sqrt(ss * invL + eps);
+				const float inv = 1.0f / std::sqrt(ss / (float)len + eps);
 				for (size_t k = 0; k < len; ++k)
 					x.storeFromDouble(o * len * inner + k * inner + j, (double)(xp[k] * wp[k] * inv));
 			}
@@ -3988,8 +3993,7 @@ NDArray& NDArray::silu() {
 	ensureWritable();
 	const size_t n = numElements();
 	if (type == F32) {
-		for (size_t i = 0; i < n; ++i)
-			float32[i] = siluF32(float32[i]);
+		ndact_silu_f32(float32, n);
 	} else if (type == F64) {
 		for (size_t i = 0; i < n; ++i)
 			float64[i] = siluF64(float64[i]);
@@ -4001,8 +4005,7 @@ NDArray& NDArray::silu() {
 				ndhalf_f16_to_f32(buf, u16 + i, m);
 			else
 				ndhalf_bf16_to_f32(buf, u16 + i, m);
-			for (size_t j = 0; j < m; ++j)
-				buf[j] = siluF32(buf[j]);
+			ndact_silu_f32(buf, m);
 			if (type == F16)
 				ndhalf_f32_to_f16(u16 + i, buf, m);
 			else
@@ -4028,8 +4031,7 @@ NDArray& NDArray::siluMul(const NDArray& other) {
 	ensureWritable();
 	const size_t n = numElements();
 	if (type == F32) {
-		for (size_t i = 0; i < n; ++i)
-			float32[i] = siluF32(float32[i]) * rhs.float32[i];
+		ndact_silu_mul_f32(float32, rhs.float32, n);
 	} else if (type == F64) {
 		for (size_t i = 0; i < n; ++i)
 			float64[i] = siluF64(float64[i]) * rhs.float64[i];
@@ -4044,8 +4046,7 @@ NDArray& NDArray::siluMul(const NDArray& other) {
 				ndhalf_bf16_to_f32(xb, u16 + i, m);
 				ndhalf_bf16_to_f32(yb, rhs.u16 + i, m);
 			}
-			for (size_t j = 0; j < m; ++j)
-				xb[j] = siluF32(xb[j]) * yb[j];
+			ndact_silu_mul_f32(xb, yb, m);
 			if (type == F16)
 				ndhalf_f32_to_f16(u16 + i, xb, m);
 			else
