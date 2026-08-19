@@ -182,8 +182,11 @@ TEST(NDArray_activations, RMSNorm_F32_Rows_MatchRef) {
 		}
 		const float inv = 1.0f / std::sqrt(ss / 4.0f + 1e-6f);
 		for (int c = 0; c < 4; ++c)
-			EXPECT_NEAR(y.get<float>({r, c}),
-			            x.get<float>({r, c}) * w.get<float>({c}) * inv, 1e-5f);
+			EXPECT_NEAR(static_cast<double>(y.get<float>({r, c})),
+			            static_cast<double>(x.get<float>({r, c})) *
+			                static_cast<double>(w.get<float>({c})) *
+			                static_cast<double>(inv),
+			            1e-5);
 	}
 }
 
