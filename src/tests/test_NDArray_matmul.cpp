@@ -516,6 +516,16 @@ TEST(NDArray_matmul, INT3_GemvAndFatMatchNaive) {
 	expectClose(am.matmul(bm), naiveMatmulI64(am, bm));
 }
 
+TEST(NDArray_matmul, INT3_N17_MatchesNaive) {
+	NDArray a({5, 8}, INT3);
+	NDArray b({8, 17}, INT3);
+	for (int i = 0; i < 5 * 8; ++i)
+		a.setFlat((size_t)i, (i % 7) - 3);
+	for (int i = 0; i < 8 * 17; ++i)
+		b.setFlat((size_t)i, (i % 5) - 2);
+	expectClose(a.matmul(b), naiveMatmulI64(a, b));
+}
+
 TEST(NDArray_matmul, INT3_PackedBTileSample) {
 	const int M = 32;
 	const int K = 1024;

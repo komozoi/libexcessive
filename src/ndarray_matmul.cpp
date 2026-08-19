@@ -135,6 +135,12 @@ static size_t denseElemSize(NDArrayType t) {
 	}
 }
 
+static size_t ndmMulOrThrow(size_t a, size_t b) {
+	if (b != 0 && a > SIZE_MAX / b)
+		throw std::invalid_argument("NDArray: size overflow");
+	return a * b;
+}
+
 static void* alloc64(size_t bytes) {
 	if (bytes == 0)
 		bytes = 64;
@@ -1071,10 +1077,11 @@ static void gemmI8_scalar(const int8_t* A, int lda, const int8_t* B, int ldb,
                           int32_t* C, int ldc, int M, int N, int K) {
 	for (int i = 0; i < M; ++i) {
 		for (int j = 0; j < N; ++j) {
-			int32_t acc = C[i * ldc + j];
+			int32_t acc = C[(size_t)i * (size_t)ldc + (size_t)j];
 			for (int k = 0; k < K; ++k)
-				acc += (int32_t)A[i * lda + k] * (int32_t)B[k * ldb + j];
-			C[i * ldc + j] = acc;
+				acc += (int32_t)A[(size_t)i * (size_t)lda + (size_t)k] *
+				       (int32_t)B[(size_t)k * (size_t)ldb + (size_t)j];
+			C[(size_t)i * (size_t)ldc + (size_t)j] = acc;
 		}
 	}
 }
@@ -1083,10 +1090,11 @@ static void gemmU8_scalar(const uint8_t* A, int lda, const uint8_t* B, int ldb,
                           int32_t* C, int ldc, int M, int N, int K) {
 	for (int i = 0; i < M; ++i) {
 		for (int j = 0; j < N; ++j) {
-			int32_t acc = C[i * ldc + j];
+			int32_t acc = C[(size_t)i * (size_t)ldc + (size_t)j];
 			for (int k = 0; k < K; ++k)
-				acc += (int32_t)A[i * lda + k] * (int32_t)B[k * ldb + j];
-			C[i * ldc + j] = acc;
+				acc += (int32_t)A[(size_t)i * (size_t)lda + (size_t)k] *
+				       (int32_t)B[(size_t)k * (size_t)ldb + (size_t)j];
+			C[(size_t)i * (size_t)ldc + (size_t)j] = acc;
 		}
 	}
 }
@@ -1105,7 +1113,7 @@ static void gemmINT8(const int8_t* A, int lda, const int8_t* B, int ldb,
 	gemmVNNI_u8i8((const uint8_t*)A, lda, B, ldb, C, ldc, M, N, K, 0x80, 0);
 	for (int i = 0; i < M; ++i)
 		for (int j = 0; j < N; ++j)
-			C[i * ldc + j] -= 128 * col[j];
+			C[(size_t)i * (size_t)ldc + (size_t)j] -= 128 * col[j];
 	free(col);
 #else
 	gemmI8_scalar(A, lda, B, ldb, C, ldc, M, N, K);
@@ -1472,9 +1480,11 @@ static void gemmINT3_fromPackedB_strip(void* ctx, int j0, int j1) {
 
 static void gemmINT3(const uint64_t* Aw, const uint64_t* Bw, int32_t* C, int ldc,
                      int M, int N, int K, bool wrap) {
+	const size_t nAK = ndmMulOrThrow((size_t)M, (size_t)K);
+	const size_t nKN = ndmMulOrThrow((size_t)K, (size_t)N);
 	if (wrap) {
-		memoryAdviseWillNeed((void*)Aw, int3_bufferBytes((size_t)M * (size_t)K));
-		memoryAdviseWillNeed((void*)Bw, int3_bufferBytes((size_t)K * (size_t)N));
+		memoryAdviseWillNeed((void*)Aw, int3_bufferBytes(nAK));
+		memoryAdviseWillNeed((void*)Bw, int3_bufferBytes(nKN));
 	}
 
 	if (N == 1) {
@@ -1487,7 +1497,7 @@ static void gemmINT3(const uint64_t* Aw, const uint64_t* Bw, int32_t* C, int ldc
 				int32_t acc = 0;
 				for (int k = 0; k < K; ++k)
 					acc += int3_getSigned(Aw, (size_t)i * (size_t)K + (size_t)k) * x[k];
-				C[i * ldc] = acc;
+				C[(size_t)i * (size_t)ldc] = acc;
 			}
 		}
 		free64(x);
@@ -1497,8 +1507,8 @@ static void gemmINT3(const uint64_t* Aw, const uint64_t* Bw, int32_t* C, int ldc
 	if ((N % 16) == 0 && K >= 16 &&
 	    ((size_t)K * (size_t)N >= 262144ull) &&
 	    (M <= 64 || (size_t)N >= 4ull * (size_t)M)) {
-		int32_t* X = (int32_t*)alloc64((size_t)M * (size_t)K * sizeof(int32_t));
-		unpackInt3SignedI32(X, Aw, (size_t)M * (size_t)K);
+		int32_t* X = (int32_t*)alloc64(ndmMulOrThrow(nAK, sizeof(int32_t)));
+		unpackInt3SignedI32(X, Aw, nAK);
 		gemmINT3_streamB(X, Bw, C, ldc, M, N, K);
 		free64(X);
 		return;
@@ -1507,8 +1517,8 @@ static void gemmINT3(const uint64_t* Aw, const uint64_t* Bw, int32_t* C, int ldc
 #if NDM_VNNI
 	if ((N % 16) == 0 && K >= 16 && M >= 32 &&
 	    (size_t)K * (size_t)N >= 1048576ull) {
-		uint8_t* A = (uint8_t*)alloc64((size_t)M * (size_t)K);
-		unpackInt3Xor4(A, Aw, (size_t)M * (size_t)K);
+		uint8_t* A = (uint8_t*)alloc64(nAK);
+		unpackInt3Xor4(A, Aw, nAK);
 		int32_t* row = (int32_t*)calloc((size_t)M, sizeof(int32_t));
 		int32_t* col = (int32_t*)calloc((size_t)N, sizeof(int32_t));
 		if (!row || !col) {
@@ -1552,10 +1562,10 @@ static void gemmINT3(const uint64_t* Aw, const uint64_t* Bw, int32_t* C, int ldc
 	}
 #endif
 
-	uint8_t* A = (uint8_t*)alloc64((size_t)M * (size_t)K);
-	uint8_t* B = (uint8_t*)alloc64((size_t)K * (size_t)N);
-	unpackInt3Xor4(A, Aw, (size_t)M * (size_t)K);
-	unpackInt3Xor4(B, Bw, (size_t)K * (size_t)N);
+	uint8_t* A = (uint8_t*)alloc64(nAK);
+	uint8_t* B = (uint8_t*)alloc64(nKN);
+	unpackInt3Xor4(A, Aw, nAK);
+	unpackInt3Xor4(B, Bw, nKN);
 	memset(C, 0, (size_t)M * (size_t)ldc * sizeof(int32_t));
 #if NDM_VNNI
 	int32_t* row = (int32_t*)calloc((size_t)M, sizeof(int32_t));
@@ -1582,15 +1592,16 @@ static void gemmINT3(const uint64_t* Aw, const uint64_t* Bw, int32_t* C, int ldc
 	gemmVNNI_u8i8(A, K, (const int8_t*)B, N, C, ldc, M, N, K, 0, 0);
 	for (int i = 0; i < M; ++i)
 		for (int j = 0; j < N; ++j)
-			C[i * ldc + j] = C[i * ldc + j] - 4 * row[i] - 4 * col[j] + 16 * K;
+			C[(size_t)i * (size_t)ldc + (size_t)j] =
+				C[(size_t)i * (size_t)ldc + (size_t)j] - 4 * row[i] - 4 * col[j] + 16 * K;
 	free(row);
 	free(col);
 #else
 	int8_t* As = (int8_t*)A;
 	int8_t* Bs = (int8_t*)B;
-	for (int t = 0; t < M * K; ++t)
+	for (size_t t = 0; t < nAK; ++t)
 		As[t] = (int8_t)((int)A[t] - 4);
-	for (int t = 0; t < K * N; ++t)
+	for (size_t t = 0; t < nKN; ++t)
 		Bs[t] = (int8_t)((int)((uint8_t*)B)[t] - 4);
 	gemmI8_scalar(As, K, Bs, N, C, ldc, M, N, K);
 #endif
