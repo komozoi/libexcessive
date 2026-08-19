@@ -25,6 +25,32 @@
 TEST(ArrayListTest, DefaultConstruction) {
 	ArrayList<int> list;
 	EXPECT_EQ(list.size(), 0);
+	EXPECT_EQ(list.getMemory(), nullptr);
+	int n = 0;
+	for (int x : list) {
+		(void)x;
+		++n;
+	}
+	EXPECT_EQ(n, 0);
+	list.add(1);
+	EXPECT_NE(list.getMemory(), nullptr);
+	EXPECT_EQ(list.size(), 1);
+	EXPECT_EQ(list.get(0), 1);
+}
+
+TEST(ArrayListTest, ZeroCapacityDoesNotAllocate) {
+	ArrayList<float> list(0);
+	EXPECT_EQ(list.size(), 0);
+	EXPECT_EQ(list.getMemory(), nullptr);
+	ArrayList<int> emptyInit{};
+	EXPECT_EQ(emptyInit.getMemory(), nullptr);
+	ArrayList<int> fromEmpty(static_cast<const int*>(nullptr), 0);
+	EXPECT_EQ(fromEmpty.getMemory(), nullptr);
+	ArrayList<float> copied(list);
+	EXPECT_EQ(copied.getMemory(), nullptr);
+	ArrayList<float> assigned;
+	assigned = list;
+	EXPECT_EQ(assigned.getMemory(), nullptr);
 }
 
 TEST(ArrayListTest, SingleValueConstructorCopy) {

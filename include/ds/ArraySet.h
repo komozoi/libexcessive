@@ -39,22 +39,23 @@ class ArraySet: public Set<T> {
 public:
 
 	/**
-	 * @brief Constructs an empty ArraySet with a default initial capacity.
+	 * @brief Constructs an empty ArraySet. No heap allocation until the first add.
 	 */
-	ArraySet() {
-		allocated = 64;
-		length = 0;
-		elements = (T*)malloc(sizeof(T) * allocated);
-	}
+	ArraySet() = default;
 
 	/**
 	 * @brief Constructs an empty ArraySet with the specified initial capacity.
-	 * @param start_capacity Initial capacity.
+	 * @param start_capacity Initial capacity. Zero allocates nothing.
 	 */
 	explicit ArraySet(int start_capacity) {
-		allocated = start_capacity;
 		length = 0;
-		elements = (T*)malloc(sizeof(T) * allocated);
+		if (start_capacity <= 0) {
+			allocated = 0;
+			elements = nullptr;
+		} else {
+			allocated = start_capacity;
+			elements = (T*)malloc(sizeof(T) * allocated);
+		}
 	}
 
 	/**
@@ -64,6 +65,10 @@ public:
 	ArraySet(const ArraySet<T>& other) {
 		allocated = other.allocated;
 		length = other.length;
+		if (allocated == 0) {
+			elements = nullptr;
+			return;
+		}
 		elements = (T*)malloc(sizeof(T) * allocated);
 		for (int i = 0; i < length; i++)
 			new (&elements[i]) T(other.elements[i]);
@@ -93,9 +98,13 @@ public:
 			free(elements);
 			allocated = other.allocated;
 			length = other.length;
-			elements = (T*)malloc(sizeof(T) * allocated);
-			for (int i = 0; i < length; i++)
-				new (&elements[i]) T(other.elements[i]);
+			if (allocated == 0) {
+				elements = nullptr;
+			} else {
+				elements = (T*)malloc(sizeof(T) * allocated);
+				for (int i = 0; i < length; i++)
+					new (&elements[i]) T(other.elements[i]);
+			}
 		}
 		return *this;
 	}
@@ -125,8 +134,13 @@ public:
 	 * @param size Number of elements to add.
 	 */
 	ArraySet(const T* src, int size) {
-		allocated = size;
 		length = 0;
+		if (size <= 0) {
+			allocated = 0;
+			elements = nullptr;
+			return;
+		}
+		allocated = size;
 		elements = (T*)malloc(sizeof(T) * allocated);
 		Set<T>::addMany(src, size);
 	}
@@ -306,9 +320,9 @@ public:
 	}
 
 	T* begin() override { return elements; }
-	T* end() override { return &(elements[length]); }
+	T* end() override { return elements + length; }
 	const T* begin() const override { return elements; }
-	const T* end() const override { return &(elements[length]); }
+	const T* end() const override { return elements + length; }
 
 
 	~ArraySet() override {
@@ -365,8 +379,9 @@ private:
 		return false;
 	}
 
-	int length, allocated;
-	T* elements;
+	int length = 0;
+	int allocated = 0;
+	T* elements = nullptr;
 };
 
 #endif //EXCESSIVE_ARRAYSET_H

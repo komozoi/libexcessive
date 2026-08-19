@@ -53,20 +53,16 @@ class ArrayList : public Container<T, T&, T*, const T*> {
 public:
 
 	/**
-	 * @brief Constructs an empty ArrayList with a default initial capacity.
+	 * @brief Constructs an empty ArrayList. No heap allocation until the first insert.
 	 */
-	ArrayList() {
-		allocated = 64;
-		length = 0;
-		elements = (T*)malloc(sizeof(T) * allocated);
-	}
+	ArrayList() = default;
 
 	/**
 	 * @brief Constructs an ArrayList with one element using move semantics.
 	 * @param v The element to move into the array.
 	 */
 	explicit ArrayList(T&& v) {
-		allocated = 64;
+		allocated = 1;
 		length = 1;
 		elements = (T*)malloc(sizeof(T) * allocated);
 		new (elements) T(std::move(v));
@@ -77,7 +73,7 @@ public:
 	 * @param v The element to copy into the array.
 	 */
 	explicit ArrayList(const T& v) {
-		allocated = 64;
+		allocated = 1;
 		length = 1;
 		elements = (T*)malloc(sizeof(T) * allocated);
 		new (elements) T(v);
@@ -86,11 +82,17 @@ public:
 	/**
 	 * @brief Constructs an empty ArrayList with a specified initial capacity.
 	 * @param start_capacity Initial number of elements to allocate space for.
+	 *        Zero allocates nothing.
 	 */
 	explicit ArrayList(int start_capacity) {
-		allocated = start_capacity;
 		length = 0;
-		elements = (T*)malloc(sizeof(T) * allocated);
+		if (start_capacity <= 0) {
+			allocated = 0;
+			elements = nullptr;
+		} else {
+			allocated = start_capacity;
+			elements = (T*)malloc(sizeof(T) * allocated);
+		}
 	}
 
 	/**
@@ -99,6 +101,12 @@ public:
 	 * @param size Number of elements to copy from the source.
 	 */
 	ArrayList(const T* src, int size) {
+		if (size <= 0) {
+			length = 0;
+			allocated = 0;
+			elements = nullptr;
+			return;
+		}
 		allocated = size;
 		length = size;
 		elements = (T*)malloc(sizeof(T) * allocated);
@@ -111,6 +119,12 @@ public:
 	 * @param view The string view to copy data from.
 	 */
 	explicit ArrayList(std::string_view view) {
+		if (view.empty()) {
+			length = 0;
+			allocated = 0;
+			elements = nullptr;
+			return;
+		}
 		allocated = (int)view.length();
 		length = (int)view.length();
 		elements = (T*)malloc(sizeof(T) * allocated);
@@ -131,6 +145,10 @@ public:
 	ArrayList(const ArrayList<T>& v) {
 		allocated = v.allocated;
 		length = v.length;
+		if (allocated == 0) {
+			elements = nullptr;
+			return;
+		}
 		elements = (T*)malloc(sizeof(T) * allocated);
 		for (int i = 0; i < length; i++)
 			new (&elements[i]) T(v.elements[i]);
@@ -143,6 +161,10 @@ public:
 	ArrayList(std::initializer_list<T> initList) {
 		allocated = static_cast<int>(initList.size());
 		length = allocated;
+		if (allocated == 0) {
+			elements = nullptr;
+			return;
+		}
 		elements = (T*)malloc(sizeof(T) * allocated);
 
 		int i = 0;
@@ -176,9 +198,13 @@ public:
 			free((void*)elements);
 			length = rhs.length;
 			allocated = rhs.allocated;
-			elements = (T*)malloc(allocated * sizeof(T));
-			for (int i = 0; i < length; i++)
-				new (&elements[i]) T(rhs.elements[i]);
+			if (allocated == 0) {
+				elements = nullptr;
+			} else {
+				elements = (T*)malloc(allocated * sizeof(T));
+				for (int i = 0; i < length; i++)
+					new (&elements[i]) T(rhs.elements[i]);
+			}
 		}
 		return *this;
 	}
@@ -475,9 +501,9 @@ public:
 	}
 
 	T* begin() override { return elements; }
-	T* end() override { return &(elements[length]); }
+	T* end() override { return elements + length; }
 	const T* begin() const override { return elements; }
-	const T* end() const override { return &(elements[length]); }
+	const T* end() const override { return elements + length; }
 
 	/**
 	 * @brief Returns a Range for custom iteration using MonkeyIterator.
@@ -488,7 +514,7 @@ public:
 	Range<MonkeyIterator<T*, E>> rangeOf() {
 		return Range<MonkeyIterator<T*, E>>(
 				MonkeyIterator<T*, E>(elements),
-				MonkeyIterator<T*, E>(&elements[length])
+				MonkeyIterator<T*, E>(elements + length)
 		);
 	}
 
@@ -502,8 +528,8 @@ public:
 	template<class E>
 	Range<MonkeyIterator<T*, E>> rangeOf(int start, int end) {
 		return Range<MonkeyIterator<T*, E>>(
-				MonkeyIterator<T*, E>(&elements[start]),
-				MonkeyIterator<T*, E>(&elements[end])
+				MonkeyIterator<T*, E>(elements + start),
+				MonkeyIterator<T*, E>(elements + end)
 		);
 	}
 
@@ -530,8 +556,9 @@ public:
 	}
 
 private:
-	int length, allocated;
-	T* elements;
+	int length = 0;
+	int allocated = 0;
+	T* elements = nullptr;
 };
 
 

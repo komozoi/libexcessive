@@ -50,6 +50,28 @@ int DestructionTracker::destructedCount = 0;
 TEST(ArraySetTest, DefaultConstructor) {
 	ArraySet<int> s;
 	EXPECT_EQ(s.size(), 0);
+	EXPECT_EQ(s.getMemory(), nullptr);
+	int n = 0;
+	for (int x : s) {
+		(void)x;
+		++n;
+	}
+	EXPECT_EQ(n, 0);
+	s.add(1);
+	EXPECT_NE(s.getMemory(), nullptr);
+	EXPECT_EQ(s.size(), 1);
+	EXPECT_EQ(s.get(0), 1);
+}
+
+TEST(ArraySetTest, ZeroCapacityDoesNotAllocate) {
+	ArraySet<int> s(0);
+	EXPECT_EQ(s.size(), 0);
+	EXPECT_EQ(s.getMemory(), nullptr);
+	ArraySet<int> copied(s);
+	EXPECT_EQ(copied.getMemory(), nullptr);
+	ArraySet<int> assigned;
+	assigned = s;
+	EXPECT_EQ(assigned.getMemory(), nullptr);
 }
 
 TEST(ArraySetTest, CapacityConstructor) {
