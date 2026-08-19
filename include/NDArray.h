@@ -281,6 +281,11 @@ public:
 	 * Views share storage (read). Writes go through the owner or wrap().
 	 */
 	NDArrayView slice(int axis, int index) const;
+	/**
+	 * Keep `axis`; `shape[axis] = end - start`. `0 <= start <= end <= len`.
+	 * Offset moves by `start * stride[axis]`. Index slice still drops the axis.
+	 */
+	NDArrayView slice(int axis, int start, int end) const;
 	/** slice(0, i). */
 	NDArrayView row(int i) const;
 	/** slice(last axis, j). */
@@ -629,6 +634,8 @@ public:
 	NDArrayView permute(const ArrayList<int>& axes) const;
 	/** view().slice(axis, index). */
 	NDArrayView slice(int axis, int index) const;
+	/** view().slice(axis, start, end). */
+	NDArrayView slice(int axis, int start, int end) const;
 	/** view().row(i). */
 	NDArrayView row(int i) const;
 	/** view().col(j). */

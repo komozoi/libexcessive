@@ -1326,6 +1326,7 @@ NDArrayView NDArray::transpose() const { return view().transpose(); }
 NDArrayView NDArray::swapaxes(int axisA, int axisB) const { return view().swapaxes(axisA, axisB); }
 NDArrayView NDArray::permute(const ArrayList<int>& axes) const { return view().permute(axes); }
 NDArrayView NDArray::slice(int axis, int index) const { return view().slice(axis, index); }
+NDArrayView NDArray::slice(int axis, int start, int end) const { return view().slice(axis, start, end); }
 NDArrayView NDArray::row(int i) const { return view().row(i); }
 NDArrayView NDArray::col(int j) const { return view().col(j); }
 
@@ -1677,6 +1678,26 @@ NDArrayView NDArrayView::slice(int axis, int index) const {
 		++nr;
 	}
 	return aliasMeta(nr, ns, nst, newOff);
+}
+
+NDArrayView NDArrayView::slice(int axis, int start, int end) const {
+	const int r = rank_;
+	if (r == 0)
+		throw std::invalid_argument("NDArrayView::slice - cannot slice a scalar");
+	if (axis < 0 || axis >= r)
+		throw std::out_of_range("NDArrayView::slice - axis out of range");
+	const int len = shapeDim[axis];
+	if (start < 0 || end < start || end > len)
+		throw std::out_of_range("NDArrayView::slice - index out of bounds");
+	size_t newOff = offset + (size_t)start * strideDim[axis];
+	int ns[kInlineRank];
+	size_t nst[kInlineRank];
+	for (int d = 0; d < r; ++d) {
+		ns[d] = shapeDim[d];
+		nst[d] = strideDim[d];
+	}
+	ns[axis] = end - start;
+	return aliasMeta(r, ns, nst, newOff);
 }
 
 NDArrayView NDArrayView::row(int i) const {
