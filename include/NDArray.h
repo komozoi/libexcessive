@@ -197,6 +197,16 @@ public:
 
 	/** Empty view: shape {0}, F32, null buffer. */
 	NDArrayView();
+	/** Copy; shape/stride metadata stays inline (no heap). */
+	NDArrayView(const NDArrayView& other);
+	/** Move; source becomes an empty view. */
+	NDArrayView(NDArrayView&& other) noexcept;
+	/** Copy-assign. */
+	NDArrayView& operator=(const NDArrayView& other);
+	/** Move-assign; source becomes an empty view. */
+	NDArrayView& operator=(NDArrayView&& other) noexcept;
+	/** Drops lazy `getShape` / `sharedBuffer` caches. */
+	~NDArrayView();
 
 	/** View over `buf` with independent shape, element strides, and offset. */
 	NDArrayView(sp<NDArrayBuffer> buf, ArrayList<int> shape, ArrayList<size_t> strides, size_t offset, NDArrayType type);
@@ -205,7 +215,7 @@ public:
 	 * View over caller-owned bytes (const or mutable). Does not copy or free
 	 * `data`. The view has no mutators; writes go through `NDArray::wrap(void*)`.
 	 * `data` must stay valid for the lifetime of this view and any copy of it.
-	 * `byteSize` must be at least the packed size of `shape` × `type`.
+	 * `byteSize` must be at least `NDArray::packedByteSize(type, shape)`.
 	 * Axes must be >= 0; the packed size must fit in size_t.
 	 * Packed types (BINARY, INT3, UINT256) require 8-byte alignment.
 	 */
@@ -225,12 +235,12 @@ public:
 	 */
 	bool isContiguous() const {
 		size_t expect = 1;
-		for (int d = shape.size() - 1; d >= 0; --d) {
-			if (shape.get(d) <= 1)
+		for (int d = rank_ - 1; d >= 0; --d) {
+			if (shapeDim[d] <= 1)
 				continue;
-			if (d >= strides.size() || strides.get(d) != expect)
+			if (strideDim[d] != expect)
 				return false;
-			expect *= (size_t)shape.get(d);
+			expect *= (size_t)shapeDim[d];
 		}
 		return true;
 	}
@@ -240,12 +250,12 @@ public:
 			return offset + flat;
 		size_t o = offset;
 		size_t r = flat;
-		for (int d = shape.size() - 1; d >= 0; --d) {
-			int dim = shape.get(d);
+		for (int d = rank_ - 1; d >= 0; --d) {
+			int dim = shapeDim[d];
 			size_t c = (dim > 0) ? (r % (size_t)dim) : 0;
 			if (dim > 0)
 				r /= (size_t)dim;
-			o += c * ((d < strides.size()) ? strides.get(d) : (size_t)0);
+			o += c * strideDim[d];
 		}
 		return o;
 	}
@@ -375,32 +385,52 @@ public:
 	size_t computeOffset(const ArrayList<int>& indices) const;
 
 	/** Logical shape of this view. */
-	const ArrayList<int>& getShape() const { return shape; }
+	const ArrayList<int>& getShape() const;
 	/** Element strides (0 = broadcast axis). */
-	const ArrayList<size_t>& getStrides() const { return strides; }
+	const ArrayList<size_t>& getStrides() const;
 	/** Element offset into the shared buffer. */
 	size_t getOffset() const { return offset; }
 	/** Storage type of the shared buffer. */
 	NDArrayType getType() const { return type; }
 
 	/** Shared storage (refcount); used by ndarray_detail load helpers. */
-	const sp<NDArrayBuffer>& sharedBuffer() const { return buffer; }
+	const sp<NDArrayBuffer>& sharedBuffer() const;
 
 	/** Packed word base of the shared buffer, or nullptr if empty. */
 	const void* data() const {
-		return buffer && buffer.get() ? buffer.get()->data : nullptr;
+		if (buffer && buffer.get())
+			return buffer.get()->data;
+		return wrapData;
 	}
 	/** Size of the shared buffer in bytes (0 if empty). */
 	size_t byteSize() const {
-		return buffer && buffer.get() ? buffer.get()->byteSize : 0;
+		if (buffer && buffer.get())
+			return buffer.get()->byteSize;
+		return wrapByteSize;
 	}
+	/** Dense packed size of this view's type and shape (not the wrap buffer). */
+	size_t packedByteSize() const;
 
 private:
-	ArrayList<int> shape;
-	ArrayList<size_t> strides; // element strides; 0 = broadcast dimension
-	size_t offset = 0;         // element offset into shared buffer
+	friend class NDArray;
+	static constexpr int kInlineRank = 16;
+	int rank_ = 1;
+	int shapeDim[kInlineRank] {};
+	size_t strideDim[kInlineRank] {};
+	size_t offset = 0;
 	NDArrayType type = F32;
-	sp<NDArrayBuffer> buffer;
+	mutable sp<NDArrayBuffer> buffer;
+	const void* wrapData = nullptr;
+	size_t wrapByteSize = 0;
+	mutable ArrayList<int>* shapeCache = nullptr;
+	mutable ArrayList<size_t>* strideCache = nullptr;
+
+	void resetCaches();
+	void setEmpty();
+	void copyMetaFrom(const NDArrayView& other);
+	void setShapeFrom(const ArrayList<int>& shape);
+	void fillDenseStrides();
+	NDArrayView aliasMeta(int rank, const int* sh, const size_t* st, size_t off) const;
 };
 
 
@@ -516,6 +546,7 @@ public:
 	 * Takes `void*`, not `const void*`: mutation is part of the NDArray API.
 	 * Const memory is a view — use `NDArrayView::wrap`.
 	 * Axes must be >= 0; the packed size must fit in size_t.
+	 * `byteSize` must be at least `packedByteSize(type, shape)`.
 	 */
 	static NDArray wrap(void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type);
 	/**
@@ -524,6 +555,10 @@ public:
 	 */
 	static NDArray wrap(void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type,
 	                    size_t rowStrideBytes);
+	/** Dense packed bytes for `numElements` values of `type`. Overflow throws. */
+	static size_t packedByteSize(NDArrayType type, size_t numElements);
+	/** Dense packed bytes for `shape` × `type`. Negative axis or overflow throws. */
+	static size_t packedByteSize(NDArrayType type, const ArrayList<int>& shape);
 
 	/** Empty 1-D array (shape {0}), no heap buffer. Type F32 if omitted. */
 	static NDArray empty();
@@ -624,6 +659,8 @@ public:
 	size_t byteSize() const {
 		return buffer && buffer.get() ? buffer.get()->byteSize : 0;
 	}
+	/** Dense packed size of this array's type and shape (a wrap may have a larger byteSize). */
+	size_t packedByteSize() const;
 
 	template <typename T>
 	/** Typed packed base; throws if `T` does not match `type`. */
@@ -1982,7 +2019,7 @@ T NDArrayView::getFlat(size_t flat) const {
 template <typename T>
 /** Element at `indices` (rank must match). */
 T NDArrayView::get(const ArrayList<int>& indices) const {
-	if (indices.size() != shape.size())
+	if (indices.size() != rank_)
 		throw std::out_of_range("NDArrayView::get - rank mismatch");
 	size_t elemOff = computeOffset(indices);
 	if constexpr (std::is_same_v<T, uint256_t>)

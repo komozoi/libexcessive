@@ -739,8 +739,24 @@ static size_t packedBufferBytes(NDArrayType t, size_t numElems) {
 	}
 }
 
-size_t NDArray::bufferBytesFor(NDArrayType t, size_t numElems) {
+size_t NDArray::packedByteSize(NDArrayType t, size_t numElems) {
 	return packedBufferBytes(t, numElems);
+}
+
+size_t NDArray::packedByteSize(NDArrayType t, const ArrayList<int>& shape) {
+	return packedByteSize(t, shapeElementCount(shape));
+}
+
+size_t NDArray::packedByteSize() const {
+	return packedByteSize(type, numElements());
+}
+
+size_t NDArrayView::packedByteSize() const {
+	return NDArray::packedByteSize(type, numElements());
+}
+
+size_t NDArray::bufferBytesFor(NDArrayType t, size_t numElems) {
+	return packedByteSize(t, numElems);
 }
 
 static size_t wrapAlignment(NDArrayType t) {
@@ -856,13 +872,6 @@ static size_t paddedWrapNeed(const ArrayList<int>& shape, NDArrayType type, size
 	return prefix + rowPacked;
 }
 
-static ArrayList<size_t> paddedWrapStrides(const ArrayList<int>& shape, NDArrayType type,
-                                           size_t rowStrideBytes) {
-	ArrayList<size_t> st = denseRowMajorStrides(shape);
-	st.set(0, elementsForPackedBytes(type, rowStrideBytes));
-	return st;
-}
-
 static void checkWrapPointer(const void* data, size_t byteSize, size_t need, NDArrayType type) {
 	if (need > 0 && data == nullptr)
 		throw std::invalid_argument("NDArray wrap: null data");
@@ -886,9 +895,15 @@ NDArrayView NDArrayView::wrap(const void* data, size_t byteSize, ArrayList<int> 
 	}
 	const size_t need = paddedWrapNeed(shape, type, rowStrideBytes);
 	checkWrapPointer(data, byteSize, need, type);
-	ArrayList<size_t> st = paddedWrapStrides(shape, type, rowStrideBytes);
-	sp<NDArrayBuffer> buf(COPY_ON_WRITE, (void*)data, byteSize, type);
-	return NDArrayView(std::move(buf), std::move(shape), std::move(st), 0, type);
+	NDArrayView v;
+	v.type = type;
+	v.offset = 0;
+	v.setShapeFrom(shape);
+	v.fillDenseStrides();
+	v.strideDim[0] = elementsForPackedBytes(type, rowStrideBytes);
+	v.wrapData = data;
+	v.wrapByteSize = byteSize;
+	return v;
 }
 
 NDArray NDArray::wrap(void* data, size_t byteSize, ArrayList<int> shape,
@@ -1230,7 +1245,19 @@ bool NDArray::isBroadcastableTo(const ArrayList<int>& targetShape) const {
 }
 
 NDArrayView NDArray::view() const {
-	return NDArrayView(buffer, shape, rowMajorStrides(shape), 0, type);
+	if (shape.size() > NDArrayView::kInlineRank)
+		throw std::out_of_range("NDArrayView: rank exceeds kMaxRank");
+	NDArrayView v;
+	v.type = type;
+	v.offset = 0;
+	v.buffer = buffer;
+	v.setShapeFrom(shape);
+	v.fillDenseStrides();
+	if (buffer && buffer.get() && !buffer.get()->ownsData) {
+		v.wrapData = buffer.get()->data;
+		v.wrapByteSize = buffer.get()->byteSize;
+	}
+	return v;
 }
 
 NDArray NDArray::matmul(const NDArray& b) const {
@@ -1342,44 +1369,193 @@ NDArray::CRef NDArray::CRef::operator[](int i) const {
 
 // ---- NDArrayView -----------------------------------------------------------
 
-NDArrayView::NDArrayView() : shape({0}), type(F32) {}
+static_assert(16 == NDArray::kMaxRank, "view rank cap is kMaxRank");
+
+void NDArrayView::resetCaches() {
+	delete shapeCache;
+	delete strideCache;
+	shapeCache = nullptr;
+	strideCache = nullptr;
+}
+
+void NDArrayView::setEmpty() {
+	resetCaches();
+	rank_ = 1;
+	shapeDim[0] = 0;
+	strideDim[0] = 1;
+	offset = 0;
+	type = F32;
+	buffer = sp<NDArrayBuffer>();
+	wrapData = nullptr;
+	wrapByteSize = 0;
+}
+
+void NDArrayView::copyMetaFrom(const NDArrayView& other) {
+	rank_ = other.rank_;
+	memcpy(shapeDim, other.shapeDim, sizeof(shapeDim));
+	memcpy(strideDim, other.strideDim, sizeof(strideDim));
+	offset = other.offset;
+	type = other.type;
+	buffer = other.buffer;
+	wrapData = other.wrapData;
+	wrapByteSize = other.wrapByteSize;
+}
+
+void NDArrayView::setShapeFrom(const ArrayList<int>& shape) {
+	if (shape.size() > kInlineRank)
+		throw std::out_of_range("NDArrayView: rank exceeds kMaxRank");
+	rank_ = shape.size();
+	for (int d = 0; d < rank_; ++d)
+		shapeDim[d] = shape.get(d);
+}
+
+void NDArrayView::fillDenseStrides() {
+	size_t stride = 1;
+	for (int d = rank_ - 1; d >= 0; --d) {
+		strideDim[d] = stride;
+		int dim = shapeDim[d];
+		stride *= (size_t)(dim > 0 ? dim : 1);
+	}
+}
+
+NDArrayView NDArrayView::aliasMeta(int rank, const int* sh, const size_t* st, size_t off) const {
+	NDArrayView v;
+	v.rank_ = rank;
+	if (rank > 0) {
+		memcpy(v.shapeDim, sh, (size_t)rank * sizeof(int));
+		memcpy(v.strideDim, st, (size_t)rank * sizeof(size_t));
+	}
+	v.offset = off;
+	v.type = type;
+	v.buffer = buffer;
+	v.wrapData = wrapData;
+	v.wrapByteSize = wrapByteSize;
+	return v;
+}
+
+NDArrayView::NDArrayView() {
+	strideDim[0] = 1;
+}
+
+NDArrayView::NDArrayView(const NDArrayView& other)
+	: rank_(other.rank_), offset(other.offset), type(other.type),
+	  buffer(other.buffer), wrapData(other.wrapData), wrapByteSize(other.wrapByteSize) {
+	memcpy(shapeDim, other.shapeDim, sizeof(shapeDim));
+	memcpy(strideDim, other.strideDim, sizeof(strideDim));
+}
+
+NDArrayView::NDArrayView(NDArrayView&& other) noexcept
+	: rank_(other.rank_), offset(other.offset), type(other.type),
+	  buffer(std::move(other.buffer)), wrapData(other.wrapData), wrapByteSize(other.wrapByteSize),
+	  shapeCache(other.shapeCache), strideCache(other.strideCache) {
+	memcpy(shapeDim, other.shapeDim, sizeof(shapeDim));
+	memcpy(strideDim, other.strideDim, sizeof(strideDim));
+	other.shapeCache = nullptr;
+	other.strideCache = nullptr;
+	other.setEmpty();
+}
+
+NDArrayView& NDArrayView::operator=(const NDArrayView& other) {
+	if (this == &other)
+		return *this;
+	resetCaches();
+	copyMetaFrom(other);
+	return *this;
+}
+
+NDArrayView& NDArrayView::operator=(NDArrayView&& other) noexcept {
+	if (this == &other)
+		return *this;
+	resetCaches();
+	copyMetaFrom(other);
+	shapeCache = other.shapeCache;
+	strideCache = other.strideCache;
+	other.shapeCache = nullptr;
+	other.strideCache = nullptr;
+	other.setEmpty();
+	return *this;
+}
+
+NDArrayView::~NDArrayView() {
+	resetCaches();
+}
 
 NDArrayView::NDArrayView(sp<NDArrayBuffer> buf, ArrayList<int> shape_, ArrayList<size_t> strides_,
                          size_t offset_, NDArrayType type_)
-	: shape(std::move(shape_)), strides(std::move(strides_)), offset(offset_), type(type_),
-	  buffer(std::move(buf)) {}
+	: offset(offset_), type(type_), buffer(std::move(buf)) {
+	setShapeFrom(shape_);
+	for (int d = 0; d < rank_; ++d)
+		strideDim[d] = d < strides_.size() ? strides_.get(d) : (size_t)0;
+	if (buffer && buffer.get() && !buffer.get()->ownsData) {
+		wrapData = buffer.get()->data;
+		wrapByteSize = buffer.get()->byteSize;
+	}
+}
 
 NDArrayView NDArrayView::wrap(const void* data, size_t byteSize, ArrayList<int> shape, NDArrayType type) {
-	sp<NDArrayBuffer> buf = NDArray::makeWrapBuffer(data, byteSize, shape, type);
-	ArrayList<size_t> st = NDArray::rowMajorStrides(shape);
-	return NDArrayView(std::move(buf), std::move(shape), std::move(st), 0, type);
+	const size_t n = shapeElementCount(shape);
+	const size_t need = packedBufferBytes(type, n);
+	checkWrapPointer(data, byteSize, need, type);
+	NDArrayView v;
+	v.type = type;
+	v.offset = 0;
+	v.setShapeFrom(shape);
+	v.fillDenseStrides();
+	v.wrapData = data;
+	v.wrapByteSize = byteSize;
+	return v;
 }
 
 size_t NDArrayView::numElements() const {
-	return shapeElementCount(shape);
+	size_t n = 1;
+	for (int i = 0; i < rank_; ++i) {
+		int d = shapeDim[i];
+		if (d < 0)
+			throw std::invalid_argument("NDArray: negative dimension");
+		n = mulOrThrow(n, (size_t)d);
+	}
+	return n;
+}
+
+const ArrayList<int>& NDArrayView::getShape() const {
+	if (!shapeCache)
+		shapeCache = new ArrayList<int>(shapeDim, rank_);
+	return *shapeCache;
+}
+
+const ArrayList<size_t>& NDArrayView::getStrides() const {
+	if (!strideCache)
+		strideCache = new ArrayList<size_t>(strideDim, rank_);
+	return *strideCache;
+}
+
+const sp<NDArrayBuffer>& NDArrayView::sharedBuffer() const {
+	if ((!buffer || !buffer.get()) && wrapData)
+		buffer = sp<NDArrayBuffer>(COPY_ON_WRITE, (void*)wrapData, wrapByteSize, type);
+	return buffer;
 }
 
 size_t NDArrayView::computeOffset(const ArrayList<int>& indices) const {
-	if (indices.size() != shape.size())
+	if (indices.size() != rank_)
 		throw std::out_of_range("NDArrayView::computeOffset - rank mismatch");
 	size_t o = offset;
-	for (int d = 0; d < shape.size(); ++d) {
+	for (int d = 0; d < rank_; ++d) {
 		int idx = indices.get(d);
-		if (idx < 0 || idx >= shape.get(d))
+		if (idx < 0 || idx >= shapeDim[d])
 			throw std::out_of_range("NDArrayView: index out of bounds");
-		o += (size_t)idx * strides.get(d);
+		o += (size_t)idx * strideDim[d];
 	}
 	return o;
 }
 
 bool NDArrayView::isBroadcastableTo(const ArrayList<int>& targetShape) const {
-	int ar = shape.size();
+	int ar = rank_;
 	int tr = targetShape.size();
 	if (ar > tr)
 		return false;
 	for (int i = 0; i < tr; ++i) {
 		int ti = targetShape.get(tr - 1 - i);
-		int si = i < ar ? shape.get(ar - 1 - i) : 1;
+		int si = i < ar ? shapeDim[ar - 1 - i] : 1;
 		if (si != ti && si != 1)
 			return false;
 	}
@@ -1388,21 +1564,23 @@ bool NDArrayView::isBroadcastableTo(const ArrayList<int>& targetShape) const {
 
 NDArrayView NDArrayView::broadcastTo(const ArrayList<int>& targetShape) const {
 	shapeElementCount(targetShape);
+	if (targetShape.size() > kInlineRank)
+		throw std::out_of_range("NDArrayView: rank exceeds kMaxRank");
 	if (!isBroadcastableTo(targetShape))
 		throw std::invalid_argument("NDArrayView::broadcastTo - shape not broadcastable");
-	int ar = shape.size();
+	int ar = rank_;
 	int tr = targetShape.size();
-	ArrayList<size_t> newStrides;
+	int ns[kInlineRank];
+	size_t nst[kInlineRank];
 	for (int i = 0; i < tr; ++i)
-		newStrides.add((size_t)0);
+		ns[i] = targetShape.get(i);
 	for (int i = 0; i < tr; ++i) {
 		int ti = targetShape.get(tr - 1 - i);
-		int si = i < ar ? shape.get(ar - 1 - i) : 1;
-		size_t oldStride = i < ar ? strides.get(ar - 1 - i) : 0;
-		newStrides.set(tr - 1 - i, si == ti ? oldStride : (size_t)0);
-		(void)ti;
+		int si = i < ar ? shapeDim[ar - 1 - i] : 1;
+		size_t oldStride = i < ar ? strideDim[ar - 1 - i] : 0;
+		nst[tr - 1 - i] = si == ti ? oldStride : (size_t)0;
 	}
-	return NDArrayView(buffer, targetShape, std::move(newStrides), offset, type);
+	return aliasMeta(tr, ns, nst, offset);
 }
 
 NDArrayView NDArrayView::reshape(const ArrayList<int>& newShape) const {
@@ -1412,7 +1590,10 @@ NDArrayView NDArrayView::reshape(const ArrayList<int>& newShape) const {
 	size_t newN = shapeElementCount(newShape);
 	if (oldN != newN)
 		throw std::invalid_argument("NDArrayView::reshape - element count mismatch");
-	return NDArrayView(buffer, newShape, NDArray::rowMajorStrides(newShape), offset, type);
+	NDArrayView v = aliasMeta(0, nullptr, nullptr, offset);
+	v.setShapeFrom(newShape);
+	v.fillDenseStrides();
+	return v;
 }
 
 NDArray NDArrayView::reshapeOwned(const ArrayList<int>& newShape) const {
@@ -1425,69 +1606,77 @@ NDArray NDArrayView::reshapeOwned(const ArrayList<int>& newShape) const {
 }
 
 NDArrayView NDArrayView::permute(const ArrayList<int>& axes) const {
-	const int r = shape.size();
+	const int r = rank_;
 	if (axes.size() != r)
 		throw std::invalid_argument("NDArrayView::permute - axes rank mismatch");
-	ArrayList<int> used;
-	for (int i = 0; i < r; ++i)
-		used.add(0);
-	ArrayList<int> ns;
-	ArrayList<size_t> nst;
+	int used[kInlineRank] = {};
+	int ns[kInlineRank];
+	size_t nst[kInlineRank];
 	for (int i = 0; i < r; ++i) {
 		int ax = axes.get(i);
 		if (ax < 0 || ax >= r)
 			throw std::invalid_argument("NDArrayView::permute - axis out of range");
-		if (used.get(ax))
+		if (used[ax])
 			throw std::invalid_argument("NDArrayView::permute - duplicate axis");
-		used.set(ax, 1);
-		ns.add(shape.get(ax));
-		nst.add(ax < strides.size() ? strides.get(ax) : (size_t)0);
+		used[ax] = 1;
+		ns[i] = shapeDim[ax];
+		nst[i] = strideDim[ax];
 	}
-	return NDArrayView(buffer, std::move(ns), std::move(nst), offset, type);
+	return aliasMeta(r, ns, nst, offset);
 }
 
 NDArrayView NDArrayView::transpose() const {
-	const int r = shape.size();
+	const int r = rank_;
 	if (r < 2)
 		return *this;
-	ArrayList<int> axes;
-	for (int i = r - 1; i >= 0; --i)
-		axes.add(i);
-	return permute(axes);
+	int ns[kInlineRank];
+	size_t nst[kInlineRank];
+	for (int i = 0; i < r; ++i) {
+		ns[i] = shapeDim[r - 1 - i];
+		nst[i] = strideDim[r - 1 - i];
+	}
+	return aliasMeta(r, ns, nst, offset);
 }
 
 NDArrayView NDArrayView::swapaxes(int axisA, int axisB) const {
-	const int r = shape.size();
+	const int r = rank_;
 	if (axisA < 0 || axisA >= r || axisB < 0 || axisB >= r)
 		throw std::invalid_argument("NDArrayView::swapaxes - axis out of range");
 	if (axisA == axisB)
 		return *this;
-	ArrayList<int> axes;
-	for (int i = 0; i < r; ++i)
-		axes.add(i);
-	axes.set(axisA, axisB);
-	axes.set(axisB, axisA);
-	return permute(axes);
+	int ns[kInlineRank];
+	size_t nst[kInlineRank];
+	for (int i = 0; i < r; ++i) {
+		ns[i] = shapeDim[i];
+		nst[i] = strideDim[i];
+	}
+	ns[axisA] = shapeDim[axisB];
+	nst[axisA] = strideDim[axisB];
+	ns[axisB] = shapeDim[axisA];
+	nst[axisB] = strideDim[axisA];
+	return aliasMeta(r, ns, nst, offset);
 }
 
 NDArrayView NDArrayView::slice(int axis, int index) const {
-	const int r = shape.size();
+	const int r = rank_;
 	if (r == 0)
 		throw std::invalid_argument("NDArrayView::slice - cannot slice a scalar");
 	if (axis < 0 || axis >= r)
 		throw std::out_of_range("NDArrayView::slice - axis out of range");
-	if (index < 0 || index >= shape.get(axis))
+	if (index < 0 || index >= shapeDim[axis])
 		throw std::out_of_range("NDArrayView::slice - index out of bounds");
-	size_t newOff = offset + (size_t)index * (axis < strides.size() ? strides.get(axis) : (size_t)0);
-	ArrayList<int> ns;
-	ArrayList<size_t> nst;
+	size_t newOff = offset + (size_t)index * strideDim[axis];
+	int ns[kInlineRank];
+	size_t nst[kInlineRank];
+	int nr = 0;
 	for (int d = 0; d < r; ++d) {
 		if (d == axis)
 			continue;
-		ns.add(shape.get(d));
-		nst.add(d < strides.size() ? strides.get(d) : (size_t)0);
+		ns[nr] = shapeDim[d];
+		nst[nr] = strideDim[d];
+		++nr;
 	}
-	return NDArrayView(buffer, std::move(ns), std::move(nst), newOff, type);
+	return aliasMeta(nr, ns, nst, newOff);
 }
 
 NDArrayView NDArrayView::row(int i) const {
@@ -1495,7 +1684,7 @@ NDArrayView NDArrayView::row(int i) const {
 }
 
 NDArrayView NDArrayView::col(int j) const {
-	const int r = shape.size();
+	const int r = rank_;
 	if (r == 0)
 		throw std::invalid_argument("NDArrayView::col - cannot slice a scalar");
 	return slice(r - 1, j);
@@ -1561,59 +1750,53 @@ static void viewStoreLane(NDArray& out, size_t dst, const void* data, NDArrayTyp
 }
 
 NDArray NDArrayView::copy() const {
-	NDArray out(shape, type);
+	NDArray out(getShape(), type);
 	const size_t n = numElements();
-	if (n == 0 || !sharedBuffer() || !sharedBuffer().get() || !sharedBuffer()->data)
+	const void* data = this->data();
+	if (n == 0 || !data)
 		return out;
-	const void* data = sharedBuffer()->data;
 	const size_t esize = unpackedElemSize(type);
 	if (isContiguous() && esize != 0) {
 		memcpy(out.data(), (const char*)data + offset * esize, n * esize);
 		return out;
 	}
 
-	const int rank = shape.size();
+	const int rank = rank_;
 	if (rank == 0) {
 		viewStoreLane(out, 0, data, type, offset);
 		return out;
 	}
-	if (rank <= NDArray::kMaxRank) {
-		int coord[NDArray::kMaxRank] = {};
-		size_t srcOff = offset;
-		size_t dst = 0;
-		const int last = rank - 1;
-		const int nLast = shape.get(last);
-		const size_t stLast = last < strides.size() ? strides.get(last) : (size_t)0;
-		while (true) {
-			if (esize != 0 && stLast == 1 && nLast > 0) {
-				memcpy((char*)out.data() + dst * esize,
-				       (const char*)data + srcOff * esize,
-				       (size_t)nLast * esize);
-				dst += (size_t)nLast;
-			} else {
-				size_t o = srcOff;
-				for (int j = 0; j < nLast; ++j) {
-					viewStoreLane(out, dst++, data, type, o);
-					o += stLast;
-				}
+	int coord[kInlineRank] = {};
+	size_t srcOff = offset;
+	size_t dst = 0;
+	const int last = rank - 1;
+	const int nLast = shapeDim[last];
+	const size_t stLast = strideDim[last];
+	while (true) {
+		if (esize != 0 && stLast == 1 && nLast > 0) {
+			memcpy((char*)out.data() + dst * esize,
+			       (const char*)data + srcOff * esize,
+			       (size_t)nLast * esize);
+			dst += (size_t)nLast;
+		} else {
+			size_t o = srcOff;
+			for (int j = 0; j < nLast; ++j) {
+				viewStoreLane(out, dst++, data, type, o);
+				o += stLast;
 			}
-			int d = last - 1;
-			for (; d >= 0; --d) {
-				coord[d]++;
-				srcOff += strides.get(d);
-				if (coord[d] < shape.get(d))
-					break;
-				srcOff -= (size_t)shape.get(d) * strides.get(d);
-				coord[d] = 0;
-			}
-			if (d < 0)
-				break;
 		}
-		return out;
+		int d = last - 1;
+		for (; d >= 0; --d) {
+			coord[d]++;
+			srcOff += strideDim[d];
+			if (coord[d] < shapeDim[d])
+				break;
+			srcOff -= (size_t)shapeDim[d] * strideDim[d];
+			coord[d] = 0;
+		}
+		if (d < 0)
+			break;
 	}
-
-	for (size_t i = 0; i < n; ++i)
-		viewStoreLane(out, i, data, type, elementOffset(i));
 	return out;
 }
 

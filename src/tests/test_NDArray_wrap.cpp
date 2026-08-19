@@ -441,3 +441,71 @@ TEST(NDArray_wrap, OwnedOutOfPlace_IsDistinctBuffer) {
 	EXPECT_FLOAT_EQ(a.get<float>({0}), 1.0f);
 	EXPECT_FLOAT_EQ(n.get<float>({0}), -1.0f);
 }
+
+TEST(NDArray_wrap, PackedByteSize_StaticByCount) {
+	EXPECT_EQ(NDArray::packedByteSize(F32, (size_t)0), (size_t)0);
+	EXPECT_EQ(NDArray::packedByteSize(F32, (size_t)3), (size_t)12);
+	EXPECT_EQ(NDArray::packedByteSize(F64, (size_t)2), (size_t)16);
+	EXPECT_EQ(NDArray::packedByteSize(INT32, (size_t)4), (size_t)16);
+	EXPECT_EQ(NDArray::packedByteSize(INT64, (size_t)1), (size_t)8);
+	EXPECT_EQ(NDArray::packedByteSize(UINT8, (size_t)7), (size_t)7);
+	EXPECT_EQ(NDArray::packedByteSize(INT8, (size_t)7), (size_t)7);
+	EXPECT_EQ(NDArray::packedByteSize(F16, (size_t)5), (size_t)10);
+	EXPECT_EQ(NDArray::packedByteSize(BF16, (size_t)5), (size_t)10);
+	EXPECT_EQ(NDArray::packedByteSize(UINT256, (size_t)2), (size_t)64);
+	EXPECT_EQ(NDArray::packedByteSize(BINARY, (size_t)0), (size_t)0);
+	EXPECT_EQ(NDArray::packedByteSize(BINARY, (size_t)1), (size_t)8);
+	EXPECT_EQ(NDArray::packedByteSize(BINARY, (size_t)64), (size_t)8);
+	EXPECT_EQ(NDArray::packedByteSize(BINARY, (size_t)65), (size_t)16);
+	EXPECT_EQ(NDArray::packedByteSize(INT3, (size_t)0), (size_t)0);
+	EXPECT_EQ(NDArray::packedByteSize(INT3, (size_t)1), (size_t)8);
+	EXPECT_EQ(NDArray::packedByteSize(INT3, (size_t)16), (size_t)8);
+	EXPECT_EQ(NDArray::packedByteSize(INT3, (size_t)17), (size_t)16);
+}
+
+TEST(NDArray_wrap, PackedByteSize_StaticByShape) {
+	EXPECT_EQ(NDArray::packedByteSize(F32, ArrayList<int>({2, 3})), (size_t)24);
+	EXPECT_EQ(NDArray::packedByteSize(INT3, ArrayList<int>({2, 16})), (size_t)16);
+	EXPECT_EQ(NDArray::packedByteSize(BINARY, ArrayList<int>({4, 16})), (size_t)8);
+	EXPECT_EQ(NDArray::packedByteSize(F32, ArrayList<int>({0, 8})), (size_t)0);
+	EXPECT_EQ(NDArray::packedByteSize(UINT8, ArrayList<int>()), (size_t)1);
+	EXPECT_THROW(NDArray::packedByteSize(F32, ArrayList<int>({-1, 4})), std::invalid_argument);
+	EXPECT_THROW(NDArray::packedByteSize(UINT256, ArrayList<int>({1 << 30, 1 << 30})),
+	             std::invalid_argument);
+}
+
+TEST(NDArray_wrap, PackedByteSize_InstanceMatchesStaticAndOwnerBuffer) {
+	NDArray a({3, 4}, F32);
+	EXPECT_EQ(a.packedByteSize(), NDArray::packedByteSize(F32, (size_t)12));
+	EXPECT_EQ(a.packedByteSize(), a.byteSize());
+	EXPECT_EQ(a.view().packedByteSize(), a.packedByteSize());
+
+	NDArray i3({17}, INT3);
+	EXPECT_EQ(i3.packedByteSize(), (size_t)16);
+	EXPECT_EQ(i3.packedByteSize(), i3.byteSize());
+	EXPECT_EQ(i3.view().packedByteSize(), (size_t)16);
+}
+
+TEST(NDArray_wrap, PackedByteSize_WrapPadIsLargerBuffer) {
+	alignas(4) float buf[8] = {};
+	NDArray w = NDArray::wrap(buf, sizeof(buf), {4}, F32);
+	EXPECT_EQ(w.packedByteSize(), (size_t)16);
+	EXPECT_EQ(w.byteSize(), sizeof(buf));
+	EXPECT_GT(w.byteSize(), w.packedByteSize());
+	EXPECT_EQ(w.view().packedByteSize(), (size_t)16);
+	EXPECT_EQ(w.view().byteSize(), sizeof(buf));
+}
+
+TEST(NDArray_wrap, PackedByteSize_SliceIsLogicalCount) {
+	NDArray a({4, 4}, F32);
+	NDArrayView row = a.row(1);
+	EXPECT_EQ(row.packedByteSize(), NDArray::packedByteSize(F32, (size_t)4));
+	EXPECT_EQ(row.byteSize(), a.byteSize());
+}
+
+TEST(NDArray_wrap, PackedByteSize_EmptyIsZero) {
+	NDArray a = NDArray::empty(INT3);
+	EXPECT_EQ(a.packedByteSize(), (size_t)0);
+	EXPECT_EQ(a.view().packedByteSize(), (size_t)0);
+	EXPECT_EQ(NDArray::packedByteSize(INT3, (size_t)0), (size_t)0);
+}

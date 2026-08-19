@@ -8,9 +8,30 @@
 #include <cstring>
 #include <gtest/gtest.h>
 #include <stdexcept>
+#include <vector>
+
+#if defined(__APPLE__)
+#include <malloc/malloc.h>
+#else
+#include <malloc.h>
+#endif
 
 #include "NDArray.h"
 #include "alloc/pointer.h"
+
+static size_t heapInUse() {
+#if defined(__APPLE__)
+	malloc_statistics_t st;
+	malloc_zone_statistics(malloc_default_zone(), &st);
+	return (size_t)st.size_in_use;
+#elif defined(__GLIBC__)
+	struct mallinfo2 mi = mallinfo2();
+	return (size_t)mi.uordblks;
+#else
+	struct mallinfo mi = mallinfo();
+	return (size_t)mi.uordblks;
+#endif
+}
 
 
 TEST(NDArray_views, DefaultView_IsEmpty) {
@@ -597,4 +618,55 @@ TEST(NDArray_views, Fuzz_SliceTransposeBroadcastWrap) {
 		}
 		fuzzCheckView(owner, v, g);
 	}
+}
+
+TEST(NDArray_views, Wrap_RetainedMatchesEmptyHeap) {
+	const int n = 20000;
+	float buf[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+	ArrayList<int> sh({4});
+
+	std::vector<NDArrayView> emptyViews;
+	emptyViews.reserve((size_t)n);
+	const size_t hEmpty0 = heapInUse();
+	for (int i = 0; i < n; ++i)
+		emptyViews.emplace_back();
+	const size_t emptyCost = heapInUse() - hEmpty0;
+
+	std::vector<NDArrayView> wraps;
+	wraps.reserve((size_t)n);
+	const size_t hWrap0 = heapInUse();
+	for (int i = 0; i < n; ++i)
+		wraps.push_back(NDArrayView::wrap(buf, sizeof(buf), sh, F32));
+	const size_t wrapCost = heapInUse() - hWrap0;
+
+	ASSERT_EQ(wraps[(size_t)n - 1].getFlat<float>(0), 1.0f);
+	EXPECT_LE(wrapCost, emptyCost + (size_t)4096);
+}
+
+TEST(NDArray_views, Slice_RetainedNoExtraHeap) {
+	const int rows = 4000;
+	NDArray a({rows, 8}, F32);
+	for (int i = 0; i < rows * 8; ++i)
+		a.setFlat((size_t)i, (float)i);
+	NDArrayView owner = a.view();
+
+	std::vector<NDArrayView> slices;
+	slices.reserve((size_t)rows);
+	const size_t h0 = heapInUse();
+	for (int i = 0; i < rows; ++i)
+		slices.push_back(owner.row(i));
+	const size_t cost = heapInUse() - h0;
+
+	EXPECT_FLOAT_EQ(slices[1].getFlat<float>(0), 8.0f);
+	EXPECT_LE(cost, (size_t)4096);
+}
+
+TEST(NDArray_views, RankAboveMax_Throws) {
+	ArrayList<int> sh;
+	for (int i = 0; i < NDArray::kMaxRank + 1; ++i)
+		sh.add(1);
+	float buf[1] = {1.0f};
+	EXPECT_THROW(NDArrayView::wrap(buf, sizeof(buf), sh, F32), std::out_of_range);
+	NDArray a(sh, F32);
+	EXPECT_THROW(a.view(), std::out_of_range);
 }
