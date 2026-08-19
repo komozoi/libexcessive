@@ -303,3 +303,24 @@ if(LIBEXCESSIVE_BUILD_TESTS)
         )
     endif()
 endif()
+
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+	option(LIBEXCESSIVE_BUILD_BENCH "Build NDArray bench binary" ON)
+else()
+	option(LIBEXCESSIVE_BUILD_BENCH "Build NDArray bench binary" OFF)
+endif()
+
+if(LIBEXCESSIVE_BUILD_BENCH)
+	add_executable(libexcessive_bench src/bench/bench_NDArray.cpp)
+	target_link_libraries(libexcessive_bench PRIVATE LibExcessive::excessive)
+	target_compile_options(libexcessive_bench PRIVATE
+		$<$<CXX_COMPILER_ID:GNU,Clang>:
+		-Wall
+		-Wextra
+		-Werror
+		-Wno-format
+		-Wno-unused-parameter
+		-Wno-unused-result
+		>
+	)
+endif()

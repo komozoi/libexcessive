@@ -166,7 +166,10 @@ make
 
 `LIBEXCESSIVE_ISA` selects the SIMD binary (`auto` by default = this CPU).
 Use `vanilla`, `sse2`, `avx2`, `avx512`, or `neon` for a fixed artifact
-(a later release can ship one `.so` per value). See `docs/ndarray_isa.md`.
+(a later release can ship one `.so` per value).
+
+NDArray wall times (not ctest): `cmake --build . --target libexcessive_bench`
+then `./libexcessive_bench`.
 
 ## Usage Examples
 
