@@ -55,6 +55,12 @@ static void fillF32(NDArray& a, int start) {
 		a.setFlat((size_t)i, (float)((start + (int)i) % 17) * 0.1f);
 }
 
+static void fillF64(NDArray& a, int start) {
+	const size_t n = a.numElements();
+	for (size_t i = 0; i < n; ++i)
+		a.setFlat((size_t)i, (double)((start + (int)i) % 17) * 0.1);
+}
+
 static void benchInt3Dot(LogEndpoint& log) {
 	const int n = 65536;
 	const int warmup = 4;
@@ -276,6 +282,70 @@ static void benchF32Silu(LogEndpoint& log) {
 	report(log, "F32 silu", "2048x256", reps, elapsedNs(t0, t1));
 }
 
+static void benchF32AddMul(LogEndpoint& log) {
+	const int n = 1000000;
+	const int warmup = 3;
+	const int reps = 20;
+	NDArray a({n}, F32);
+	NDArray b({n}, F32);
+	fillF32(a, 1);
+	fillF32(b, 2);
+	for (int i = 0; i < warmup; ++i) {
+		NDArray c = a + b;
+		gSink += (int64_t)c.getFlat<float>(0);
+	}
+	std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+	for (int i = 0; i < reps; ++i) {
+		NDArray c = a + b;
+		gSink += (int64_t)c.getFlat<float>(0);
+	}
+	std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+	report(log, "F32 add", "n=1000000", reps, elapsedNs(t0, t1));
+	for (int i = 0; i < warmup; ++i) {
+		NDArray c = a * b;
+		gSink += (int64_t)c.getFlat<float>(0);
+	}
+	t0 = std::chrono::steady_clock::now();
+	for (int i = 0; i < reps; ++i) {
+		NDArray c = a * b;
+		gSink += (int64_t)c.getFlat<float>(0);
+	}
+	t1 = std::chrono::steady_clock::now();
+	report(log, "F32 mul", "n=1000000", reps, elapsedNs(t0, t1));
+}
+
+static void benchF64AddMul(LogEndpoint& log) {
+	const int n = 1000000;
+	const int warmup = 3;
+	const int reps = 20;
+	NDArray a({n}, F64);
+	NDArray b({n}, F64);
+	fillF64(a, 1);
+	fillF64(b, 2);
+	for (int i = 0; i < warmup; ++i) {
+		NDArray c = a + b;
+		gSink += (int64_t)c.getFlat<double>(0);
+	}
+	std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+	for (int i = 0; i < reps; ++i) {
+		NDArray c = a + b;
+		gSink += (int64_t)c.getFlat<double>(0);
+	}
+	std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+	report(log, "F64 add", "n=1000000", reps, elapsedNs(t0, t1));
+	for (int i = 0; i < warmup; ++i) {
+		NDArray c = a * b;
+		gSink += (int64_t)c.getFlat<double>(0);
+	}
+	t0 = std::chrono::steady_clock::now();
+	for (int i = 0; i < reps; ++i) {
+		NDArray c = a * b;
+		gSink += (int64_t)c.getFlat<double>(0);
+	}
+	t1 = std::chrono::steady_clock::now();
+	report(log, "F64 mul", "n=1000000", reps, elapsedNs(t0, t1));
+}
+
 int main() {
 	Logger logger("logs", LOG_LEVEL_CRIT, LOG_LEVEL_INFO);
 	LogEndpoint log(logger, "ndarray-bench");
@@ -289,5 +359,7 @@ int main() {
 	benchF32Softmax(log);
 	benchF32Rmsnorm(log);
 	benchF32Silu(log);
+	benchF32AddMul(log);
+	benchF64AddMul(log);
 	return 0;
 }

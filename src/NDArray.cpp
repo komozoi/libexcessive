@@ -45,7 +45,8 @@
 **
 ** Unary *methods* mutate in place.  Operators return new arrays (copy).
 ** Same-type a+b allocates one result and writes into it (no convert() of
-** either side). Mixed-type converts only the side that is not resultType.
+** either side; the result is not zeroed). Mixed-type converts only the
+** side that is not resultType.
 ** binaryOpInto never allocates dest; add/+= remain the in-place API.
 */
 
@@ -343,6 +344,26 @@ static void addInto(T* dst, const T* a, const T* b, size_t n) {
 		dst[i] = (T)(a[i] + b[i]);
 }
 template<typename T>
+static void addInto4(T* dst, const T* a, const T* b, size_t n) {
+	size_t i = 0;
+	for (; i + 4 <= n; i += 4) {
+		const T a0 = a[i], a1 = a[i + 1], a2 = a[i + 2], a3 = a[i + 3];
+		const T b0 = b[i], b1 = b[i + 1], b2 = b[i + 2], b3 = b[i + 3];
+		dst[i] = (T)(a0 + b0);
+		dst[i + 1] = (T)(a1 + b1);
+		dst[i + 2] = (T)(a2 + b2);
+		dst[i + 3] = (T)(a3 + b3);
+	}
+	for (; i < n; ++i)
+		dst[i] = (T)(a[i] + b[i]);
+}
+static void addInto(float* dst, const float* a, const float* b, size_t n) {
+	addInto4(dst, a, b, n);
+}
+static void addInto(double* dst, const double* a, const double* b, size_t n) {
+	addInto4(dst, a, b, n);
+}
+template<typename T>
 static void subInto(T* dst, const T* a, const T* b, size_t n) {
 	for (size_t i = 0; i < n; ++i)
 		dst[i] = (T)(a[i] - b[i]);
@@ -351,6 +372,26 @@ template<typename T>
 static void mulInto(T* dst, const T* a, const T* b, size_t n) {
 	for (size_t i = 0; i < n; ++i)
 		dst[i] = (T)(a[i] * b[i]);
+}
+template<typename T>
+static void mulInto4(T* dst, const T* a, const T* b, size_t n) {
+	size_t i = 0;
+	for (; i + 4 <= n; i += 4) {
+		const T a0 = a[i], a1 = a[i + 1], a2 = a[i + 2], a3 = a[i + 3];
+		const T b0 = b[i], b1 = b[i + 1], b2 = b[i + 2], b3 = b[i + 3];
+		dst[i] = (T)(a0 * b0);
+		dst[i + 1] = (T)(a1 * b1);
+		dst[i + 2] = (T)(a2 * b2);
+		dst[i + 3] = (T)(a3 * b3);
+	}
+	for (; i < n; ++i)
+		dst[i] = (T)(a[i] * b[i]);
+}
+static void mulInto(float* dst, const float* a, const float* b, size_t n) {
+	mulInto4(dst, a, b, n);
+}
+static void mulInto(double* dst, const double* a, const double* b, size_t n) {
+	mulInto4(dst, a, b, n);
 }
 template<typename T>
 static void divInto(T* dst, const T* a, const T* b, size_t n) {
@@ -3317,7 +3358,23 @@ NDArray NDArray::binaryOp(const NDArray& other, ArithOp op) const {
 	const NDArray& right = maybeConvert(other, resultType, rightTmp);
 	if (type == resultType) {
 		// Left already matches: do not CoW-share *this (wrap would be mutated).
-		NDArray result(shape, resultType);
+		// Skip bzero — applyBinaryInto writes every lane.
+		NDArray result;
+		result.shape = shape;
+		result.type = resultType;
+		const size_t n = result.numElements();
+		if (n != 0) {
+			result.memorySize = bufferBytesFor(resultType, n);
+			sp<NDArrayBuffer> buf(UNIQUE);
+			NDArrayBuffer* raw = buf.get();
+			raw->data = malloc(result.memorySize ? result.memorySize : 1);
+			raw->byteSize = result.memorySize;
+			raw->elementType = resultType;
+			raw->ownsData = true;
+			noteOwnedBufferAlloc();
+			result.buffer = std::move(buf);
+			result.rebindPointers();
+		}
 		result.applyBinaryInto(left, right, op);
 		return result;
 	}

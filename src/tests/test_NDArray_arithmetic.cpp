@@ -1005,3 +1005,121 @@ TEST(NDArray_arithmetic, MixedTypeAdd_StillPromotes) {
 	EXPECT_EQ(a.type, INT8);
 	EXPECT_EQ(a.get<int>({0}), -1);
 }
+
+// 4-wide F32/F64 add/mul + tail. Every lane is checked so an
+// uninitialized result that missed a store fails.
+
+static void fillRampF32(NDArray& a, float start, float step) {
+	const size_t n = a.numElements();
+	for (size_t i = 0; i < n; ++i)
+		a.setFlat(i, start + step * (float)i);
+}
+
+static void fillRampF64(NDArray& a, double start, double step) {
+	const size_t n = a.numElements();
+	for (size_t i = 0; i < n; ++i)
+		a.setFlat(i, start + step * (double)i);
+}
+
+TEST(NDArray_arithmetic, F32_Add_FourWideTail) {
+	const int n = 17;
+	NDArray a({n}, F32);
+	NDArray b({n}, F32);
+	fillRampF32(a, 0.25f, 0.5f);
+	fillRampF32(b, -3.0f, 0.125f);
+	const size_t before = NDArray::ownedBufferAllocCount();
+	NDArray c = a + b;
+	EXPECT_EQ(NDArray::ownedBufferAllocCount() - before, 1u);
+	EXPECT_EQ(c.type, F32);
+	EXPECT_TRUE(c.ownsStorage());
+	for (int i = 0; i < n; ++i)
+		EXPECT_FLOAT_EQ(c.get<float>({i}), a.get<float>({i}) + b.get<float>({i}));
+	EXPECT_FLOAT_EQ(a.get<float>({0}), 0.25f);
+}
+
+TEST(NDArray_arithmetic, F32_Mul_FourWideTail) {
+	const int n = 17;
+	NDArray a({n}, F32);
+	NDArray b({n}, F32);
+	fillRampF32(a, 1.0f, 0.25f);
+	fillRampF32(b, -2.0f, 0.5f);
+	NDArray c = a * b;
+	EXPECT_EQ(c.type, F32);
+	for (int i = 0; i < n; ++i)
+		EXPECT_FLOAT_EQ(c.get<float>({i}), a.get<float>({i}) * b.get<float>({i}));
+}
+
+TEST(NDArray_arithmetic, F64_Add_FourWideTail) {
+	const int n = 17;
+	NDArray a({n}, F64);
+	NDArray b({n}, F64);
+	fillRampF64(a, 0.25, 0.5);
+	fillRampF64(b, -3.0, 0.125);
+	NDArray c = a + b;
+	EXPECT_EQ(c.type, F64);
+	for (int i = 0; i < n; ++i)
+		EXPECT_DOUBLE_EQ(c.get<double>({i}), a.get<double>({i}) + b.get<double>({i}));
+}
+
+TEST(NDArray_arithmetic, F64_Mul_FourWideTail) {
+	const int n = 17;
+	NDArray a({n}, F64);
+	NDArray b({n}, F64);
+	fillRampF64(a, 1.0, 0.25);
+	fillRampF64(b, -2.0, 0.5);
+	NDArray c = a * b;
+	EXPECT_EQ(c.type, F64);
+	for (int i = 0; i < n; ++i)
+		EXPECT_DOUBLE_EQ(c.get<double>({i}), a.get<double>({i}) * b.get<double>({i}));
+}
+
+TEST(NDArray_arithmetic, F32_Add_LongNotMultipleOfFour) {
+	const int n = 67;
+	NDArray a({n}, F32);
+	NDArray b({n}, F32);
+	fillRampF32(a, -8.0f, 0.03125f);
+	fillRampF32(b, 2.0f, -0.0625f);
+	NDArray c = a + b;
+	for (int i = 0; i < n; ++i)
+		EXPECT_FLOAT_EQ(c.get<float>({i}), a.get<float>({i}) + b.get<float>({i}));
+}
+
+TEST(NDArray_arithmetic, F64_Mul_LongNotMultipleOfFour) {
+	const int n = 67;
+	NDArray a({n}, F64);
+	NDArray b({n}, F64);
+	fillRampF64(a, -8.0, 0.03125);
+	fillRampF64(b, 2.0, -0.0625);
+	NDArray c = a * b;
+	for (int i = 0; i < n; ++i)
+		EXPECT_DOUBLE_EQ(c.get<double>({i}), a.get<double>({i}) * b.get<double>({i}));
+}
+
+TEST(NDArray_arithmetic, F32_AddInto_AliasingDestIsA_FourWide) {
+	const int n = 17;
+	NDArray a({n}, F32);
+	NDArray b({n}, F32);
+	fillRampF32(a, 1.0f, 1.0f);
+	fillRampF32(b, 0.5f, -0.25f);
+	float expect[17];
+	for (int i = 0; i < n; ++i)
+		expect[i] = a.get<float>({i}) + b.get<float>({i});
+	NDArray::binaryOpInto(a, a, b, NDArray::ArithOp::Add);
+	for (int i = 0; i < n; ++i)
+		EXPECT_FLOAT_EQ(a.get<float>({i}), expect[i]);
+}
+
+TEST(NDArray_arithmetic, F64_MulInto_AliasingDestIsB_FourWide) {
+	const int n = 17;
+	NDArray a({n}, F64);
+	NDArray b({n}, F64);
+	fillRampF64(a, 1.0, 0.5);
+	fillRampF64(b, -1.0, 0.25);
+	double expect[17];
+	for (int i = 0; i < n; ++i)
+		expect[i] = a.get<double>({i}) * b.get<double>({i});
+	NDArray::binaryOpInto(b, a, b, NDArray::ArithOp::Mul);
+	for (int i = 0; i < n; ++i)
+		EXPECT_DOUBLE_EQ(b.get<double>({i}), expect[i]);
+	EXPECT_DOUBLE_EQ(a.get<double>({0}), 1.0);
+}
