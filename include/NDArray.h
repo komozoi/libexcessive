@@ -1661,9 +1661,7 @@ private:
 					return static_cast<T>(int32[offset]);
 			case INT64:
 				if constexpr (std::is_same_v<T, uint256_t>)
-					return int64[offset] < 0
-						? uint256_t((int)int64[offset])
-						: uint256_t((uint64_t)int64[offset]);
+					return uint256_t(int64[offset]);
 				else
 					return static_cast<T>(int64[offset]);
 			case F16:
@@ -1789,9 +1787,7 @@ private:
 					if constexpr (std::is_same_v<T, bool>)
 						uint256[offset] = value ? uint256_t(1) : uint256_t(0);
 					else if constexpr (std::is_integral_v<T> && std::is_signed_v<T>)
-						uint256[offset] = value < 0
-							? uint256_t((int)value)
-							: uint256_t((uint64_t)value);
+						uint256[offset] = uint256_t((int64_t)value);
 					else if constexpr (std::is_integral_v<T>)
 						uint256[offset] = uint256_t((uint64_t)value);
 					else if constexpr (std::is_floating_point_v<T>)

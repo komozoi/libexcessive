@@ -1822,7 +1822,7 @@ static void requireScoreLength(const NDArrayView& a, const NDArrayView& b, const
 template <typename Acc>
 static Acc accFromI64(int64_t v) {
 	if constexpr (std::is_same_v<Acc, uint256_t>)
-		return v < 0 ? uint256_t((int)v) : uint256_t((uint64_t)v);
+		return uint256_t(v);
 	else
 		return static_cast<Acc>(v);
 }
@@ -2589,7 +2589,7 @@ uint256_t NDArray::loadAsU256(size_t i) const {
 		case UINT8:   return uint256_t((uint64_t)uint8[i]);
 		case INT8:    return uint256_t((int)int8[i]);
 		case INT32:   return uint256_t((int)int32[i]);
-		case INT64:   return uint256_t((uint64_t)int64[i]); // truncates sign bit interpretation
+		case INT64:   return uint256_t(int64[i]);
 		case F16:
 		case BF16:    return uint256_t((double)ndarray_half::load(type, u16[i]));
 		case F32:     return uint256_t((double)float32[i]);
@@ -2633,10 +2633,7 @@ void NDArray::storeFromI64(size_t i, int64_t v) {
 		case F32:     float32[i] = (float)v; break;
 		case F64:     float64[i] = (double)v; break;
 		case UINT256:
-			if (v < 0)
-				uint256[i] = uint256_t((int)v); // two's-complement via int ctor when in range
-			else
-				uint256[i] = uint256_t((uint64_t)v);
+			uint256[i] = uint256_t(v);
 			break;
 		default: throw std::runtime_error("storeFromI64: invalid type");
 	}
@@ -3267,9 +3264,7 @@ void NDArray::applyInt64ScalarInPlace(int64_t scalar, ArithOp op) {
 			break;
 		}
 		case UINT256: {
-			uint256_t s = scalar < 0
-				? uint256_t((int)scalar)
-				: uint256_t((uint64_t)scalar);
+			uint256_t s = uint256_t(scalar);
 			switch (op) {
 				case ArithOp::Add: addBasic(uint256, s, n); break;
 				case ArithOp::Sub: subBasic(uint256, s, n); break;
@@ -4954,7 +4949,7 @@ struct NDArray::Impl {
 		NDArray out(a.shape, INT3);
 		const size_t n = a.numElements();
 		if (a.type == UINT256) {
-			uint256_t su = s < 0 ? uint256_t((int)s) : uint256_t((uint64_t)s);
+			uint256_t su = uint256_t(s);
 			for (size_t i = 0; i < n; ++i)
 				int3_setSigned(out.uint64, i, threeWayU256(a.uint256[i], su));
 			return out;

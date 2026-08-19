@@ -147,6 +147,18 @@ public:
 	}
 
 	/**
+	 * @brief Constructs from a signed 64-bit integer.
+	 * @param value The initial value. Sign-extends to the full bigint.
+	 */
+	UnsignedFixedWidthBigInt(int64_t value) { // NOLINT(*-explicit-constructor)
+		this->data.chunks[0] = (uint64_t)value;
+		if (value < 0)
+			memset(&this->data.chunks[1], 0xFF, sizeof(*this->data.chunks) * (N - 1));
+		else
+			bzero(&this->data.chunks[1], sizeof(*this->data.chunks) * (N - 1));
+	}
+
+	/**
 	 * @brief Constructs from a double.
 	 * @param value The initial double value.
 	 */

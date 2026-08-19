@@ -183,6 +183,23 @@ TEST(UnsignedFixedWidthBigIntTest, Multiply) {
 	EXPECT_EQ(result, resultExpected);
 }
 
+TEST(UnsignedFixedWidthBigIntTest, Int64SignExtend) {
+	uint256_t m1((int64_t)-1);
+	EXPECT_EQ(m1, uint256_t(-1));
+	EXPECT_EQ(m1.data.chunks[0], ~0ULL);
+	EXPECT_EQ(m1.data.chunks[3], ~0ULL);
+
+	uint256_t m32((int64_t)-4294967296LL);
+	EXPECT_EQ(m32, -uint256_t((uint64_t)1 << 32));
+	EXPECT_EQ(m32.data.chunks[0], 0xFFFFFFFF00000000ULL);
+	EXPECT_EQ(m32.data.chunks[1], ~0ULL);
+	EXPECT_EQ(m32.data.chunks[2], ~0ULL);
+	EXPECT_EQ(m32.data.chunks[3], ~0ULL);
+
+	uint256_t p((int64_t)1);
+	EXPECT_EQ(p, uint256_t((uint64_t)1));
+}
+
 TEST(UnsignedFixedWidthBigIntTest, SignedLessThan_PositiveVsNegative) {
 	uint256_t a(1); // +1
 	uint256_t b = -a; // -1

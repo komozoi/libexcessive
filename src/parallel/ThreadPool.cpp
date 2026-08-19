@@ -19,6 +19,8 @@
 #include "parallel/ThreadPool.h"
 #include <stdexcept>
 
+static thread_local ThreadPool* tPoolThisWorker = nullptr;
+
 ThreadPool::ThreadPool(int threads) : stop(false) {
 	for (int i = 0; i < threads; ++i) {
 		workers.add(std::thread(&ThreadPool::workerLoop, this, i + 1));
@@ -30,6 +32,7 @@ ThreadPool::~ThreadPool() {
 }
 
 void ThreadPool::workerLoop(int workerId) {
+	tPoolThisWorker = this;
 	unsigned lastEpoch = 0;
 	for (;;) {
 		sp<ThreadPoolTask> task;
@@ -187,4 +190,8 @@ static int defaultWorkerCount() {
 ThreadPool& ThreadPool::getDefault() {
 	static ThreadPool pool(defaultWorkerCount());
 	return pool;
+}
+
+bool ThreadPool::isWorkerThread() const {
+	return tPoolThisWorker == this;
 }

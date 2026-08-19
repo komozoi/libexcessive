@@ -100,6 +100,28 @@ TEST(NDArray_conversions, UINT8_to_UINT256_Lossless) {
 	EXPECT_EQ(b.get<uint256_t>({2}), uint256_t(255));
 }
 
+TEST(NDArray_conversions, INT64_to_UINT256_SignExtendsFullWidth) {
+	const int64_t minusOne = (int64_t)-1;
+	const int64_t minusTwo32 = (int64_t)-4294967296LL;
+	const uint256_t allOnes(-1);
+	const uint256_t extTwo32 = -uint256_t((uint64_t)1 << 32);
+
+	NDArray a({2}, INT64);
+	a.set({0}, minusOne);
+	a.set({1}, minusTwo32);
+	EXPECT_EQ(a.get<uint256_t>({0}), allOnes);
+	EXPECT_EQ(a.get<uint256_t>({1}), extTwo32);
+
+	NDArray b = a.convert(UINT256);
+	EXPECT_EQ(b.type, UINT256);
+	EXPECT_EQ(b.get<uint256_t>({0}), allOnes);
+	EXPECT_EQ(b.get<uint256_t>({1}), extTwo32);
+
+	NDArray u({1}, UINT256);
+	u.set({0}, minusTwo32);
+	EXPECT_EQ(u.get<uint256_t>({0}), extTwo32);
+}
+
 TEST(NDArray_conversions, BINARY_to_UINT8) {
 	NDArray a({4}, BINARY);
 	a.set({0}, 1);

@@ -149,6 +149,9 @@ public:
 	 */
 	static ThreadPool& getDefault();
 
+	/** True if the calling thread is one of this pool's worker threads. */
+	bool isWorkerThread() const;
+
 	/**
 	 * Zero-alloc barrier: run `fn` on the caller (worker 0) and every pool
 	 * thread (workers 1..getPoolSize()). `nWorkers` is getPoolSize()+1.

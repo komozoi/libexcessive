@@ -7,13 +7,16 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <future>
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <sys/mman.h>
+#include <thread>
 #include <unistd.h>
 
 #include "NDArray.h"
 #include "fs/FdHandle.h"
+#include "parallel/ThreadPool.h"
 
 
 static void fillSeq(NDArray& a, int start) {
@@ -457,6 +460,39 @@ TEST(NDArray_matmul, F32_ParallelStripsMatchIdentity) {
 			a.set({i, j}, (float)((i * 17 + j) % 13) * 0.1f);
 	NDArray I = identitySquare(n, F32);
 	expectClose(a.matmul(I), a);
+}
+
+TEST(NDArray_matmul, F32_TwoConcurrentLargeMatchIdentity) {
+	const int n = 448;
+	NDArray a({n, n}, F32);
+	for (int i = 0; i < n; ++i)
+		for (int j = 0; j < n; ++j)
+			a.set({i, j}, (float)((i * 17 + j) % 13) * 0.1f);
+	NDArray I = identitySquare(n, F32);
+	NDArray c1({n, n}, F32);
+	NDArray c2({n, n}, F32);
+	std::thread t1([&]() { c1 = a.matmul(I); });
+	std::thread t2([&]() { c2 = a.matmul(I); });
+	t1.join();
+	t2.join();
+	expectClose(c1, a);
+	expectClose(c2, a);
+}
+
+TEST(NDArray_matmul, F32_LargeOnDefaultPoolWorkerCompletes) {
+	const int n = 448;
+	NDArray a({n, n}, F32);
+	for (int i = 0; i < n; ++i)
+		for (int j = 0; j < n; ++j)
+			a.set({i, j}, (float)((i * 17 + j) % 13) * 0.1f);
+	NDArray I = identitySquare(n, F32);
+	std::promise<NDArray> done;
+	std::future<NDArray> fut = done.get_future();
+	ThreadPool::getDefault().submit([&a, &I, &done]() {
+		done.set_value(a.matmul(I));
+	});
+	ASSERT_EQ(fut.wait_for(std::chrono::seconds(60)), std::future_status::ready);
+	expectClose(fut.get(), a);
 }
 
 TEST(NDArray_matmul, OddSizesMatchNaive) {

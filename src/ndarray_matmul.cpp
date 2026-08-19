@@ -10,7 +10,9 @@
 #include "parallel/ThreadPool.h"
 
 #include <cstring>
+#include <mutex>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 
 #if defined(_MSC_VER)
@@ -214,7 +216,19 @@ static void ndmRunNStrips(int N, int nrAlign, size_t work,
 	job.ctx = ctx;
 	job.N = N;
 	job.nc = nc;
-	pool.parallelFor(ndmStripWorker, &job);
+	if (pool.isWorkerThread()) {
+		fn(ctx, 0, N);
+		return;
+	}
+	static std::mutex gemmPfor;
+	std::lock_guard<std::mutex> gemmLock(gemmPfor);
+	try {
+		pool.parallelFor(ndmStripWorker, &job);
+	} catch (const std::runtime_error& e) {
+		if (std::string(e.what()) != "ThreadPool::parallelFor is not nestable")
+			throw;
+		fn(ctx, 0, N);
+	}
 }
 
 static size_t popcnt64(uint64_t x) {
