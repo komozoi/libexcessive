@@ -1212,6 +1212,8 @@ static void unpackInt3SignedI32(int32_t* dst, const uint64_t* src, size_t n) {
 		dst[i] = int3_getSigned(src, i);
 }
 
+static int32_t int3RangeDot(const uint64_t* Aw, size_t aOff, const int32_t* x, int k0, int k1);
+
 struct I3StreamJob {
 	int32_t* C;
 	const int32_t* X;
@@ -1347,34 +1349,9 @@ static void gemmINT3_streamB(const int32_t* X, const uint64_t* Bw, int32_t* C, i
 	ndmRunNStrips(N, 16, work, gemmINT3_streamB_strip, &job);
 }
 
-static void gemvINT3_streamA(const uint64_t* Aw, const int32_t* x, int32_t* y, int M, int K) {
-	int wordsK = K / 16;
-	for (int i = 0; i < M; ++i) {
-		const uint64_t* row = Aw + ((size_t)i * (size_t)K) / 16;
-#if NDM_AVX512
-		__m512i accv = _mm512_setzero_si512();
-		int w = 0;
-		for (; w < wordsK; ++w) {
-			__m512i av = ndmNibbleWordToEpi32(row[w]);
-			__m512i xv = _mm512_loadu_si512(x + w * 16);
-			accv = _mm512_add_epi32(accv, _mm512_mullo_epi32(av, xv));
-		}
-		int32_t acc = (int32_t)_mm512_reduce_add_epi32(accv);
-#else
-		int32_t acc = 0;
-		int w = 0;
-		for (; w < wordsK; ++w) {
-			uint64_t packed = row[w];
-			for (int t = 0; t < 16; ++t) {
-				int v = (int)((packed >> (unsigned)(t * 4)) & 7u);
-				acc += ((v >= 4) ? v - 8 : v) * x[w * 16 + t];
-			}
-		}
-#endif
-		for (int k = wordsK * 16; k < K; ++k)
-			acc += int3_getSigned(Aw, (size_t)i * (size_t)K + (size_t)k) * x[k];
-		y[i] = acc;
-	}
+static void gemvINT3_streamA(const uint64_t* Aw, const int32_t* x, int32_t* y, int ldc, int M, int K) {
+	for (int i = 0; i < M; ++i)
+		y[(size_t)i * (size_t)ldc] = int3RangeDot(Aw, (size_t)i * (size_t)K, x, 0, K);
 }
 
 #if NDM_VNNI
@@ -1499,16 +1476,7 @@ static void gemmINT3(const uint64_t* Aw, const uint64_t* Bw, int32_t* C, int ldc
 	if (N == 1) {
 		int32_t* x = (int32_t*)alloc64((size_t)K * sizeof(int32_t));
 		unpackInt3SignedI32(x, Bw, (size_t)K);
-		if (((size_t)K % 16u) == 0)
-			gemvINT3_streamA(Aw, x, C, M, K);
-		else {
-			for (int i = 0; i < M; ++i) {
-				int32_t acc = 0;
-				for (int k = 0; k < K; ++k)
-					acc += int3_getSigned(Aw, (size_t)i * (size_t)K + (size_t)k) * x[k];
-				C[(size_t)i * (size_t)ldc] = acc;
-			}
-		}
+		gemvINT3_streamA(Aw, x, C, ldc, M, K);
 		free64(x);
 		return;
 	}
@@ -2442,20 +2410,34 @@ static int32_t int3WordDot(uint64_t packed, const int32_t* NDM_RESTRICT x) {
 #endif
 }
 
+static int32_t int3PartialWordDot(uint64_t packed, unsigned lane0, const int32_t* NDM_RESTRICT x,
+                                  int n) {
+	int32_t av[16];
+	for (int t = 0; t < n; ++t) {
+		int p = (int)((packed >> (unsigned)((lane0 + (unsigned)t) * 4)) & 7u);
+		av[t] = (p >= 4) ? p - 8 : p;
+	}
+	return dotRange4<int32_t, int32_t>(av, x, n);
+}
+
 static int32_t int3RangeDot(const uint64_t* Aw, size_t aOff, const int32_t* NDM_RESTRICT x,
                             int k0, int k1) {
 	int32_t acc = 0;
 	int k = k0;
-	while (k < k1 && ((aOff + (size_t)k) & 15u) != 0) {
-		acc += int3_getSigned(Aw, aOff + (size_t)k) * x[k];
-		++k;
+	if (k < k1 && ((aOff + (size_t)k) & 15u) != 0) {
+		unsigned lane = (unsigned)((aOff + (size_t)k) & 15u);
+		int npre = 16 - (int)lane;
+		if (npre > k1 - k)
+			npre = k1 - k;
+		acc += int3PartialWordDot(Aw[(aOff + (size_t)k) / 16], lane, x + k, npre);
+		k += npre;
 	}
 	while (k + 16 <= k1) {
 		acc += int3WordDot(Aw[(aOff + (size_t)k) / 16], x + k);
 		k += 16;
 	}
-	for (; k < k1; ++k)
-		acc += int3_getSigned(Aw, aOff + (size_t)k) * x[k];
+	if (k < k1)
+		acc += int3PartialWordDot(Aw[(aOff + (size_t)k) / 16], 0, x + k, k1 - k);
 	return acc;
 }
 

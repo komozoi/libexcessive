@@ -115,6 +115,27 @@ static void benchF32Gemv(LogEndpoint& log) {
 	report(log, "F32 GEMV", "1024x1024 @ 1024", reps, elapsedNs(t0, t1));
 }
 
+static void benchInt3Gemv(LogEndpoint& log) {
+	const int n = 256;
+	const int warmup = 4;
+	const int reps = 20;
+	NDArray a({n, n}, INT3);
+	NDArray x({n}, INT3);
+	fillInt3(a, 1);
+	fillInt3(x, 2);
+	for (int i = 0; i < warmup; ++i) {
+		NDArray y = a.gemv(x);
+		gSink += (int64_t)y.getFlat<int>(0);
+	}
+	std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+	for (int i = 0; i < reps; ++i) {
+		NDArray y = a.gemv(x);
+		gSink += (int64_t)y.getFlat<int>(0);
+	}
+	std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+	report(log, "INT3 GEMV", "256x256 @ 256", reps, elapsedNs(t0, t1));
+}
+
 static void benchBinaryHamming(LogEndpoint& log) {
 	const int n = 65536;
 	const int warmup = 4;
@@ -138,6 +159,7 @@ int main() {
 	benchInt3Dot(log);
 	benchF32Gemm(log);
 	benchF32Gemv(log);
+	benchInt3Gemv(log);
 	benchBinaryHamming(log);
 	return 0;
 }

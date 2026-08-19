@@ -614,6 +614,28 @@ TEST(NDArray_matmul, INT3_N17_MatchesNaive) {
 	expectClose(a.matmul(b), naiveMatmulI64(a, b));
 }
 
+TEST(NDArray_matmul, INT3_Gemv_KNotMultipleOf16) {
+	const int ks[3] = {17, 20, 33};
+	for (int t = 0; t < 3; ++t) {
+		int K = ks[t];
+		const int M = 5;
+		NDArray a({M, K}, INT3);
+		NDArray x({K}, INT3);
+		for (int i = 0; i < M * K; ++i)
+			a.setFlat((size_t)i, (i % 7) - 3);
+		for (int i = 0; i < K; ++i)
+			x.setFlat((size_t)i, (i % 5) - 2);
+		NDArray y = a.gemv(x);
+		NDArray xm({K, 1}, INT3);
+		for (int i = 0; i < K; ++i)
+			xm.set({i, 0}, x.get<int>({i}));
+		NDArray plane = naiveMatmulI64(a, xm);
+		EXPECT_EQ(y.type, INT32);
+		for (int i = 0; i < M; ++i)
+			EXPECT_EQ(y.get<int>({i}), plane.get<int>({i, 0})) << "K=" << K << " i=" << i;
+	}
+}
+
 TEST(NDArray_matmul, INT3_PackedBTileSample) {
 	const int M = 32;
 	const int K = 1024;
