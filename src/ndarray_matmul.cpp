@@ -253,6 +253,15 @@ static bool isPackedContig2d(const NDArrayView& v, int rows, int cols) {
 	return v.isContiguous();
 }
 
+// Rank-2 packed, or rank-1 as a row (1, n) or column (n, 1).
+static bool isPackedContigMK(const NDArrayView& v, int rows, int cols) {
+	if (v.getShape().size() == 1 && v.data() && v.isContiguous()) {
+		int n = v.getShape().get(0);
+		return (rows == 1 && n == cols) || (cols == 1 && n == rows);
+	}
+	return isPackedContig2d(v, rows, cols);
+}
+
 /** First logical element of a contiguous view. Packed types only if offset == 0. */
 static const void* contigElemPtr(const NDArrayView& v) {
 	const void* base = v.data();
@@ -2024,41 +2033,39 @@ static void storePlane(NDArray& c, const NDArray& plane, int batch, int b) {
 	}
 }
 
-static NDArray gemmRaw(NDArrayType type, const void* ap, int lda, const void* bp, int ldb,
-                       int M, int N, int K, bool wrapA, bool wrapB) {
-	NDArray c({M, N}, matmulResultType(type));
-	void* cp = c.data();
+static void gemmRawInto(void* cp, NDArrayType type, const void* ap, int lda, const void* bp, int ldb,
+                        int M, int N, int K, int ldc, bool wrapA, bool wrapB) {
 	if (M == 0 || N == 0)
-		return c;
-	if (!ap || !bp)
+		return;
+	if (!ap || !bp || !cp)
 		throw std::invalid_argument("NDArray::matmul - null buffer");
 
 	if (N == 1) {
 		switch (type) {
 			case F16:
 				gemvHalf(NdmHalf::F16, (const uint16_t*)ap, lda, (const uint16_t*)bp, (float*)cp, M, K);
-				return c;
+				return;
 			case BF16:
 				gemvHalf(NdmHalf::BF16, (const uint16_t*)ap, lda, (const uint16_t*)bp, (float*)cp, M, K);
-				return c;
+				return;
 			case F32:
 				gemvDense<float, float, float>((const float*)ap, lda, (const float*)bp, (float*)cp, M, K);
-				return c;
+				return;
 			case F64:
 				gemvDense<double, double, double>((const double*)ap, lda, (const double*)bp, (double*)cp, M, K);
-				return c;
+				return;
 			case INT8:
 				gemvDense<int8_t, int32_t, int32_t>((const int8_t*)ap, lda, (const int8_t*)bp, (int32_t*)cp, M, K);
-				return c;
+				return;
 			case UINT8:
 				gemvDense<uint8_t, int32_t, int32_t>((const uint8_t*)ap, lda, (const uint8_t*)bp, (int32_t*)cp, M, K);
-				return c;
+				return;
 			case INT32:
 				gemvDense<int32_t, int64_t, int64_t>((const int32_t*)ap, lda, (const int32_t*)bp, (int64_t*)cp, M, K);
-				return c;
+				return;
 			case INT64:
 				gemvDense<int64_t, int64_t, int64_t>((const int64_t*)ap, lda, (const int64_t*)bp, (int64_t*)cp, M, K);
-				return c;
+				return;
 			default:
 				break;
 		}
@@ -2067,36 +2074,36 @@ static NDArray gemmRaw(NDArrayType type, const void* ap, int lda, const void* bp
 	switch (type) {
 		case F16:
 			gemmHalf(NdmHalf::F16, (const uint16_t*)ap, lda, (const uint16_t*)bp, ldb,
-			         (float*)cp, N, M, N, K, wrapA, wrapB);
+			         (float*)cp, ldc, M, N, K, wrapA, wrapB);
 			break;
 		case BF16:
 			gemmHalf(NdmHalf::BF16, (const uint16_t*)ap, lda, (const uint16_t*)bp, ldb,
-			         (float*)cp, N, M, N, K, wrapA, wrapB);
+			         (float*)cp, ldc, M, N, K, wrapA, wrapB);
 			break;
 		case F32:
-			gemmF32((const float*)ap, lda, (const float*)bp, ldb, (float*)cp, N, M, N, K, wrapA, wrapB);
+			gemmF32((const float*)ap, lda, (const float*)bp, ldb, (float*)cp, ldc, M, N, K, wrapA, wrapB);
 			break;
 		case F64:
-			gemmF64((const double*)ap, lda, (const double*)bp, ldb, (double*)cp, N, M, N, K, wrapA, wrapB);
+			gemmF64((const double*)ap, lda, (const double*)bp, ldb, (double*)cp, ldc, M, N, K, wrapA, wrapB);
 			break;
 		case INT8:
-			gemmINT8((const int8_t*)ap, lda, (const int8_t*)bp, ldb, (int32_t*)cp, N, M, N, K);
+			gemmINT8((const int8_t*)ap, lda, (const int8_t*)bp, ldb, (int32_t*)cp, ldc, M, N, K);
 			break;
 		case UINT8:
-			gemmUINT8((const uint8_t*)ap, lda, (const uint8_t*)bp, ldb, (int32_t*)cp, N, M, N, K);
+			gemmUINT8((const uint8_t*)ap, lda, (const uint8_t*)bp, ldb, (int32_t*)cp, ldc, M, N, K);
 			break;
 		case INT32:
-			gemmINT32((const int32_t*)ap, lda, (const int32_t*)bp, ldb, (int64_t*)cp, N, M, N, K, wrapA, wrapB);
+			gemmINT32((const int32_t*)ap, lda, (const int32_t*)bp, ldb, (int64_t*)cp, ldc, M, N, K, wrapA, wrapB);
 			break;
 		case INT64:
-			gemmINT64((const int64_t*)ap, lda, (const int64_t*)bp, ldb, (int64_t*)cp, N, M, N, K, wrapA, wrapB);
+			gemmINT64((const int64_t*)ap, lda, (const int64_t*)bp, ldb, (int64_t*)cp, ldc, M, N, K, wrapA, wrapB);
 			break;
 		case UINT256:
-			gemmU256((const uint256_t*)ap, lda, (const uint256_t*)bp, ldb, (uint256_t*)cp, N, M, N, K);
+			gemmU256((const uint256_t*)ap, lda, (const uint256_t*)bp, ldb, (uint256_t*)cp, ldc, M, N, K);
 			break;
 		case INT3:
 			if (lda == K && ldb == N)
-				gemmINT3((const uint64_t*)ap, (const uint64_t*)bp, (int32_t*)cp, N, M, N, K, wrapA || wrapB);
+				gemmINT3((const uint64_t*)ap, (const uint64_t*)bp, (int32_t*)cp, ldc, M, N, K, wrapA || wrapB);
 			else {
 				NDArray ad({M, K}, INT3);
 				NDArray bd({K, N}, INT3);
@@ -2108,12 +2115,12 @@ static NDArray gemmRaw(NDArrayType type, const void* ap, int lda, const void* bp
 				for (int k = 0; k < K; ++k)
 					for (int j = 0; j < N; ++j)
 						bd.set({k, j}, int3_getSigned(Bs, (size_t)k * (size_t)ldb + (size_t)j));
-				return gemmRaw(INT3, ad.data(), K, bd.data(), N, M, N, K, false, false);
+				gemmRawInto(cp, INT3, ad.data(), K, bd.data(), N, M, N, K, ldc, false, false);
 			}
 			break;
 		case BINARY:
 			if (lda == K && ldb == N)
-				gemmBINARY((const uint64_t*)ap, (const uint64_t*)bp, (int32_t*)cp, N, M, N, K, wrapA || wrapB);
+				gemmBINARY((const uint64_t*)ap, (const uint64_t*)bp, (int32_t*)cp, ldc, M, N, K, wrapA || wrapB);
 			else {
 				NDArray ad({M, K}, BINARY);
 				NDArray bd({K, N}, BINARY);
@@ -2129,12 +2136,18 @@ static NDArray gemmRaw(NDArrayType type, const void* ap, int lda, const void* bp
 						size_t e = (size_t)k * (size_t)ldb + (size_t)j;
 						bd.set({k, j}, (int)((Bs[e >> 6] >> (e & 63u)) & 1u));
 					}
-				return gemmRaw(BINARY, ad.data(), K, bd.data(), N, M, N, K, false, false);
+				gemmRawInto(cp, BINARY, ad.data(), K, bd.data(), N, M, N, K, ldc, false, false);
 			}
 			break;
 		default:
 			throw std::invalid_argument("NDArray::matmul - unsupported type");
 	}
+}
+
+static NDArray gemmRaw(NDArrayType type, const void* ap, int lda, const void* bp, int ldb,
+                       int M, int N, int K, bool wrapA, bool wrapB) {
+	NDArray c({M, N}, matmulResultType(type));
+	gemmRawInto(c.data(), type, ap, lda, bp, ldb, M, N, K, N, wrapA, wrapB);
 	return c;
 }
 
@@ -2149,6 +2162,43 @@ static NDArray gemmViews2d(const NDArrayView& a, const NDArrayView& b, int M, in
 	NDArray ad = dense2d(a, M, K, 1, 0);
 	NDArray bd = dense2d(b, K, N, 1, 0);
 	return gemmRaw(a.getType(), ad.data(), K, bd.data(), N, M, N, K, false, false);
+}
+
+static NDArray gemmViewsSqueezed(const NDArrayView& a, const NDArrayView& b,
+                                 int M, int N, int K, bool squeezeM, bool squeezeN,
+                                 bool wrapA, bool wrapB) {
+	ArrayList<int> outShape;
+	if (!squeezeM)
+		outShape.add(M);
+	if (!squeezeN)
+		outShape.add(N);
+	NDArray acc(outShape, matmulResultType(a.getType()));
+	int ldc = squeezeN ? 1 : N;
+	if (ldc < 1)
+		ldc = 1;
+
+	const void* ap = nullptr;
+	const void* bp = nullptr;
+	bool wa = wrapA;
+	bool wb = wrapB;
+	NDArray ad;
+	NDArray bd;
+	if (isPackedContigMK(a, M, K))
+		ap = contigElemPtr(a);
+	if (isPackedContigMK(b, K, N))
+		bp = contigElemPtr(b);
+	if (!ap) {
+		ad = dense2d(a, M, K, 1, 0);
+		ap = ad.data();
+		wa = false;
+	}
+	if (!bp) {
+		bd = dense2d(b, K, N, 1, 0);
+		bp = bd.data();
+		wb = false;
+	}
+	gemmRawInto(acc.data(), a.getType(), ap, K, bp, N, M, N, K, ldc, wa, wb);
+	return acc;
 }
 
 struct MatmulGeom {
@@ -2270,34 +2320,8 @@ NDArray ndmatmul(const NDArrayView& a, const NDArrayView& b) {
 	if (g.batch == 1 && !g.squeezeM && !g.squeezeN)
 		return gemmViews2d(a, b, g.M, g.N, g.K, wrapA, wrapB);
 
-	if (g.batch == 1 && (g.squeezeM || g.squeezeN)) {
-		NDArray plane = gemmViews2d(a, b, g.M, g.N, g.K, wrapA, wrapB);
-		if (g.squeezeM && g.squeezeN) {
-			NDArray acc(outShape, plane.type);
-			switch (plane.type) {
-				case F32: acc.set({}, plane.get<float>({0, 0})); break;
-				case F64: acc.set({}, plane.get<double>({0, 0})); break;
-				case UINT256: acc.set({}, plane.get<uint256_t>({0, 0})); break;
-				case INT64: acc.set({}, plane.get<int64_t>({0, 0})); break;
-				default: acc.set({}, plane.get<int>({0, 0})); break;
-			}
-			return acc;
-		}
-		NDArray acc(outShape, plane.type);
-		int len = g.squeezeM ? g.N : g.M;
-		for (int t = 0; t < len; ++t) {
-			int i = g.squeezeM ? 0 : t;
-			int j = g.squeezeN ? 0 : t;
-			switch (plane.type) {
-				case F32: acc.set({t}, plane.get<float>({i, j})); break;
-				case F64: acc.set({t}, plane.get<double>({i, j})); break;
-				case UINT256: acc.set({t}, plane.get<uint256_t>({i, j})); break;
-				case INT64: acc.set({t}, plane.get<int64_t>({i, j})); break;
-				default: acc.set({t}, plane.get<int>({i, j})); break;
-			}
-		}
-		return acc;
-	}
+	if (g.batch == 1 && (g.squeezeM || g.squeezeN))
+		return gemmViewsSqueezed(a, b, g.M, g.N, g.K, g.squeezeM, g.squeezeN, wrapA, wrapB);
 
 	NDArray acc(outShape, matmulResultType(a.getType()));
 	const size_t es = denseElemSize(a.getType());

@@ -244,6 +244,94 @@ TEST(NDArray_matmul, GemvMatchesN1) {
 		EXPECT_FLOAT_EQ(y.getFlat<float>((size_t)i), c.get<float>({i, 0}));
 }
 
+TEST(NDArray_matmul, Gemv_NoExtraPlane_F32) {
+	NDArray a({8, 4}, F32);
+	NDArray x({4}, F32);
+	fillSeq(a, 1);
+	fillSeq(x, 2);
+	const size_t before = NDArray::ownedBufferAllocCount();
+	NDArray y = a.gemv(x);
+	EXPECT_EQ(NDArray::ownedBufferAllocCount() - before, 1u);
+	EXPECT_EQ(y.shape.size(), 1);
+	EXPECT_EQ(y.shape.get(0), 8);
+	NDArray xm({4, 1}, F32);
+	for (int k = 0; k < 4; ++k)
+		xm.set({k, 0}, x.get<float>({k}));
+	NDArray plane = a.matmul(xm);
+	for (int i = 0; i < 8; ++i)
+		EXPECT_FLOAT_EQ(y.getFlat<float>((size_t)i), plane.get<float>({i, 0}));
+}
+
+TEST(NDArray_matmul, Gemv_NoExtraPlane_INT3) {
+	NDArray a({6, 8}, INT3);
+	NDArray x({8}, INT3);
+	for (int i = 0; i < 48; ++i)
+		a.setFlat((size_t)i, (i % 7) - 3);
+	for (int i = 0; i < 8; ++i)
+		x.setFlat((size_t)i, (i % 5) - 2);
+	const size_t before = NDArray::ownedBufferAllocCount();
+	NDArray y = a.gemv(x);
+	EXPECT_EQ(NDArray::ownedBufferAllocCount() - before, 1u);
+	EXPECT_EQ(y.type, INT32);
+	NDArray xm({8, 1}, INT3);
+	for (int k = 0; k < 8; ++k)
+		xm.set({k, 0}, x.get<int>({k}));
+	NDArray plane = naiveMatmulI64(a, xm);
+	for (int i = 0; i < 6; ++i)
+		EXPECT_EQ(y.get<int>({i}), plane.get<int>({i, 0}));
+}
+
+TEST(NDArray_matmul, Gemv_NoExtraPlane_INT32) {
+	NDArray a({5, 3}, INT32);
+	NDArray x({3}, INT32);
+	for (int i = 0; i < 15; ++i)
+		a.setFlat((size_t)i, i + 1);
+	x.set({0}, 2); x.set({1}, -1); x.set({2}, 4);
+	const size_t before = NDArray::ownedBufferAllocCount();
+	NDArray y = a.gemv(x);
+	EXPECT_EQ(NDArray::ownedBufferAllocCount() - before, 1u);
+	EXPECT_EQ(y.type, INT64);
+	NDArray xm({3, 1}, INT32);
+	for (int k = 0; k < 3; ++k)
+		xm.set({k, 0}, x.get<int>({k}));
+	NDArray plane = naiveMatmulI64(a, xm);
+	for (int i = 0; i < 5; ++i)
+		EXPECT_EQ(y.get<int64_t>({i}), plane.get<int64_t>({i, 0}));
+}
+
+TEST(NDArray_matmul, InnerProduct_NoExtraPlane) {
+	NDArray u({5}, F32);
+	NDArray v({5}, F32);
+	fillSeq(u, 1);
+	fillSeq(v, 3);
+	const size_t before = NDArray::ownedBufferAllocCount();
+	NDArray s = u.matmul(v);
+	EXPECT_EQ(NDArray::ownedBufferAllocCount() - before, 1u);
+	EXPECT_EQ(s.shape.size(), 0);
+	float acc = 0;
+	for (int k = 0; k < 5; ++k)
+		acc += u.get<float>({k}) * v.get<float>({k});
+	EXPECT_FLOAT_EQ(s.get<float>({}), acc);
+}
+
+TEST(NDArray_matmul, VecMat_NoExtraPlane_F32) {
+	NDArray x({3}, F32);
+	NDArray b({3, 4}, F32);
+	fillSeq(x, 1);
+	fillSeq(b, 2);
+	const size_t before = NDArray::ownedBufferAllocCount();
+	NDArray y = x.matmul(b);
+	EXPECT_EQ(NDArray::ownedBufferAllocCount() - before, 1u);
+	EXPECT_EQ(y.shape.size(), 1);
+	EXPECT_EQ(y.shape.get(0), 4);
+	NDArray xm({1, 3}, F32);
+	for (int k = 0; k < 3; ++k)
+		xm.set({0, k}, x.get<float>({k}));
+	NDArray plane = xm.matmul(b);
+	for (int j = 0; j < 4; ++j)
+		EXPECT_FLOAT_EQ(y.get<float>({j}), plane.get<float>({0, j}));
+}
+
 TEST(NDArray_matmul, EmptyAndThrows) {
 	NDArray emptyA({0, 4}, F32);
 	NDArray emptyB({4, 3}, F32);
