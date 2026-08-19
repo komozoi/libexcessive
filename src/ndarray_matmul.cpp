@@ -11,6 +11,7 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <type_traits>
 
 #if defined(_MSC_VER)
 #define NDM_RESTRICT __restrict
@@ -280,6 +281,14 @@ static inline __m256 ndmFmaddPs(__m256 a, __m256 b, __m256 c) {
 	return _mm256_fmadd_ps(a, b, c);
 #else
 	return _mm256_add_ps(_mm256_mul_ps(a, b), c);
+#endif
+}
+
+static inline __m256d ndmFmaddPd(__m256d a, __m256d b, __m256d c) {
+#if NDM_FMA
+	return _mm256_fmadd_pd(a, b, c);
+#else
+	return _mm256_add_pd(_mm256_mul_pd(a, b), c);
 #endif
 }
 #endif
@@ -1806,6 +1815,403 @@ static void gemmU256(const uint256_t* A, int lda, const uint256_t* B, int ldb,
 	}
 }
 
+static void gemvF32(const float* NDM_RESTRICT A, int lda, const float* NDM_RESTRICT x,
+                    float* NDM_RESTRICT y, int M, int K) {
+	int i = 0;
+#if NDM_AVX512
+	for (; i + 4 <= M; i += 4) {
+		const float* a0 = A + (size_t)i * (size_t)lda;
+		const float* a1 = a0 + lda;
+		const float* a2 = a1 + lda;
+		const float* a3 = a2 + lda;
+		__m512 c0 = _mm512_setzero_ps();
+		__m512 c1 = _mm512_setzero_ps();
+		__m512 c2 = _mm512_setzero_ps();
+		__m512 c3 = _mm512_setzero_ps();
+		int k = 0;
+		for (; k + 16 <= K; k += 16) {
+			__m512 xv = _mm512_loadu_ps(x + k);
+			c0 = _mm512_fmadd_ps(_mm512_loadu_ps(a0 + k), xv, c0);
+			c1 = _mm512_fmadd_ps(_mm512_loadu_ps(a1 + k), xv, c1);
+			c2 = _mm512_fmadd_ps(_mm512_loadu_ps(a2 + k), xv, c2);
+			c3 = _mm512_fmadd_ps(_mm512_loadu_ps(a3 + k), xv, c3);
+		}
+		float s0 = _mm512_reduce_add_ps(c0);
+		float s1 = _mm512_reduce_add_ps(c1);
+		float s2 = _mm512_reduce_add_ps(c2);
+		float s3 = _mm512_reduce_add_ps(c3);
+		for (; k < K; ++k) {
+			float xv = x[k];
+			s0 += a0[k] * xv;
+			s1 += a1[k] * xv;
+			s2 += a2[k] * xv;
+			s3 += a3[k] * xv;
+		}
+		y[i] = s0;
+		y[i + 1] = s1;
+		y[i + 2] = s2;
+		y[i + 3] = s3;
+	}
+#elif NDM_AVX2
+	for (; i + 4 <= M; i += 4) {
+		const float* a0 = A + (size_t)i * (size_t)lda;
+		const float* a1 = a0 + lda;
+		const float* a2 = a1 + lda;
+		const float* a3 = a2 + lda;
+		__m256 c0 = _mm256_setzero_ps();
+		__m256 c1 = _mm256_setzero_ps();
+		__m256 c2 = _mm256_setzero_ps();
+		__m256 c3 = _mm256_setzero_ps();
+		int k = 0;
+		for (; k + 8 <= K; k += 8) {
+			__m256 xv = _mm256_loadu_ps(x + k);
+			c0 = ndmFmaddPs(_mm256_loadu_ps(a0 + k), xv, c0);
+			c1 = ndmFmaddPs(_mm256_loadu_ps(a1 + k), xv, c1);
+			c2 = ndmFmaddPs(_mm256_loadu_ps(a2 + k), xv, c2);
+			c3 = ndmFmaddPs(_mm256_loadu_ps(a3 + k), xv, c3);
+		}
+		alignas(32) float tmp[8];
+		_mm256_store_ps(tmp, c0);
+		float s0 = tmp[0] + tmp[1] + tmp[2] + tmp[3] + tmp[4] + tmp[5] + tmp[6] + tmp[7];
+		_mm256_store_ps(tmp, c1);
+		float s1 = tmp[0] + tmp[1] + tmp[2] + tmp[3] + tmp[4] + tmp[5] + tmp[6] + tmp[7];
+		_mm256_store_ps(tmp, c2);
+		float s2 = tmp[0] + tmp[1] + tmp[2] + tmp[3] + tmp[4] + tmp[5] + tmp[6] + tmp[7];
+		_mm256_store_ps(tmp, c3);
+		float s3 = tmp[0] + tmp[1] + tmp[2] + tmp[3] + tmp[4] + tmp[5] + tmp[6] + tmp[7];
+		for (; k < K; ++k) {
+			float xv = x[k];
+			s0 += a0[k] * xv;
+			s1 += a1[k] * xv;
+			s2 += a2[k] * xv;
+			s3 += a3[k] * xv;
+		}
+		y[i] = s0;
+		y[i + 1] = s1;
+		y[i + 2] = s2;
+		y[i + 3] = s3;
+	}
+#elif NDM_NEON
+	for (; i + 4 <= M; i += 4) {
+		const float* a0 = A + (size_t)i * (size_t)lda;
+		const float* a1 = a0 + lda;
+		const float* a2 = a1 + lda;
+		const float* a3 = a2 + lda;
+		float32x4_t c0 = vdupq_n_f32(0.f);
+		float32x4_t c1 = vdupq_n_f32(0.f);
+		float32x4_t c2 = vdupq_n_f32(0.f);
+		float32x4_t c3 = vdupq_n_f32(0.f);
+		int k = 0;
+		for (; k + 4 <= K; k += 4) {
+			float32x4_t xv = vld1q_f32(x + k);
+#if defined(__ARM_FEATURE_FMA) || defined(__aarch64__)
+			c0 = vfmaq_f32(c0, vld1q_f32(a0 + k), xv);
+			c1 = vfmaq_f32(c1, vld1q_f32(a1 + k), xv);
+			c2 = vfmaq_f32(c2, vld1q_f32(a2 + k), xv);
+			c3 = vfmaq_f32(c3, vld1q_f32(a3 + k), xv);
+#else
+			c0 = vmlaq_f32(c0, vld1q_f32(a0 + k), xv);
+			c1 = vmlaq_f32(c1, vld1q_f32(a1 + k), xv);
+			c2 = vmlaq_f32(c2, vld1q_f32(a2 + k), xv);
+			c3 = vmlaq_f32(c3, vld1q_f32(a3 + k), xv);
+#endif
+		}
+#if defined(__aarch64__)
+		float s0 = vaddvq_f32(c0);
+		float s1 = vaddvq_f32(c1);
+		float s2 = vaddvq_f32(c2);
+		float s3 = vaddvq_f32(c3);
+#else
+		float32x2_t p0 = vadd_f32(vget_low_f32(c0), vget_high_f32(c0));
+		p0 = vpadd_f32(p0, p0);
+		float s0 = vget_lane_f32(p0, 0);
+		float32x2_t p1 = vadd_f32(vget_low_f32(c1), vget_high_f32(c1));
+		p1 = vpadd_f32(p1, p1);
+		float s1 = vget_lane_f32(p1, 0);
+		float32x2_t p2 = vadd_f32(vget_low_f32(c2), vget_high_f32(c2));
+		p2 = vpadd_f32(p2, p2);
+		float s2 = vget_lane_f32(p2, 0);
+		float32x2_t p3 = vadd_f32(vget_low_f32(c3), vget_high_f32(c3));
+		p3 = vpadd_f32(p3, p3);
+		float s3 = vget_lane_f32(p3, 0);
+#endif
+		for (; k < K; ++k) {
+			float xv = x[k];
+			s0 += a0[k] * xv;
+			s1 += a1[k] * xv;
+			s2 += a2[k] * xv;
+			s3 += a3[k] * xv;
+		}
+		y[i] = s0;
+		y[i + 1] = s1;
+		y[i + 2] = s2;
+		y[i + 3] = s3;
+	}
+#elif NDM_SSE2
+	for (; i + 4 <= M; i += 4) {
+		const float* a0 = A + (size_t)i * (size_t)lda;
+		const float* a1 = a0 + lda;
+		const float* a2 = a1 + lda;
+		const float* a3 = a2 + lda;
+		__m128 c0 = _mm_setzero_ps();
+		__m128 c1 = _mm_setzero_ps();
+		__m128 c2 = _mm_setzero_ps();
+		__m128 c3 = _mm_setzero_ps();
+		int k = 0;
+		for (; k + 4 <= K; k += 4) {
+			__m128 xv = _mm_loadu_ps(x + k);
+			c0 = _mm_add_ps(c0, _mm_mul_ps(_mm_loadu_ps(a0 + k), xv));
+			c1 = _mm_add_ps(c1, _mm_mul_ps(_mm_loadu_ps(a1 + k), xv));
+			c2 = _mm_add_ps(c2, _mm_mul_ps(_mm_loadu_ps(a2 + k), xv));
+			c3 = _mm_add_ps(c3, _mm_mul_ps(_mm_loadu_ps(a3 + k), xv));
+		}
+		__m128 h0 = _mm_add_ps(c0, _mm_movehl_ps(c0, c0));
+		h0 = _mm_add_ss(h0, _mm_shuffle_ps(h0, h0, 1));
+		float s0 = _mm_cvtss_f32(h0);
+		__m128 h1 = _mm_add_ps(c1, _mm_movehl_ps(c1, c1));
+		h1 = _mm_add_ss(h1, _mm_shuffle_ps(h1, h1, 1));
+		float s1 = _mm_cvtss_f32(h1);
+		__m128 h2 = _mm_add_ps(c2, _mm_movehl_ps(c2, c2));
+		h2 = _mm_add_ss(h2, _mm_shuffle_ps(h2, h2, 1));
+		float s2 = _mm_cvtss_f32(h2);
+		__m128 h3 = _mm_add_ps(c3, _mm_movehl_ps(c3, c3));
+		h3 = _mm_add_ss(h3, _mm_shuffle_ps(h3, h3, 1));
+		float s3 = _mm_cvtss_f32(h3);
+		for (; k < K; ++k) {
+			float xv = x[k];
+			s0 += a0[k] * xv;
+			s1 += a1[k] * xv;
+			s2 += a2[k] * xv;
+			s3 += a3[k] * xv;
+		}
+		y[i] = s0;
+		y[i + 1] = s1;
+		y[i + 2] = s2;
+		y[i + 3] = s3;
+	}
+#else
+	for (; i + 4 <= M; i += 4) {
+		const float* a0 = A + (size_t)i * (size_t)lda;
+		const float* a1 = a0 + lda;
+		const float* a2 = a1 + lda;
+		const float* a3 = a2 + lda;
+		float s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+		for (int k = 0; k < K; ++k) {
+			float xv = x[k];
+			s0 += a0[k] * xv;
+			s1 += a1[k] * xv;
+			s2 += a2[k] * xv;
+			s3 += a3[k] * xv;
+		}
+		y[i] = s0;
+		y[i + 1] = s1;
+		y[i + 2] = s2;
+		y[i + 3] = s3;
+	}
+#endif
+	for (; i < M; ++i) {
+		const float* arow = A + (size_t)i * (size_t)lda;
+		float s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+		int k = 0;
+		for (; k + 4 <= K; k += 4) {
+			s0 += arow[k] * x[k];
+			s1 += arow[k + 1] * x[k + 1];
+			s2 += arow[k + 2] * x[k + 2];
+			s3 += arow[k + 3] * x[k + 3];
+		}
+		float s = (s0 + s1) + (s2 + s3);
+		for (; k < K; ++k)
+			s += arow[k] * x[k];
+		y[i] = s;
+	}
+}
+
+static void gemvF64(const double* NDM_RESTRICT A, int lda, const double* NDM_RESTRICT x,
+                    double* NDM_RESTRICT y, int M, int K) {
+	int i = 0;
+#if NDM_AVX512
+	for (; i + 4 <= M; i += 4) {
+		const double* a0 = A + (size_t)i * (size_t)lda;
+		const double* a1 = a0 + lda;
+		const double* a2 = a1 + lda;
+		const double* a3 = a2 + lda;
+		__m512d c0 = _mm512_setzero_pd();
+		__m512d c1 = _mm512_setzero_pd();
+		__m512d c2 = _mm512_setzero_pd();
+		__m512d c3 = _mm512_setzero_pd();
+		int k = 0;
+		for (; k + 8 <= K; k += 8) {
+			__m512d xv = _mm512_loadu_pd(x + k);
+			c0 = _mm512_fmadd_pd(_mm512_loadu_pd(a0 + k), xv, c0);
+			c1 = _mm512_fmadd_pd(_mm512_loadu_pd(a1 + k), xv, c1);
+			c2 = _mm512_fmadd_pd(_mm512_loadu_pd(a2 + k), xv, c2);
+			c3 = _mm512_fmadd_pd(_mm512_loadu_pd(a3 + k), xv, c3);
+		}
+		double s0 = _mm512_reduce_add_pd(c0);
+		double s1 = _mm512_reduce_add_pd(c1);
+		double s2 = _mm512_reduce_add_pd(c2);
+		double s3 = _mm512_reduce_add_pd(c3);
+		for (; k < K; ++k) {
+			double xv = x[k];
+			s0 += a0[k] * xv;
+			s1 += a1[k] * xv;
+			s2 += a2[k] * xv;
+			s3 += a3[k] * xv;
+		}
+		y[i] = s0;
+		y[i + 1] = s1;
+		y[i + 2] = s2;
+		y[i + 3] = s3;
+	}
+#elif NDM_AVX2
+	for (; i + 4 <= M; i += 4) {
+		const double* a0 = A + (size_t)i * (size_t)lda;
+		const double* a1 = a0 + lda;
+		const double* a2 = a1 + lda;
+		const double* a3 = a2 + lda;
+		__m256d c0 = _mm256_setzero_pd();
+		__m256d c1 = _mm256_setzero_pd();
+		__m256d c2 = _mm256_setzero_pd();
+		__m256d c3 = _mm256_setzero_pd();
+		int k = 0;
+		for (; k + 4 <= K; k += 4) {
+			__m256d xv = _mm256_loadu_pd(x + k);
+			c0 = ndmFmaddPd(_mm256_loadu_pd(a0 + k), xv, c0);
+			c1 = ndmFmaddPd(_mm256_loadu_pd(a1 + k), xv, c1);
+			c2 = ndmFmaddPd(_mm256_loadu_pd(a2 + k), xv, c2);
+			c3 = ndmFmaddPd(_mm256_loadu_pd(a3 + k), xv, c3);
+		}
+		alignas(32) double tmp[4];
+		_mm256_store_pd(tmp, c0);
+		double s0 = (tmp[0] + tmp[1]) + (tmp[2] + tmp[3]);
+		_mm256_store_pd(tmp, c1);
+		double s1 = (tmp[0] + tmp[1]) + (tmp[2] + tmp[3]);
+		_mm256_store_pd(tmp, c2);
+		double s2 = (tmp[0] + tmp[1]) + (tmp[2] + tmp[3]);
+		_mm256_store_pd(tmp, c3);
+		double s3 = (tmp[0] + tmp[1]) + (tmp[2] + tmp[3]);
+		for (; k < K; ++k) {
+			double xv = x[k];
+			s0 += a0[k] * xv;
+			s1 += a1[k] * xv;
+			s2 += a2[k] * xv;
+			s3 += a3[k] * xv;
+		}
+		y[i] = s0;
+		y[i + 1] = s1;
+		y[i + 2] = s2;
+		y[i + 3] = s3;
+	}
+#elif NDM_NEON && defined(__aarch64__)
+	for (; i + 4 <= M; i += 4) {
+		const double* a0 = A + (size_t)i * (size_t)lda;
+		const double* a1 = a0 + lda;
+		const double* a2 = a1 + lda;
+		const double* a3 = a2 + lda;
+		float64x2_t c0 = vdupq_n_f64(0.0);
+		float64x2_t c1 = vdupq_n_f64(0.0);
+		float64x2_t c2 = vdupq_n_f64(0.0);
+		float64x2_t c3 = vdupq_n_f64(0.0);
+		int k = 0;
+		for (; k + 2 <= K; k += 2) {
+			float64x2_t xv = vld1q_f64(x + k);
+			c0 = vfmaq_f64(c0, vld1q_f64(a0 + k), xv);
+			c1 = vfmaq_f64(c1, vld1q_f64(a1 + k), xv);
+			c2 = vfmaq_f64(c2, vld1q_f64(a2 + k), xv);
+			c3 = vfmaq_f64(c3, vld1q_f64(a3 + k), xv);
+		}
+		double s0 = vaddvq_f64(c0);
+		double s1 = vaddvq_f64(c1);
+		double s2 = vaddvq_f64(c2);
+		double s3 = vaddvq_f64(c3);
+		for (; k < K; ++k) {
+			double xv = x[k];
+			s0 += a0[k] * xv;
+			s1 += a1[k] * xv;
+			s2 += a2[k] * xv;
+			s3 += a3[k] * xv;
+		}
+		y[i] = s0;
+		y[i + 1] = s1;
+		y[i + 2] = s2;
+		y[i + 3] = s3;
+	}
+#elif NDM_SSE2
+	for (; i + 4 <= M; i += 4) {
+		const double* a0 = A + (size_t)i * (size_t)lda;
+		const double* a1 = a0 + lda;
+		const double* a2 = a1 + lda;
+		const double* a3 = a2 + lda;
+		__m128d c0 = _mm_setzero_pd();
+		__m128d c1 = _mm_setzero_pd();
+		__m128d c2 = _mm_setzero_pd();
+		__m128d c3 = _mm_setzero_pd();
+		int k = 0;
+		for (; k + 2 <= K; k += 2) {
+			__m128d xv = _mm_loadu_pd(x + k);
+			c0 = _mm_add_pd(c0, _mm_mul_pd(_mm_loadu_pd(a0 + k), xv));
+			c1 = _mm_add_pd(c1, _mm_mul_pd(_mm_loadu_pd(a1 + k), xv));
+			c2 = _mm_add_pd(c2, _mm_mul_pd(_mm_loadu_pd(a2 + k), xv));
+			c3 = _mm_add_pd(c3, _mm_mul_pd(_mm_loadu_pd(a3 + k), xv));
+		}
+		double t0[2], t1[2], t2[2], t3[2];
+		_mm_storeu_pd(t0, c0);
+		_mm_storeu_pd(t1, c1);
+		_mm_storeu_pd(t2, c2);
+		_mm_storeu_pd(t3, c3);
+		double s0 = t0[0] + t0[1];
+		double s1 = t1[0] + t1[1];
+		double s2 = t2[0] + t2[1];
+		double s3 = t3[0] + t3[1];
+		for (; k < K; ++k) {
+			double xv = x[k];
+			s0 += a0[k] * xv;
+			s1 += a1[k] * xv;
+			s2 += a2[k] * xv;
+			s3 += a3[k] * xv;
+		}
+		y[i] = s0;
+		y[i + 1] = s1;
+		y[i + 2] = s2;
+		y[i + 3] = s3;
+	}
+#else
+	for (; i + 4 <= M; i += 4) {
+		const double* a0 = A + (size_t)i * (size_t)lda;
+		const double* a1 = a0 + lda;
+		const double* a2 = a1 + lda;
+		const double* a3 = a2 + lda;
+		double s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+		for (int k = 0; k < K; ++k) {
+			double xv = x[k];
+			s0 += a0[k] * xv;
+			s1 += a1[k] * xv;
+			s2 += a2[k] * xv;
+			s3 += a3[k] * xv;
+		}
+		y[i] = s0;
+		y[i + 1] = s1;
+		y[i + 2] = s2;
+		y[i + 3] = s3;
+	}
+#endif
+	for (; i < M; ++i) {
+		const double* arow = A + (size_t)i * (size_t)lda;
+		double s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+		int k = 0;
+		for (; k + 4 <= K; k += 4) {
+			s0 += arow[k] * x[k];
+			s1 += arow[k + 1] * x[k + 1];
+			s2 += arow[k + 2] * x[k + 2];
+			s3 += arow[k + 3] * x[k + 3];
+		}
+		double s = (s0 + s1) + (s2 + s3);
+		for (; k < K; ++k)
+			s += arow[k] * x[k];
+		y[i] = s;
+	}
+}
+
 template <typename Lane, typename Acc, typename Out>
 static void gemvDense(const Lane* A, int lda, const Lane* x, Out* y, int M, int K) {
 	for (int i = 0; i < M; ++i) {
@@ -1894,7 +2300,8 @@ static void gemvDense(const Lane* A, int lda, const Lane* x, Out* y, int M, int 
 		}
 #endif
 #if defined(__SIZEOF_INT128__)
-		if (sizeof(Lane) == 8 && sizeof(Acc) == 8 && sizeof(Out) == 8) {
+		if (sizeof(Lane) == 8 && sizeof(Acc) == 8 && sizeof(Out) == 8 &&
+		    std::is_integral<Lane>::value) {
 			__int128 acc128 = 0;
 			for (int k = 0; k < K; ++k)
 				acc128 += (__int128)arow[k] * (__int128)x[k];
@@ -2017,10 +2424,10 @@ static void gemmRawInto(void* cp, NDArrayType type, const void* ap, int lda, con
 				gemvHalf(NdmHalf::BF16, (const uint16_t*)ap, lda, (const uint16_t*)bp, (float*)cp, M, K);
 				return;
 			case F32:
-				gemvDense<float, float, float>((const float*)ap, lda, (const float*)bp, (float*)cp, M, K);
+				gemvF32((const float*)ap, lda, (const float*)bp, (float*)cp, M, K);
 				return;
 			case F64:
-				gemvDense<double, double, double>((const double*)ap, lda, (const double*)bp, (double*)cp, M, K);
+				gemvF64((const double*)ap, lda, (const double*)bp, (double*)cp, M, K);
 				return;
 			case INT8:
 				gemvDense<int8_t, int32_t, int32_t>((const int8_t*)ap, lda, (const int8_t*)bp, (int32_t*)cp, M, K);

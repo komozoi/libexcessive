@@ -230,6 +230,42 @@ TEST(NDArray_matmul, IdentityAllDenseTypes) {
 	}
 }
 
+TEST(NDArray_matmul, F64_Gemv_MatchesNaive) {
+	NDArray a({5, 7}, F64);
+	NDArray x({7}, F64);
+	for (int i = 0; i < 5; ++i)
+		for (int k = 0; k < 7; ++k)
+			a.set({i, k}, (double)((i * 3 + k) % 5) + 0.5);
+	for (int k = 0; k < 7; ++k)
+		x.set({k}, (double)(k % 3) - 1.25);
+	NDArray y = a.gemv(x);
+	EXPECT_EQ(y.type, F64);
+	EXPECT_EQ(y.shape.size(), 1);
+	EXPECT_EQ(y.shape.get(0), 5);
+	for (int i = 0; i < 5; ++i) {
+		double acc = 0;
+		for (int k = 0; k < 7; ++k)
+			acc += a.get<double>({i, k}) * x.get<double>({k});
+		EXPECT_NEAR(y.get<double>({i}), acc, 1e-12);
+	}
+}
+
+TEST(NDArray_matmul, F32_Gemv_OddK_MatchesNaive) {
+	NDArray a({6, 17}, F32);
+	NDArray x({17}, F32);
+	for (int i = 0; i < 6 * 17; ++i)
+		a.setFlat((size_t)i, (float)((i % 5) + 0.25f));
+	for (int k = 0; k < 17; ++k)
+		x.set({k}, (float)((k % 4) - 0.5f));
+	NDArray y = a.gemv(x);
+	for (int i = 0; i < 6; ++i) {
+		float acc = 0;
+		for (int k = 0; k < 17; ++k)
+			acc += a.get<float>({i, k}) * x.get<float>({k});
+		EXPECT_NEAR(y.get<float>({i}), acc, 1e-4f);
+	}
+}
+
 TEST(NDArray_matmul, GemvMatchesN1) {
 	NDArray a({4, 3}, F32);
 	NDArray x({3}, F32);

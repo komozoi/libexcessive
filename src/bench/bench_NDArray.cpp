@@ -115,6 +115,51 @@ static void benchF32Gemv(LogEndpoint& log) {
 	report(log, "F32 GEMV", "1024x1024 @ 1024", reps, elapsedNs(t0, t1));
 }
 
+static void benchF32Gemv256(LogEndpoint& log) {
+	const int n = 256;
+	const int warmup = 8;
+	const int reps = 40;
+	NDArray a({n, n}, F32);
+	NDArray x({n}, F32);
+	fillF32(a, 2);
+	fillF32(x, 5);
+	for (int i = 0; i < warmup; ++i) {
+		NDArray y = a.gemv(x);
+		gSink += (int64_t)y.getFlat<float>(0);
+	}
+	std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+	for (int i = 0; i < reps; ++i) {
+		NDArray y = a.gemv(x);
+		gSink += (int64_t)y.getFlat<float>(0);
+	}
+	std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+	report(log, "F32 GEMV", "256x256 @ 256", reps, elapsedNs(t0, t1));
+}
+
+static void benchF64Gemv256(LogEndpoint& log) {
+	const int n = 256;
+	const int warmup = 8;
+	const int reps = 40;
+	NDArray a({n, n}, F64);
+	NDArray x({n}, F64);
+	const size_t nElem = a.numElements();
+	for (size_t i = 0; i < nElem; ++i)
+		a.setFlat(i, (double)((int)i % 17) * 0.1);
+	for (int i = 0; i < n; ++i)
+		x.setFlat((size_t)i, (double)((i + 3) % 11) * 0.1);
+	for (int i = 0; i < warmup; ++i) {
+		NDArray y = a.gemv(x);
+		gSink += (int64_t)y.getFlat<double>(0);
+	}
+	std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+	for (int i = 0; i < reps; ++i) {
+		NDArray y = a.gemv(x);
+		gSink += (int64_t)y.getFlat<double>(0);
+	}
+	std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+	report(log, "F64 GEMV", "256x256 @ 256", reps, elapsedNs(t0, t1));
+}
+
 static void benchInt3Gemv(LogEndpoint& log) {
 	const int n = 256;
 	const int warmup = 4;
@@ -159,6 +204,8 @@ int main() {
 	benchInt3Dot(log);
 	benchF32Gemm(log);
 	benchF32Gemv(log);
+	benchF32Gemv256(log);
+	benchF64Gemv256(log);
 	benchInt3Gemv(log);
 	benchBinaryHamming(log);
 	return 0;
