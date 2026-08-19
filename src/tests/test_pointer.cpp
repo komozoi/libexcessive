@@ -482,6 +482,9 @@ struct AssignAliasNode {
 int AssignAliasNode::constructed = 0;
 int AssignAliasNode::destroyed = 0;
 
+static_assert(sp_can_cast<AssignAliasNode, AssignAliasNode>::value,
+	"same-type cast must not require a complete type for is_polymorphic");
+
 struct AssignAliasBase {
 	virtual ~AssignAliasBase() = default;
 	virtual int getValue() const = 0;

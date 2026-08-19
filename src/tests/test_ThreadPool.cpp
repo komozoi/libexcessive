@@ -333,3 +333,23 @@ TEST(ThreadPoolTest, ParallelFor_AfterShutdownThrows) {
 	PForCtx ctx{};
 	EXPECT_THROW(pool.parallelFor(pforRecord, &ctx), std::runtime_error);
 }
+
+TEST(ThreadPoolTest, DefaultPool_SameInstanceAndNproc) {
+	ThreadPool& a = ThreadPool::getDefault();
+	ThreadPool& b = ThreadPool::getDefault();
+	EXPECT_EQ(&a, &b);
+	unsigned hc = std::thread::hardware_concurrency();
+	int expect = (hc < 1) ? 1 : (int)hc;
+	EXPECT_EQ(a.getPoolSize(), expect);
+	EXPECT_FALSE(a.isShutdown());
+}
+
+TEST(ThreadPoolTest, DefaultPool_RunsWork) {
+	ThreadPool& pool = ThreadPool::getDefault();
+	std::atomic<int> result(0);
+	sp<ThreadPoolTask> task = pool.submit([&result]() {
+		result.store(42);
+	});
+	task->wait();
+	EXPECT_EQ(result.load(), 42);
+}

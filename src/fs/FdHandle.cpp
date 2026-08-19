@@ -18,6 +18,7 @@
 
 #include "fs/FdHandle.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <mutex>
 #include <atomic>
@@ -683,6 +684,31 @@ void FdHandle::markToClose() const {
 	getHandleData(fd).markToClose();
 }
 
+// Grow `fd` to `newSize` bytes, allocating backing store for the new tail
+// when possible so later MAP_SHARED writes do not contend on sparse
+// allocation.  Falls back to ftruncate if preallocation is unavailable.
+static bool growFileTo(int fd, off_t currentSize, off_t newSize) {
+	if (newSize <= currentSize)
+		return true;
+
+#if defined(__APPLE__)
+	fstore_t store{};
+	store.fst_flags = F_ALLOCATECONTIG;
+	store.fst_posmode = F_PEOFPOSMODE;
+	store.fst_offset = 0;
+	store.fst_length = newSize - currentSize;
+	if (fcntl(fd, F_PREALLOCATE, &store) == -1) {
+		store.fst_flags = F_ALLOCATEALL;
+		fcntl(fd, F_PREALLOCATE, &store);
+	}
+#elif defined(__linux__)
+	if (posix_fallocate(fd, currentSize, newSize - currentSize) == 0)
+		return true;
+#endif
+
+	return ftruncate(fd, newSize) == 0;
+}
+
 MmapHandle FdHandle::getMmapHandle(off_t offset, size_t size, int prot, int flags) const {
 	FdHandleData& handle = getHandleData(fd);
 
@@ -705,9 +731,13 @@ MmapHandle FdHandle::getMmapHandle(off_t offset, size_t size, int prot, int flag
 			return MmapHandle(handle, nullptr, nullptr);
 		}
 
-		// Expand the file if needed
-		if (currentSize < (off_t)(offset + size)) {
-			if (ftruncate(fd, offset + size) == -1) {
+		// Expand the file if needed.  ftruncate alone creates a sparse hole;
+		// first-touch page faults then serialize on the filesystem allocator
+		// (especially APFS MAP_SHARED).  Preallocate the new range when the
+		// OS supports it, then set the size.
+		off_t needed = offset + (off_t)size;
+		if (currentSize < needed) {
+			if (!growFileTo(fd, currentSize, needed)) {
 				lseek(fd, previousOffset, SEEK_SET);
 				return MmapHandle(handle, nullptr, nullptr);
 			}
@@ -825,6 +855,76 @@ off_t MmapHandle::seek(off_t where, int whence) {
 	cursor = &data[pos];
 
 	return pos;
+}
+
+static void adviseRange(void* p, size_t bytes, int linuxAdvice, int posixAdvice) {
+	if (!p || bytes == 0)
+		return;
+	uintptr_t addr = (uintptr_t)p;
+	long page = sysconf(_SC_PAGESIZE);
+	if (page <= 0)
+		page = 4096;
+	uintptr_t start = addr & ~((uintptr_t)page - 1);
+	size_t len = (addr - start) + bytes;
+	len = (len + (size_t)page - 1) & ~((size_t)page - 1);
+#if defined(__linux__)
+	(void)posixAdvice;
+	madvise((void*)start, len, linuxAdvice);
+#elif defined(POSIX_MADV_WILLNEED)
+	(void)linuxAdvice;
+	posix_madvise((void*)start, len, posixAdvice);
+#else
+	(void)linuxAdvice;
+	(void)posixAdvice;
+	(void)start;
+	(void)len;
+#endif
+}
+
+void memoryAdviseWillNeed(void* p, size_t bytes) {
+#if defined(__linux__)
+	adviseRange(p, bytes, MADV_WILLNEED, 0);
+#elif defined(POSIX_MADV_WILLNEED)
+	adviseRange(p, bytes, 0, POSIX_MADV_WILLNEED);
+#else
+	(void)p;
+	(void)bytes;
+#endif
+}
+
+void memoryAdviseSequential(void* p, size_t bytes) {
+#if defined(__linux__)
+	adviseRange(p, bytes, MADV_SEQUENTIAL, 0);
+#elif defined(POSIX_MADV_SEQUENTIAL)
+	adviseRange(p, bytes, 0, POSIX_MADV_SEQUENTIAL);
+#else
+	(void)p;
+	(void)bytes;
+#endif
+}
+
+void memoryAdviseHugePage(void* p, size_t bytes) {
+#if defined(__linux__) && defined(MADV_HUGEPAGE)
+	adviseRange(p, bytes, MADV_HUGEPAGE, 0);
+#else
+	(void)p;
+	(void)bytes;
+#endif
+}
+
+void MmapHandle::adviseWillNeed() const {
+	if (data && end > data)
+		memoryAdviseWillNeed(data, (size_t)(end - data));
+}
+
+void MmapHandle::adviseSequential() const {
+	if (data && end > data)
+		memoryAdviseSequential(data, (size_t)(end - data));
+}
+
+void MmapHandle::adviseHugePage() const {
+	if (data && end > data)
+		memoryAdviseHugePage(data, (size_t)(end - data));
 }
 
 MmapHandle::~MmapHandle() {
