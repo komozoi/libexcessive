@@ -198,6 +198,84 @@ static void benchBinaryHamming(LogEndpoint& log) {
 	report(log, "BINARY hamming", "n=65536", reps, elapsedNs(t0, t1));
 }
 
+static void restoreF32(NDArray& dst, const NDArray& src) {
+	const size_t n = src.numElements();
+	const float* s = src.data<float>();
+	float* d = dst.data<float>();
+	for (size_t i = 0; i < n; ++i)
+		d[i] = s[i];
+}
+
+static void benchF32Softmax(LogEndpoint& log) {
+	const int rows = 2048;
+	const int cols = 256;
+	const int warmup = 2;
+	const int reps = 8;
+	NDArray src({rows, cols}, F32);
+	NDArray a({rows, cols}, F32);
+	fillF32(src, 1);
+	restoreF32(a, src);
+	for (int i = 0; i < warmup; ++i) {
+		restoreF32(a, src);
+		a.softmax();
+		gSink += (int64_t)a.getFlat<float>(0);
+	}
+	std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+	for (int i = 0; i < reps; ++i) {
+		restoreF32(a, src);
+		a.softmax();
+		gSink += (int64_t)a.getFlat<float>(0);
+	}
+	std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+	report(log, "F32 softmax", "2048x256", reps, elapsedNs(t0, t1));
+}
+
+static void benchF32Rmsnorm(LogEndpoint& log) {
+	const int rows = 2048;
+	const int cols = 256;
+	const int warmup = 2;
+	const int reps = 8;
+	NDArray x({rows, cols}, F32);
+	NDArray w({cols}, F32);
+	fillF32(x, 2);
+	fillF32(w, 3);
+	for (int i = 0; i < warmup; ++i) {
+		NDArray y = x.rmsnorm(w, 1e-6f);
+		gSink += (int64_t)y.getFlat<float>(0);
+	}
+	std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+	for (int i = 0; i < reps; ++i) {
+		NDArray y = x.rmsnorm(w, 1e-6f);
+		gSink += (int64_t)y.getFlat<float>(0);
+	}
+	std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+	report(log, "F32 rmsnorm", "2048x256", reps, elapsedNs(t0, t1));
+}
+
+static void benchF32Silu(LogEndpoint& log) {
+	const int rows = 2048;
+	const int cols = 256;
+	const int warmup = 2;
+	const int reps = 8;
+	NDArray src({rows, cols}, F32);
+	NDArray a({rows, cols}, F32);
+	fillF32(src, 4);
+	restoreF32(a, src);
+	for (int i = 0; i < warmup; ++i) {
+		restoreF32(a, src);
+		a.silu();
+		gSink += (int64_t)a.getFlat<float>(0);
+	}
+	std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+	for (int i = 0; i < reps; ++i) {
+		restoreF32(a, src);
+		a.silu();
+		gSink += (int64_t)a.getFlat<float>(0);
+	}
+	std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+	report(log, "F32 silu", "2048x256", reps, elapsedNs(t0, t1));
+}
+
 int main() {
 	Logger logger("logs", LOG_LEVEL_CRIT, LOG_LEVEL_INFO);
 	LogEndpoint log(logger, "ndarray-bench");
@@ -208,5 +286,8 @@ int main() {
 	benchF64Gemv256(log);
 	benchInt3Gemv(log);
 	benchBinaryHamming(log);
+	benchF32Softmax(log);
+	benchF32Rmsnorm(log);
+	benchF32Silu(log);
 	return 0;
 }
