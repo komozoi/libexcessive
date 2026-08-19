@@ -282,34 +282,19 @@ public:
 	}
 
 	/**
-	 * Removes the value from the tree
-	 * TODO: Make this function rebalance tree correctly
-	 * Currently this function does NOT rebalance the tree.
+	 * Removes the value from the tree.
+	 *
+	 * Before descending, a child at `N / 2` keys borrows or merges so a
+	 * leaf delete cannot underflow. An internal key is replaced by its
+	 * successor. If the root is left with no keys and one child, that
+	 * child is copied onto the root offset.
+	 *
 	 * @param val value to remove
 	 * @return true if the value was found and removed, false if not
 	 */
 	bool remove(T& val) {
 		std::unique_lock<std::shared_mutex> lock(mutex);
-		btree_node_t<T, N> node;
-		uint64_t offset;
-
-		int i = findNearest(val, node, offset);
-		if (i >= node.header.nElements || compare(node.elements[i], val) != 0)
-			return false;
-
-		// Only remove from leaf nodes in this basic version
-		if (node.header.nChildren != 0) {
-			// Full B-tree remove (merging, rotation, etc.) would be required here
-			return false;
-		}
-
-		// Remove element
-		for (int j = i + 1; j < node.header.nElements; j++)
-			node.elements[j - 1] = node.elements[j];
-		node.header.nElements--;
-
-		overwriteNode(offset, node);
-		return true;
+		return removeFrom(getRootNode(), getRootOffset(), val);
 	}
 
 	/**
@@ -411,6 +396,194 @@ protected:
 			offset = node.header.childOffsets[low];
 			node = getNode(offset);
 		}
+	}
+
+	static constexpr int minElements() {
+		return N / 2;
+	}
+
+	int locateKey(const btree_node_t<T, N>& node, const T& val, int& found) const {
+		int low = 0;
+		int high = node.header.nElements - 1;
+		found = -1;
+		while (low <= high) {
+			int mid = (low + high) / 2;
+			int c = compare(node.elements[mid], val);
+			if (c < 0)
+				low = mid + 1;
+			else if (c > 0)
+				high = mid - 1;
+			else {
+				found = mid;
+				return mid;
+			}
+		}
+		return low;
+	}
+
+	T minInSubtree(uint64_t offset) {
+		btree_node_t<T, N> node = getNode(offset);
+		while (node.header.nChildren != 0) {
+			validateNodeCounts(node.header);
+			offset = node.header.childOffsets[0];
+			node = getNode(offset);
+		}
+		return node.elements[0];
+	}
+
+	void writeChildHeader(uint64_t childOff, uint64_t parentOff, int indexInParent) {
+		btree_node_t<T, N> child = getNode(childOff);
+		child.header.parent = parentOff;
+		child.header.indexInParent = indexInParent;
+		overwriteNodeHeader(childOff, child);
+	}
+
+	void reindexChildren(const btree_node_t<T, N>& node, uint64_t nodeOff, int from) {
+		for (int j = from; j < node.header.nChildren; j++)
+			writeChildHeader(node.header.childOffsets[j], nodeOff, j);
+	}
+
+	void absorbOnlyChild(btree_node_t<T, N>& node, uint64_t offset) {
+		uint64_t parentOff = node.header.parent;
+		int indexInParent = node.header.indexInParent;
+		btree_node_t<T, N> child = getNode(node.header.childOffsets[0]);
+		child.header.parent = parentOff;
+		child.header.indexInParent = indexInParent;
+		reindexChildren(child, offset, 0);
+		overwriteNode(offset, child);
+		node = child;
+	}
+
+	void borrowFromSibling(btree_node_t<T, N>& parent, uint64_t parentOff, int i, int sib) {
+		uint64_t childOff = parent.header.childOffsets[i];
+		uint64_t sibOff = parent.header.childOffsets[sib];
+		btree_node_t<T, N> child = getNode(childOff);
+		btree_node_t<T, N> sibling = getNode(sibOff);
+		int sep = sib < i ? sib : i;
+
+		if (sib < i) {
+			for (int j = child.header.nElements - 1; j >= 0; j--)
+				child.elements[j + 1] = child.elements[j];
+			child.elements[0] = parent.elements[sep];
+			child.header.nElements++;
+			if (child.header.nChildren > 0) {
+				for (int j = child.header.nChildren - 1; j >= 0; j--)
+					child.header.childOffsets[j + 1] = child.header.childOffsets[j];
+				uint64_t moved = sibling.header.childOffsets[sibling.header.nChildren - 1];
+				child.header.childOffsets[0] = moved;
+				child.header.nChildren++;
+				sibling.header.nChildren--;
+				writeChildHeader(moved, childOff, 0);
+				reindexChildren(child, childOff, 1);
+			}
+			parent.elements[sep] = sibling.elements[sibling.header.nElements - 1];
+			sibling.header.nElements--;
+		} else {
+			child.elements[child.header.nElements] = parent.elements[sep];
+			child.header.nElements++;
+			if (child.header.nChildren > 0) {
+				uint64_t moved = sibling.header.childOffsets[0];
+				child.header.childOffsets[child.header.nChildren] = moved;
+				child.header.nChildren++;
+				writeChildHeader(moved, childOff, child.header.nChildren - 1);
+				for (int j = 1; j < sibling.header.nChildren; j++)
+					sibling.header.childOffsets[j - 1] = sibling.header.childOffsets[j];
+				sibling.header.nChildren--;
+				reindexChildren(sibling, sibOff, 0);
+			}
+			parent.elements[sep] = sibling.elements[0];
+			for (int j = 1; j < sibling.header.nElements; j++)
+				sibling.elements[j - 1] = sibling.elements[j];
+			sibling.header.nElements--;
+		}
+
+		overwriteNode(sibOff, sibling);
+		overwriteNode(childOff, child);
+		overwriteNode(parentOff, parent);
+	}
+
+	void mergeChildren(btree_node_t<T, N>& parent, uint64_t parentOff, int i) {
+		uint64_t leftOff = parent.header.childOffsets[i];
+		uint64_t rightOff = parent.header.childOffsets[i + 1];
+		btree_node_t<T, N> left = getNode(leftOff);
+		btree_node_t<T, N> right = getNode(rightOff);
+
+		left.elements[left.header.nElements] = parent.elements[i];
+		for (int j = 0; j < right.header.nElements; j++)
+			left.elements[left.header.nElements + 1 + j] = right.elements[j];
+		int oldLeftChildren = left.header.nChildren;
+		if (right.header.nChildren > 0) {
+			for (int j = 0; j < right.header.nChildren; j++) {
+				left.header.childOffsets[oldLeftChildren + j] = right.header.childOffsets[j];
+				writeChildHeader(right.header.childOffsets[j], leftOff, oldLeftChildren + j);
+			}
+			left.header.nChildren = oldLeftChildren + right.header.nChildren;
+		}
+		left.header.nElements += 1 + right.header.nElements;
+		overwriteNode(leftOff, left);
+
+		for (int j = i + 1; j < parent.header.nElements; j++)
+			parent.elements[j - 1] = parent.elements[j];
+		parent.header.nElements--;
+		for (int j = i + 2; j < parent.header.nChildren; j++)
+			parent.header.childOffsets[j - 1] = parent.header.childOffsets[j];
+		parent.header.nChildren--;
+		reindexChildren(parent, parentOff, i + 1);
+
+		if (parentOff == getRootOffset() && parent.header.nElements == 0 && parent.header.nChildren == 1)
+			absorbOnlyChild(parent, parentOff);
+		else
+			overwriteNode(parentOff, parent);
+	}
+
+	void ensureChildCanLoseKey(btree_node_t<T, N>& parent, uint64_t parentOff, int i) {
+		if (getNode(parent.header.childOffsets[i]).header.nElements > minElements())
+			return;
+		if (i > 0 && getNode(parent.header.childOffsets[i - 1]).header.nElements > minElements())
+			borrowFromSibling(parent, parentOff, i, i - 1);
+		else if (i + 1 < parent.header.nChildren &&
+		         getNode(parent.header.childOffsets[i + 1]).header.nElements > minElements())
+			borrowFromSibling(parent, parentOff, i, i + 1);
+		else
+			mergeChildren(parent, parentOff, i > 0 ? i - 1 : i);
+	}
+
+	bool removeFrom(btree_node_t<T, N> node, uint64_t offset, const T& val) {
+		validateNodeCounts(node.header);
+
+		int found = -1;
+		int idx = locateKey(node, val, found);
+
+		if (found >= 0 && node.header.nChildren == 0) {
+			for (int j = found + 1; j < node.header.nElements; j++)
+				node.elements[j - 1] = node.elements[j];
+			node.header.nElements--;
+			overwriteNode(offset, node);
+			return true;
+		}
+		if (node.header.nChildren == 0)
+			return false;
+
+		if (found >= 0) {
+			uint64_t rightOff = node.header.childOffsets[found + 1];
+			if (getNode(rightOff).header.nElements <= minElements()) {
+				ensureChildCanLoseKey(node, offset, found + 1);
+				return removeFrom(getNode(offset), offset, val);
+			}
+			T succ = minInSubtree(rightOff);
+			node.elements[found] = succ;
+			overwriteNode(offset, node);
+			return removeFrom(getNode(rightOff), rightOff, succ);
+		}
+
+		int oldElements = node.header.nElements;
+		int oldChildren = node.header.nChildren;
+		ensureChildCanLoseKey(node, offset, idx);
+		node = getNode(offset);
+		if (node.header.nElements != oldElements || node.header.nChildren != oldChildren)
+			return removeFrom(node, offset, val);
+		uint64_t childOff = node.header.childOffsets[idx];
+		return removeFrom(getNode(childOff), childOff, val);
 	}
 
 	/**

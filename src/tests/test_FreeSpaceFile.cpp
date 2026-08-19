@@ -259,6 +259,40 @@ TEST(FreeSpaceFileTest, ManyRegionsStress) {
 	if (!HasFailure()) unlink(test_file);
 }
 
+TEST(FreeSpaceFileTest, ReallocManyEqualHolesAreUnique) {
+	std::string path = makeTempFileName("freespace_unique_realloc");
+	const char* test_file = path.c_str();
+
+	unlink(test_file);
+	FdHandle handle = FdHandle::open(test_file, O_RDWR | O_CREAT, 0660);
+	FreeSpaceFile fs(std::move(handle));
+
+	const int count = 200;
+	ArrayList<off_t> first(count);
+	for (int i = 0; i < count; i++) {
+		off_t off = fs.getFreeRegion(4096);
+		ASSERT_NE(off, (off_t)-1);
+		first.add(off);
+	}
+
+	for (int i = 0; i < count; i++)
+		fs.markFreeRegion(first.get(i), 4096);
+
+	ArrayList<off_t> second(count);
+	for (int i = 0; i < count; i++) {
+		off_t off = fs.getFreeRegion(4096);
+		ASSERT_NE(off, (off_t)-1);
+		second.add(off);
+	}
+
+	for (int i = 0; i < count; i++) {
+		for (int j = i + 1; j < count; j++)
+			EXPECT_NE(second.get(i), second.get(j)) << "duplicate offset at " << i << "," << j;
+	}
+
+	if (!HasFailure()) unlink(test_file);
+}
+
 TEST(FreeSpaceFileTest, ReinsertAfterAllocate) {
 	std::string path = makeTempFileName("freespace_reinsert");
 	const char* test_file = path.c_str();

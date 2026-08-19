@@ -23,6 +23,7 @@
 #include "fcntl.h"
 #include "fs/BTree.h"
 #include "ds/ArrayList.h"
+#include "ds/HashSet.h"
 #include "universaltime.h"
 
 
@@ -84,8 +85,11 @@ protected:
 		EXPECT_LE(node.header.nElements, N);
 		if (offset != getRootOffset()) {
 			EXPECT_GE(node.header.nElements, N / 2);
+			EXPECT_GE(node.header.indexInParent, 0);
+			EXPECT_LE(node.header.indexInParent, N);
+		} else {
+			EXPECT_EQ(node.header.indexInParent, -1);
 		}
-		EXPECT_LE(node.header.indexInParent, getNode(node.header.parent).header.nElements + 1);
 		if (node.header.nChildren != 0) {
 			EXPECT_EQ(node.header.nChildren, node.header.nElements + 1);
 		}
@@ -112,11 +116,168 @@ protected:
 	}
 
 	ArrayList<btree_node_t<T, N>> nodes;
+
+public:
+	void collectInorder(ArrayList<T>& out) const {
+		collectInorderFrom(0, out);
+	}
+
+	void assertHealthy(const char* where) const {
+		assertHealthyNode(0, true, where);
+	}
+
+	int rootChildCount() const {
+		return nodes.get(0).header.nChildren;
+	}
+
+	int rootElementCount() const {
+		return nodes.get(0).header.nElements;
+	}
+
+	void collectInternalKeys(ArrayList<T>& out) const {
+		for (int i = 0; i < nodes.size(); i++) {
+			const btree_node_t<T, N>& node = nodes.get(i);
+			if (node.header.nChildren == 0)
+				continue;
+			for (int e = 0; e < node.header.nElements; e++)
+				out.add(node.elements[e]);
+		}
+	}
+
+private:
+	void collectInorderFrom(uint64_t offset, ArrayList<T>& out) const {
+		const btree_node_t<T, N>& node = nodes.get((int)offset);
+		if (node.header.nChildren == 0) {
+			for (int i = 0; i < node.header.nElements; i++)
+				out.add(node.elements[i]);
+			return;
+		}
+		for (int i = 0; i < node.header.nElements; i++) {
+			collectInorderFrom(node.header.childOffsets[i], out);
+			out.add(node.elements[i]);
+		}
+		collectInorderFrom(node.header.childOffsets[node.header.nElements], out);
+	}
+
+	T subtreeMin(uint64_t offset) const {
+		const btree_node_t<T, N>& node = nodes.get((int)offset);
+		if (node.header.nChildren == 0)
+			return node.elements[0];
+		return subtreeMin(node.header.childOffsets[0]);
+	}
+
+	T subtreeMax(uint64_t offset) const {
+		const btree_node_t<T, N>& node = nodes.get((int)offset);
+		if (node.header.nChildren == 0)
+			return node.elements[node.header.nElements - 1];
+		return subtreeMax(node.header.childOffsets[node.header.nChildren - 1]);
+	}
+
+	void assertHealthyNode(uint64_t offset, bool isRoot, const char* where) const {
+		ASSERT_LT((int)offset, nodes.size()) << where << " offset " << offset;
+		const btree_node_t<T, N>& node = nodes.get((int)offset);
+		EXPECT_GE(node.header.nElements, 0) << where << " off=" << offset;
+		EXPECT_LE(node.header.nElements, N) << where << " off=" << offset;
+		if (!isRoot) {
+			EXPECT_GE(node.header.nElements, N / 2) << where << " underfull off=" << offset;
+		} else {
+			EXPECT_FALSE(node.header.nElements == 0 && node.header.nChildren == 1)
+				<< where << " root has a single child and no keys";
+		}
+		if (node.header.nChildren != 0) {
+			EXPECT_EQ(node.header.nChildren, node.header.nElements + 1) << where << " off=" << offset;
+			EXPECT_GT(node.header.nElements, 0) << where << " internal empty off=" << offset;
+		}
+		for (int i = 1; i < node.header.nElements; i++) {
+			EXPECT_LT(this->compare(node.elements[i - 1], node.elements[i]), 0)
+				<< where << " unsorted off=" << offset << " i=" << i;
+		}
+		if (node.header.nChildren == 0)
+			return;
+		for (int i = 0; i < node.header.nChildren; i++) {
+			uint64_t childOff = node.header.childOffsets[i];
+			ASSERT_LT((int)childOff, nodes.size()) << where << " child off=" << childOff;
+			EXPECT_NE(childOff, offset) << where << " self-child";
+			const btree_node_t<T, N>& child = nodes.get((int)childOff);
+			EXPECT_EQ(child.header.parent, offset) << where << " parent link child=" << childOff;
+			EXPECT_EQ(child.header.indexInParent, i) << where << " indexInParent child=" << childOff;
+			if (child.header.nElements > 0) {
+				if (i > 0) {
+					EXPECT_LT(this->compare(node.elements[i - 1], subtreeMin(childOff)), 0)
+						<< where << " sep vs child min i=" << i;
+				}
+				if (i < node.header.nElements) {
+					EXPECT_LT(this->compare(subtreeMax(childOff), node.elements[i]), 0)
+						<< where << " child max vs sep i=" << i;
+				}
+			}
+			assertHealthyNode(childOff, false, where);
+		}
+	}
 };
 
 
 static int compareInts(const int& a, const int& b) {
 	return a - b;
+}
+
+
+static void shuffleInts(ArrayList<int>& keys, uint32_t seed) {
+	for (int i = keys.size() - 1; i > 0; i--) {
+		seed = seed * 1664525u + 1013904223u;
+		int j = (int)(seed % (uint32_t)(i + 1));
+		int tmp = keys.get(i);
+		keys.set(i, keys.get(j));
+		keys.set(j, tmp);
+	}
+}
+
+
+template<int N>
+static void expectContents(RAMBTree<int, N>& tree, const HashSet<int>& expected, const char* where) {
+	tree.assertHealthy(where);
+
+	for (int key : expected) {
+		int val = key;
+		ASSERT_TRUE(tree.find(val)) << where << " missing " << key;
+		EXPECT_EQ(val, key) << where;
+	}
+
+	ArrayList<int> inorder;
+	tree.collectInorder(inorder);
+	ASSERT_EQ(inorder.size(), expected.size()) << where << " inorder size";
+	for (int i = 0; i < inorder.size(); i++) {
+		EXPECT_TRUE(expected.contains(inorder.get(i))) << where << " extra " << inorder.get(i);
+		if (i > 0) {
+			EXPECT_LT(inorder.get(i - 1), inorder.get(i)) << where << " inorder not sorted";
+		}
+	}
+
+	if (expected.size() == 0) {
+		int q = 0;
+		EXPECT_FALSE(tree.findNext(q)) << where << " empty findNext";
+		return;
+	}
+
+	int first = inorder.get(0);
+	int probe = first;
+	ASSERT_TRUE(tree.findNext(probe)) << where << " first findNext";
+	EXPECT_EQ(probe, first) << where;
+
+	for (int i = 0; i < inorder.size() - 1; i++) {
+		int gap = inorder.get(i) + 1;
+		if (gap < inorder.get(i + 1)) {
+			int got = gap;
+			ASSERT_TRUE(tree.findNext(got)) << where << " gap " << gap;
+			EXPECT_EQ(got, inorder.get(i + 1)) << where << " gap " << gap;
+		}
+	}
+
+	int after = inorder.get(inorder.size() - 1) + 1;
+	int miss = after;
+	EXPECT_FALSE(tree.findNext(miss)) << where << " past end";
+	EXPECT_EQ(miss, after) << where;
+	EXPECT_FALSE(tree.find(miss)) << where << " past end find";
 }
 
 
@@ -285,29 +446,359 @@ TEST_F(BTreeBaseTest, MinNodeSize) {
 	printf("Retrieval time for %i elements: %lums (%.3fus per element)\n", num_elements, retrieveTime, 1000.0 * (double) retrieveTime / num_elements);
 }*/
 
-// TODO: It is known that remove does not work properly
-/*TEST_F(BTreeBaseTest, BasicInsertAndRemove) {
-	const int num_elements = 100;
-	for (int i = 0; i < num_elements; ++i) {
-		tree.insert(i);
+TEST_F(BTreeBaseTest, RemoveMissingFromEmpty) {
+	int val = 7;
+	EXPECT_FALSE(tree.remove(val));
+	EXPECT_EQ(val, 7);
+	tree.assertHealthy("empty");
+	EXPECT_FALSE(tree.find(val));
+}
+
+
+TEST_F(BTreeBaseTest, RemoveFromRootLeaf) {
+	tree.insert(5);
+	tree.insert(10);
+	tree.insert(3);
+
+	int val = 10;
+	EXPECT_TRUE(tree.remove(val));
+	EXPECT_FALSE(tree.find(val));
+
+	HashSet<int> expected = HashSet<int>(4);
+	expected.add(3);
+	expected.add(5);
+	expectContents(tree, expected, "after remove 10");
+
+	val = 10;
+	EXPECT_FALSE(tree.remove(val));
+
+	val = 5;
+	EXPECT_TRUE(tree.remove(val));
+	expected.remove(5);
+	expectContents(tree, expected, "after remove 5");
+
+	val = 3;
+	EXPECT_TRUE(tree.remove(val));
+	expected.remove(3);
+	expectContents(tree, expected, "empty after last");
+
+	tree.insert(1);
+	expected.add(1);
+	expectContents(tree, expected, "insert after empty");
+}
+
+
+template<int N>
+static void insertRange(RAMBTree<int, N>& tree, HashSet<int>& expected, int lo, int hi) {
+	for (int i = lo; i < hi; i++) {
+		EXPECT_FALSE(tree.insert(i)) << i;
+		EXPECT_FALSE(expected.add(i)) << i;
 	}
+}
 
-	int val;
-	EXPECT_TRUE(tree.find(val = 5));
-	EXPECT_EQ(5, val);
 
-	EXPECT_TRUE(tree.find(val = 10));
-	EXPECT_EQ(10, val);
+TEST(BTreeRemove, SequentialForwardN3) {
+	RAMBTree<int, 3> t(compareInts);
+	HashSet<int> expected = HashSet<int>(64);
+	insertRange(t, expected, 0, 40);
+	expectContents(t, expected, "inserted");
 
-	tree.remove(val);
+	for (int i = 0; i < 40; i++) {
+		int val = i;
+		ASSERT_TRUE(t.remove(val)) << i;
+		expected.remove(i);
+		expectContents(t, expected, "forward");
+		if (HasFailure())
+			return;
+	}
+}
 
-	EXPECT_TRUE(tree.find(val = 3));
-	EXPECT_EQ(3, val);
 
-	int not_found = -1;
-	EXPECT_FALSE(tree.find(not_found));
-	EXPECT_EQ(-1, not_found);
-}*/
+TEST(BTreeRemove, SequentialReverseN3) {
+	RAMBTree<int, 3> t(compareInts);
+	HashSet<int> expected = HashSet<int>(64);
+	insertRange(t, expected, 0, 40);
+	for (int i = 39; i >= 0; i--) {
+		int val = i;
+		ASSERT_TRUE(t.remove(val)) << i;
+		expected.remove(i);
+		expectContents(t, expected, "reverse");
+		if (HasFailure())
+			return;
+	}
+}
+
+
+TEST(BTreeRemove, EveryOtherThenRestN3) {
+	RAMBTree<int, 3> t(compareInts);
+	HashSet<int> expected = HashSet<int>(64);
+	insertRange(t, expected, 0, 50);
+	for (int i = 0; i < 50; i += 2) {
+		int val = i;
+		ASSERT_TRUE(t.remove(val)) << i;
+		expected.remove(i);
+		expectContents(t, expected, "evens");
+		if (HasFailure())
+			return;
+	}
+	for (int i = 1; i < 50; i += 2) {
+		int val = i;
+		ASSERT_TRUE(t.remove(val)) << i;
+		expected.remove(i);
+		expectContents(t, expected, "odds");
+		if (HasFailure())
+			return;
+	}
+}
+
+
+TEST(BTreeRemove, ShuffledN3) {
+	RAMBTree<int, 3> t(compareInts);
+	HashSet<int> expected = HashSet<int>(128);
+	const int n = 80;
+	insertRange(t, expected, 0, n);
+
+	ArrayList<int> order;
+	for (int i = 0; i < n; i++)
+		order.add(i);
+	shuffleInts(order, 0xBEEF1234u);
+
+	for (int i = 0; i < order.size(); i++) {
+		int key = order.get(i);
+		int val = key;
+		ASSERT_TRUE(t.remove(val)) << key;
+		expected.remove(key);
+		expectContents(t, expected, "shuffled");
+		if (HasFailure())
+			return;
+	}
+}
+
+
+TEST(BTreeRemove, ShuffledN63) {
+	RAMBTree<int, 63> t(compareInts);
+	HashSet<int> expected = HashSet<int>(256);
+	const int n = 200;
+	insertRange(t, expected, 0, n);
+
+	ArrayList<int> order;
+	for (int i = 0; i < n; i++)
+		order.add(i);
+	shuffleInts(order, 0xA5A5A5A5u);
+
+	for (int i = 0; i < order.size(); i++) {
+		int key = order.get(i);
+		int val = key;
+		ASSERT_TRUE(t.remove(val)) << key;
+		expected.remove(key);
+		expectContents(t, expected, "shuffled63");
+		if (HasFailure())
+			return;
+	}
+}
+
+
+TEST(BTreeRemove, InternalKeysN3) {
+	RAMBTree<int, 3> t(compareInts);
+	HashSet<int> expected = HashSet<int>(64);
+	insertRange(t, expected, 0, 30);
+
+	ArrayList<int> internals;
+	t.collectInternalKeys(internals);
+	ASSERT_GT(internals.size(), 0);
+
+	for (int i = 0; i < internals.size(); i++) {
+		int key = internals.get(i);
+		if (!expected.contains(key))
+			continue;
+		int val = key;
+		ASSERT_TRUE(t.remove(val)) << key;
+		expected.remove(key);
+		expectContents(t, expected, "internal");
+		if (HasFailure())
+			return;
+	}
+}
+
+
+TEST(BTreeRemove, RootShrinksToLeafThenEmpty) {
+	RAMBTree<int, 3> t(compareInts);
+	HashSet<int> expected = HashSet<int>(64);
+	insertRange(t, expected, 0, 20);
+	ASSERT_GT(t.rootChildCount(), 0);
+
+	for (int i = 0; i < 20; i++) {
+		int val = i;
+		ASSERT_TRUE(t.remove(val)) << i;
+		expected.remove(i);
+		expectContents(t, expected, "shrink");
+		if (HasFailure())
+			return;
+	}
+	EXPECT_EQ(t.rootChildCount(), 0);
+	EXPECT_EQ(t.rootElementCount(), 0);
+}
+
+
+TEST(BTreeRemove, InterleavedInsertDelete) {
+	RAMBTree<int, 3> t(compareInts);
+	HashSet<int> expected = HashSet<int>(256);
+	uint32_t seed = 0xC0FFEEu;
+	const int universe = 120;
+	for (int step = 0; step < 800; step++) {
+		seed = seed * 1664525u + 1013904223u;
+		int key = (int)(seed % (uint32_t)universe);
+		int val = key;
+		if ((seed & 1u) == 0) {
+			bool already = t.insert(key);
+			EXPECT_EQ(already, expected.contains(key)) << "insert " << key;
+			expected.add(key);
+		} else {
+			bool present = expected.contains(key);
+			EXPECT_EQ(t.remove(val), present) << "remove " << key;
+			if (present)
+				expected.remove(key);
+		}
+		if (step % 7 == 0 || step == 799) {
+			expectContents(t, expected, "mix");
+			if (HasFailure())
+				return;
+		}
+	}
+	expectContents(t, expected, "mix end");
+}
+
+
+TEST(BTreeRemove, ReinsertAfterDelete) {
+	RAMBTree<int, 3> t(compareInts);
+	HashSet<int> expected = HashSet<int>(64);
+	insertRange(t, expected, 0, 25);
+	for (int i = 0; i < 25; i += 3) {
+		int val = i;
+		ASSERT_TRUE(t.remove(val));
+		expected.remove(i);
+	}
+	expectContents(t, expected, "before reinsert");
+	for (int i = 0; i < 25; i += 3) {
+		EXPECT_FALSE(t.insert(i));
+		expected.add(i);
+	}
+	expectContents(t, expected, "after reinsert");
+}
+
+
+struct KvEntry {
+	int key;
+	int value;
+
+	static int compare(const KvEntry& a, const KvEntry& b) {
+		return a.key - b.key;
+	}
+};
+
+
+TEST(BTreeRemove, KeyValuePayload) {
+	RAMBTree<KvEntry, 3> t(KvEntry::compare);
+	for (int i = 0; i < 40; i++)
+		EXPECT_FALSE(t.insert(KvEntry{i, i * 10}));
+
+	KvEntry q{17, -1};
+	ASSERT_TRUE(t.find(q));
+	EXPECT_EQ(q.value, 170);
+
+	q = KvEntry{17, 0};
+	ASSERT_TRUE(t.remove(q));
+	q = KvEntry{17, 0};
+	EXPECT_FALSE(t.find(q));
+	EXPECT_FALSE(t.remove(q));
+
+	t.assertHealthy("after kv remove 17");
+
+	q = KvEntry{16, 0};
+	ASSERT_TRUE(t.find(q));
+	EXPECT_EQ(q.value, 160);
+	q = KvEntry{18, 0};
+	ASSERT_TRUE(t.find(q));
+	EXPECT_EQ(q.value, 180);
+
+	for (int i = 0; i < 40; i++) {
+		if (i == 17)
+			continue;
+		q = KvEntry{i, 0};
+		ASSERT_TRUE(t.find(q)) << i;
+		EXPECT_EQ(q.value, i * 10) << i;
+	}
+}
+
+
+TEST(BTreeRemove, RandomMixStressN3SecondSeed) {
+	RAMBTree<int, 3> t(compareInts);
+	HashSet<int> expected = HashSet<int>(2048);
+	uint32_t seed = 0x0D15EA5Eu;
+	const int universe = 300;
+	for (int step = 0; step < 2000; step++) {
+		seed = seed * 1664525u + 1013904223u;
+		int key = (int)(seed % (uint32_t)universe);
+		int val = key;
+		if ((seed >> 16) & 1u) {
+			bool already = t.insert(key);
+			EXPECT_EQ(already, expected.contains(key)) << "insert " << key;
+			expected.add(key);
+		} else {
+			bool present = expected.contains(key);
+			EXPECT_EQ(t.remove(val), present) << "remove " << key;
+			if (present)
+				expected.remove(key);
+		}
+		if (step % 11 == 0 || step == 1999) {
+			expectContents(t, expected, "mix2");
+			if (HasFailure())
+				return;
+		}
+	}
+	expectContents(t, expected, "mix2 end");
+}
+
+
+TEST(BTreeRemove, RandomMixStressN3) {
+	RAMBTree<int, 3> t(compareInts);
+	HashSet<int> expected = HashSet<int>(1024);
+	const int n = 400;
+	insertRange(t, expected, 0, n);
+
+	ArrayList<int> order;
+	for (int i = 0; i < n; i++)
+		order.add(i);
+	shuffleInts(order, 0x13579BDFu);
+
+	for (int i = 0; i < n / 2; i++) {
+		int key = order.get(i);
+		int val = key;
+		ASSERT_TRUE(t.remove(val)) << key;
+		expected.remove(key);
+	}
+	expectContents(t, expected, "half gone");
+
+	for (int i = 0; i < n / 2; i++) {
+		int key = order.get(i);
+		EXPECT_FALSE(t.insert(key + n));
+		expected.add(key + n);
+	}
+	expectContents(t, expected, "refilled high");
+
+	shuffleInts(order, 0x2468ACE0u);
+	for (int i = 0; i < order.size(); i++) {
+		int key = order.get(i);
+		int val = key;
+		if (expected.contains(key)) {
+			ASSERT_TRUE(t.remove(val)) << key;
+			expected.remove(key);
+		} else {
+			EXPECT_FALSE(t.remove(val)) << key;
+		}
+	}
+	expectContents(t, expected, "after second pass");
+}
 
 
 TEST_F(BTreeBaseTest, FindNext) {
@@ -423,6 +914,61 @@ TEST(BTreeDisk, InitializeInsertFindAndReopen) {
 			ASSERT_TRUE(tree.find(v)) << i;
 			EXPECT_EQ(v, i);
 		}
+	}
+
+	unlink(path.c_str());
+}
+
+
+TEST(BTreeDisk, RemoveAndReopen) {
+	std::string path = makeBTreeTempFile("btree_disk_remove");
+	unlink(path.c_str());
+
+	{
+		FdHandle file = FdHandle::open(path.c_str(), O_RDWR | O_CREAT, 0660);
+		ASSERT_TRUE((bool)file);
+		BTree<int, 3> disk(file, 0, compareInts);
+		for (int i = 0; i < 80; i++)
+			EXPECT_FALSE(disk.insert(i));
+		for (int i = 0; i < 80; i += 2) {
+			int val = i;
+			ASSERT_TRUE(disk.remove(val)) << i;
+		}
+		for (int i = 1; i < 80; i += 2) {
+			int val = i;
+			ASSERT_TRUE(disk.find(val)) << i;
+			EXPECT_EQ(val, i);
+		}
+		int gone = 4;
+		EXPECT_FALSE(disk.find(gone));
+	}
+
+	{
+		FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+		ASSERT_TRUE((bool)file);
+		BTree<int, 3> disk(file, 0, compareInts);
+		for (int i = 1; i < 80; i += 2) {
+			int val = i;
+			ASSERT_TRUE(disk.find(val)) << i;
+			EXPECT_EQ(val, i);
+			ASSERT_TRUE(disk.remove(val)) << i;
+		}
+		int any = 1;
+		EXPECT_FALSE(disk.find(any));
+		EXPECT_FALSE(disk.findNext(any));
+		EXPECT_FALSE(disk.insert(99));
+		int v = 99;
+		ASSERT_TRUE(disk.find(v));
+	}
+
+	{
+		FdHandle file = FdHandle::open(path.c_str(), O_RDWR, 0660);
+		BTree<int, 3> disk(file, 0, compareInts);
+		int v = 99;
+		ASSERT_TRUE(disk.find(v));
+		EXPECT_EQ(v, 99);
+		int miss = 1;
+		EXPECT_FALSE(disk.find(miss));
 	}
 
 	unlink(path.c_str());
