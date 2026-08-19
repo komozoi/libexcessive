@@ -87,6 +87,33 @@ static inline uint64_t int3_subWord(uint64_t a, uint64_t b) {
 	return ((a | int3_kPadMask) - b) & int3_kValueMask;
 }
 
+// XOR 4 maps signed INT3 (0,1,2,3,-4,..) to unsigned order 4,5,6,7,0,..
+static constexpr uint64_t int3_kSignBias = 0x4444444444444444ULL;
+
+static inline uint64_t int3_minWord(uint64_t a, uint64_t b) {
+	a &= int3_kValueMask;
+	b &= int3_kValueMask;
+	const uint64_t ax = a ^ int3_kSignBias;
+	const uint64_t bx = b ^ int3_kSignBias;
+	const uint64_t le = ((bx | int3_kPadMask) - ax) & int3_kPadMask;
+	uint64_t pickA = le >> 3;
+	pickA |= pickA << 1;
+	pickA |= pickA << 2;
+	return (a & pickA) | (b & ~pickA & int3_kValueMask);
+}
+
+static inline uint64_t int3_maxWord(uint64_t a, uint64_t b) {
+	a &= int3_kValueMask;
+	b &= int3_kValueMask;
+	const uint64_t ax = a ^ int3_kSignBias;
+	const uint64_t bx = b ^ int3_kSignBias;
+	const uint64_t ge = ((ax | int3_kPadMask) - bx) & int3_kPadMask;
+	uint64_t pickA = ge >> 3;
+	pickA |= pickA << 1;
+	pickA |= pickA << 2;
+	return (a & pickA) | (b & ~pickA & int3_kValueMask);
+}
+
 // ---- tables ----------------------------------------------------------------
 
 // index = a | (b << 3); mul = (a * b) & 7
@@ -469,6 +496,36 @@ static inline void int3_mulScalar(uint64_t* dst, uint8_t pattern3, size_t nElems
 	pattern3 &= 7;
 	for (size_t i = 0; i < nElems; ++i)
 		int3_set(dst, i, int3_kMulTable[(size_t)int3_get(dst, i) | ((size_t)pattern3 << 3)]);
+	int3_clearPadding(dst, nElems);
+}
+
+static inline void int3_min(uint64_t* dst, const uint64_t* src, size_t nElems) {
+	const size_t nWords = int3_wordCount(nElems);
+	for (size_t w = 0; w < nWords; ++w)
+		dst[w] = int3_minWord(dst[w], src[w]);
+	int3_clearPadding(dst, nElems);
+}
+
+static inline void int3_max(uint64_t* dst, const uint64_t* src, size_t nElems) {
+	const size_t nWords = int3_wordCount(nElems);
+	for (size_t w = 0; w < nWords; ++w)
+		dst[w] = int3_maxWord(dst[w], src[w]);
+	int3_clearPadding(dst, nElems);
+}
+
+static inline void int3_minScalar(uint64_t* dst, uint8_t pattern3, size_t nElems) {
+	const uint64_t s = int3_splatWord(pattern3);
+	const size_t nWords = int3_wordCount(nElems);
+	for (size_t w = 0; w < nWords; ++w)
+		dst[w] = int3_minWord(dst[w], s);
+	int3_clearPadding(dst, nElems);
+}
+
+static inline void int3_maxScalar(uint64_t* dst, uint8_t pattern3, size_t nElems) {
+	const uint64_t s = int3_splatWord(pattern3);
+	const size_t nWords = int3_wordCount(nElems);
+	for (size_t w = 0; w < nWords; ++w)
+		dst[w] = int3_maxWord(dst[w], s);
 	int3_clearPadding(dst, nElems);
 }
 

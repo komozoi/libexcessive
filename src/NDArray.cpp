@@ -378,6 +378,83 @@ static void divBasic(A* a, B b, size_t size) {
 		a[i] /= (A)b;
 }
 
+template<typename T>
+static void min4(T* dst, const T* a, const T* b, size_t n) {
+	size_t i = 0;
+	for (; i + 4 <= n; i += 4) {
+		const T a0 = a[i], a1 = a[i + 1], a2 = a[i + 2], a3 = a[i + 3];
+		const T b0 = b[i], b1 = b[i + 1], b2 = b[i + 2], b3 = b[i + 3];
+		dst[i] = a0 < b0 ? a0 : b0;
+		dst[i + 1] = a1 < b1 ? a1 : b1;
+		dst[i + 2] = a2 < b2 ? a2 : b2;
+		dst[i + 3] = a3 < b3 ? a3 : b3;
+	}
+	for (; i < n; ++i)
+		dst[i] = a[i] < b[i] ? a[i] : b[i];
+}
+
+template<typename T>
+static void max4(T* dst, const T* a, const T* b, size_t n) {
+	size_t i = 0;
+	for (; i + 4 <= n; i += 4) {
+		const T a0 = a[i], a1 = a[i + 1], a2 = a[i + 2], a3 = a[i + 3];
+		const T b0 = b[i], b1 = b[i + 1], b2 = b[i + 2], b3 = b[i + 3];
+		dst[i] = a0 > b0 ? a0 : b0;
+		dst[i + 1] = a1 > b1 ? a1 : b1;
+		dst[i + 2] = a2 > b2 ? a2 : b2;
+		dst[i + 3] = a3 > b3 ? a3 : b3;
+	}
+	for (; i < n; ++i)
+		dst[i] = a[i] > b[i] ? a[i] : b[i];
+}
+
+static void fmin4(float* dst, const float* a, const float* b, size_t n) {
+	size_t i = 0;
+	for (; i + 4 <= n; i += 4) {
+		dst[i] = std::fmin(a[i], b[i]);
+		dst[i + 1] = std::fmin(a[i + 1], b[i + 1]);
+		dst[i + 2] = std::fmin(a[i + 2], b[i + 2]);
+		dst[i + 3] = std::fmin(a[i + 3], b[i + 3]);
+	}
+	for (; i < n; ++i)
+		dst[i] = std::fmin(a[i], b[i]);
+}
+
+static void fmax4(float* dst, const float* a, const float* b, size_t n) {
+	size_t i = 0;
+	for (; i + 4 <= n; i += 4) {
+		dst[i] = std::fmax(a[i], b[i]);
+		dst[i + 1] = std::fmax(a[i + 1], b[i + 1]);
+		dst[i + 2] = std::fmax(a[i + 2], b[i + 2]);
+		dst[i + 3] = std::fmax(a[i + 3], b[i + 3]);
+	}
+	for (; i < n; ++i)
+		dst[i] = std::fmax(a[i], b[i]);
+}
+
+static void dmin4(double* dst, const double* a, const double* b, size_t n) {
+	size_t i = 0;
+	for (; i + 4 <= n; i += 4) {
+		dst[i] = std::fmin(a[i], b[i]);
+		dst[i + 1] = std::fmin(a[i + 1], b[i + 1]);
+		dst[i + 2] = std::fmin(a[i + 2], b[i + 2]);
+		dst[i + 3] = std::fmin(a[i + 3], b[i + 3]);
+	}
+	for (; i < n; ++i)
+		dst[i] = std::fmin(a[i], b[i]);
+}
+
+static void dmax4(double* dst, const double* a, const double* b, size_t n) {
+	size_t i = 0;
+	for (; i + 4 <= n; i += 4) {
+		dst[i] = std::fmax(a[i], b[i]);
+		dst[i + 1] = std::fmax(a[i + 1], b[i + 1]);
+		dst[i + 2] = std::fmax(a[i + 2], b[i + 2]);
+		dst[i + 3] = std::fmax(a[i + 3], b[i + 3]);
+	}
+	for (; i < n; ++i)
+		dst[i] = std::fmax(a[i], b[i]);
+}
 
 static uint8_t binaryGet(const uint64_t* words, size_t i) {
 	return (uint8_t)(words[i >> 6] >> (i & 63) & 1ULL);
@@ -4216,27 +4293,90 @@ static size_t resultElemsWithoutAxis(const ArrayList<int>& shape, int axis) {
 }
 
 struct NDArray::Impl {
+	static void applyElemMinMax(NDArray& left, const NDArray& right, bool wantMin) {
+		const size_t n = left.numElements();
+		switch (left.type) {
+			case F16:
+				if (wantMin)
+					ndhalf_min_f16(left.u16, left.u16, right.u16, n);
+				else
+					ndhalf_max_f16(left.u16, left.u16, right.u16, n);
+				break;
+			case BF16:
+				if (wantMin)
+					ndhalf_min_bf16(left.u16, left.u16, right.u16, n);
+				else
+					ndhalf_max_bf16(left.u16, left.u16, right.u16, n);
+				break;
+			case F32:
+				if (wantMin)
+					fmin4(left.float32, left.float32, right.float32, n);
+				else
+					fmax4(left.float32, left.float32, right.float32, n);
+				break;
+			case F64:
+				if (wantMin)
+					dmin4(left.float64, left.float64, right.float64, n);
+				else
+					dmax4(left.float64, left.float64, right.float64, n);
+				break;
+			case UINT8:
+				if (wantMin)
+					min4(left.uint8, left.uint8, right.uint8, n);
+				else
+					max4(left.uint8, left.uint8, right.uint8, n);
+				break;
+			case INT8:
+				if (wantMin)
+					min4(left.int8, left.int8, right.int8, n);
+				else
+					max4(left.int8, left.int8, right.int8, n);
+				break;
+			case INT32:
+				if (wantMin)
+					min4(left.int32, left.int32, right.int32, n);
+				else
+					max4(left.int32, left.int32, right.int32, n);
+				break;
+			case INT64:
+				if (wantMin)
+					min4(left.int64, left.int64, right.int64, n);
+				else
+					max4(left.int64, left.int64, right.int64, n);
+				break;
+			case UINT256:
+				for (size_t i = 0; i < n; ++i)
+					left.uint256[i] = wantMin
+						? elemBinU256(left.uint256[i], right.uint256[i], ElemBinOp::Min)
+						: elemBinU256(left.uint256[i], right.uint256[i], ElemBinOp::Max);
+				break;
+			case BINARY:
+				ndBinaryBitOpInPlace(left.uint64, right.uint64, n, wantMin ? NdBinAnd : NdBinOr);
+				break;
+			case INT3:
+				if (wantMin)
+					int3_min(left.uint64, right.uint64, n);
+				else
+					int3_max(left.uint64, right.uint64, n);
+				break;
+			default:
+				throw std::runtime_error("NDArray: invalid type in element-wise min/max");
+		}
+	}
+
 	static void applyElemBin(NDArray& left, const NDArray& right, ElemBinOp op) {
+		if (op == ElemBinOp::Min || op == ElemBinOp::Max) {
+			applyElemMinMax(left, right, op == ElemBinOp::Min);
+			return;
+		}
 		const size_t n = left.numElements();
 		switch (left.type) {
 			case F16:
 			case BF16:
-				if (op == ElemBinOp::Min) {
-					if (left.type == F16)
-						ndhalf_min_f16(left.u16, left.u16, right.u16, n);
-					else
-						ndhalf_min_bf16(left.u16, left.u16, right.u16, n);
-				} else if (op == ElemBinOp::Max) {
-					if (left.type == F16)
-						ndhalf_max_f16(left.u16, left.u16, right.u16, n);
-					else
-						ndhalf_max_bf16(left.u16, left.u16, right.u16, n);
-				} else {
-					for (size_t i = 0; i < n; ++i) {
-						double av = ndarray_half::load(left.type, left.u16[i]);
-						double bv = ndarray_half::load(right.type, right.u16[i]);
-						left.u16[i] = ndarray_half::store(left.type, (float)elemBinDouble(av, bv, op));
-					}
+				for (size_t i = 0; i < n; ++i) {
+					double av = ndarray_half::load(left.type, left.u16[i]);
+					double bv = ndarray_half::load(right.type, right.u16[i]);
+					left.u16[i] = ndarray_half::store(left.type, (float)elemBinDouble(av, bv, op));
 				}
 				break;
 			case F32:
@@ -4291,6 +4431,10 @@ struct NDArray::Impl {
 		requireSameShape(a, b);
 		NDArrayType rt = promoteForElemBin(a.type, b.type, op);
 		NDArray left = a.convert(rt);
+		if (b.type == rt) {
+			applyElemBin(left, b, op);
+			return left;
+		}
 		NDArray right = b.convert(rt);
 		applyElemBin(left, right, op);
 		return left;
@@ -4339,11 +4483,17 @@ struct NDArray::Impl {
 			}
 		} else if (left.type == INT3) {
 			int sb = (int)s;
-			for (size_t i = 0; i < n; ++i) {
-				int av = int3_getSigned(left.uint64, i);
-				int3_setSigned(left.uint64, i, (int)elemBinI64(av, sb, op));
+			if (op == ElemBinOp::Min)
+				int3_minScalar(left.uint64, int3_encode(sb), n);
+			else if (op == ElemBinOp::Max)
+				int3_maxScalar(left.uint64, int3_encode(sb), n);
+			else {
+				for (size_t i = 0; i < n; ++i) {
+					int av = int3_getSigned(left.uint64, i);
+					int3_setSigned(left.uint64, i, (int)elemBinI64(av, sb, op));
+				}
+				int3_clearPadding(left.uint64, n);
 			}
-			int3_clearPadding(left.uint64, n);
 		} else {
 			throw std::runtime_error("NDArray: invalid type in scalar element-wise op");
 		}
@@ -4401,11 +4551,17 @@ struct NDArray::Impl {
 				binarySet(left.uint64, i, elemBinU8(av, sb, op) & 1);
 			}
 		} else if (left.type == INT3) {
-			for (size_t i = 0; i < n; ++i) {
-				int av = int3_getSigned(left.uint64, i);
-				int3_setSigned(left.uint64, i, (int)elemBinI64(av, s, op));
+			if (op == ElemBinOp::Min)
+				int3_minScalar(left.uint64, int3_encode(s), n);
+			else if (op == ElemBinOp::Max)
+				int3_maxScalar(left.uint64, int3_encode(s), n);
+			else {
+				for (size_t i = 0; i < n; ++i) {
+					int av = int3_getSigned(left.uint64, i);
+					int3_setSigned(left.uint64, i, (int)elemBinI64(av, s, op));
+				}
+				int3_clearPadding(left.uint64, n);
 			}
-			int3_clearPadding(left.uint64, n);
 		} else {
 			throw std::runtime_error("NDArray: invalid type in scalar element-wise op");
 		}

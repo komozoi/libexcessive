@@ -364,6 +364,23 @@ TEST(NDArray_int3, Compare_ArrayAndScalars) {
 	EXPECT_EQ(uc.get<int>({1}), -1);
 }
 
+TEST(NDArray_int3, MinMax_AllPairs_StayINT3) {
+	for (int av = -4; av <= 3; ++av) {
+		for (int bv = -4; bv <= 3; ++bv) {
+			NDArray a({1}, INT3);
+			NDArray b({1}, INT3);
+			a.set({0}, av);
+			b.set({0}, bv);
+			NDArray mn = a.minimum(b);
+			NDArray mx = a.maximum(b);
+			EXPECT_EQ(mn.type, INT3);
+			EXPECT_EQ(mx.type, INT3);
+			EXPECT_EQ(mn.get<int>({0}), av < bv ? av : bv) << av << " min " << bv;
+			EXPECT_EQ(mx.get<int>({0}), av > bv ? av : bv) << av << " max " << bv;
+		}
+	}
+}
+
 TEST(NDArray_int3, MinMax_MatchScalarReference) {
 	NDArray a = NDArray::full({5}, INT3, 0);
 	const int vals[] = {1, -4, 3, -2, 0};

@@ -358,3 +358,243 @@ TEST(NDArray_views, GetFlat_StridedNoHeapCoords) {
 	EXPECT_FLOAT_EQ(col.getFlat<float>(0), 2.0f);
 	EXPECT_FLOAT_EQ(col.getFlat<float>(1), 5.0f);
 }
+
+// Deterministic view / stride / wrap fuzz (issue 045).
+static const int kFuzzMaxR = 6;
+
+struct FuzzRng {
+	uint32_t s;
+	uint32_t next() {
+		s = s * 1664525u + 1013904223u;
+		return s;
+	}
+	int pick(int lo, int hi) {
+		return lo + (int)(next() % (uint32_t)(hi - lo));
+	}
+};
+
+struct FuzzGeom {
+	int rank;
+	int shape[kFuzzMaxR];
+	int origAxis[kFuzzMaxR];
+	int origRank;
+	int origShape[kFuzzMaxR];
+	int origFixed[kFuzzMaxR];
+};
+
+static void fuzzGeomInit(FuzzGeom& g, const ArrayList<int>& sh) {
+	g.origRank = sh.size();
+	g.rank = g.origRank;
+	for (int d = 0; d < g.rank; ++d) {
+		g.shape[d] = sh.get(d);
+		g.origAxis[d] = d;
+		g.origShape[d] = sh.get(d);
+		g.origFixed[d] = -1;
+	}
+}
+
+static void fuzzGeomSlice(FuzzGeom& g, int axis, int index) {
+	int oa = g.origAxis[axis];
+	if (oa >= 0)
+		g.origFixed[oa] = index;
+	for (int d = axis; d < g.rank - 1; ++d) {
+		g.shape[d] = g.shape[d + 1];
+		g.origAxis[d] = g.origAxis[d + 1];
+	}
+	--g.rank;
+}
+
+static void fuzzGeomTranspose(FuzzGeom& g) {
+	if (g.rank < 2)
+		return;
+	for (int i = 0, j = g.rank - 1; i < j; ++i, --j) {
+		int ts = g.shape[i];
+		g.shape[i] = g.shape[j];
+		g.shape[j] = ts;
+		int ta = g.origAxis[i];
+		g.origAxis[i] = g.origAxis[j];
+		g.origAxis[j] = ta;
+	}
+}
+
+static void fuzzGeomSwap(FuzzGeom& g, int a, int b) {
+	int ts = g.shape[a];
+	g.shape[a] = g.shape[b];
+	g.shape[b] = ts;
+	int ta = g.origAxis[a];
+	g.origAxis[a] = g.origAxis[b];
+	g.origAxis[b] = ta;
+}
+
+static void fuzzGeomBroadcast(FuzzGeom& g, const ArrayList<int>& target) {
+	const int tr = target.size();
+	int newShape[kFuzzMaxR];
+	int newOrig[kFuzzMaxR];
+	for (int i = 0; i < tr; ++i) {
+		int src = i - (tr - g.rank);
+		newShape[i] = target.get(i);
+		newOrig[i] = src < 0 ? -1 : g.origAxis[src];
+	}
+	g.rank = tr;
+	for (int i = 0; i < tr; ++i) {
+		g.shape[i] = newShape[i];
+		g.origAxis[i] = newOrig[i];
+	}
+}
+
+static ArrayList<int> fuzzOrigIdx(const FuzzGeom& g, const int* viewCoords) {
+	int orig[kFuzzMaxR];
+	for (int d = 0; d < g.origRank; ++d)
+		orig[d] = g.origFixed[d] >= 0 ? g.origFixed[d] : 0;
+	for (int d = 0; d < g.rank; ++d) {
+		int oa = g.origAxis[d];
+		if (oa < 0 || g.origFixed[oa] >= 0)
+			continue;
+		orig[oa] = g.origShape[oa] <= 1 ? 0 : viewCoords[d];
+	}
+	ArrayList<int> idx;
+	for (int d = 0; d < g.origRank; ++d)
+		idx.add(orig[d]);
+	return idx;
+}
+
+static void fuzzFlatToCoords(const FuzzGeom& g, size_t flat, int* coords) {
+	size_t r = flat;
+	for (int d = g.rank - 1; d >= 0; --d) {
+		int dim = g.shape[d];
+		coords[d] = dim > 0 ? (int)(r % (size_t)dim) : 0;
+		if (dim > 0)
+			r /= (size_t)dim;
+	}
+}
+
+static void fuzzCheckView(const NDArray& owner, const NDArrayView& v, const FuzzGeom& g) {
+	ASSERT_EQ(v.getShape().size(), g.rank);
+	for (int d = 0; d < g.rank; ++d)
+		ASSERT_EQ(v.getShape().get(d), g.shape[d]);
+	const size_t n = v.numElements();
+	if (n == 0)
+		return;
+	NDArray copied = v.copy();
+	ASSERT_EQ(copied.numElements(), n);
+	for (size_t i = 0; i < n; ++i) {
+		int coords[kFuzzMaxR];
+		fuzzFlatToCoords(g, i, coords);
+		ArrayList<int> viewIdx;
+		for (int d = 0; d < g.rank; ++d)
+			viewIdx.add(coords[d]);
+		ArrayList<int> srcIdx = fuzzOrigIdx(g, coords);
+		switch (owner.type) {
+			case F32: {
+				float exp = owner.get<float>(srcIdx);
+				EXPECT_FLOAT_EQ(v.getFlat<float>(i), exp);
+				EXPECT_FLOAT_EQ(v.get<float>(viewIdx), exp);
+				EXPECT_FLOAT_EQ(copied.getFlat<float>(i), exp);
+				break;
+			}
+			case INT32: {
+				int32_t exp = owner.get<int32_t>(srcIdx);
+				EXPECT_EQ(v.getFlat<int32_t>(i), exp);
+				EXPECT_EQ(v.get<int32_t>(viewIdx), exp);
+				EXPECT_EQ(copied.getFlat<int32_t>(i), exp);
+				break;
+			}
+			case UINT8: {
+				uint8_t exp = owner.get<uint8_t>(srcIdx);
+				EXPECT_EQ(v.getFlat<uint8_t>(i), exp);
+				EXPECT_EQ(v.get<uint8_t>(viewIdx), exp);
+				EXPECT_EQ(copied.getFlat<uint8_t>(i), exp);
+				break;
+			}
+			case INT3: {
+				int exp = owner.get<int>(srcIdx);
+				EXPECT_EQ(v.getFlat<int>(i), exp);
+				EXPECT_EQ(v.get<int>(viewIdx), exp);
+				EXPECT_EQ(copied.getFlat<int>(i), exp);
+				break;
+			}
+			default:
+				FAIL() << "unexpected fuzz type";
+		}
+	}
+}
+
+TEST(NDArray_views, Fuzz_SliceTransposeBroadcastWrap) {
+	FuzzRng rng;
+	rng.s = 0xC0FFEE01u;
+	const NDArrayType types[4] = { F32, INT32, UINT8, INT3 };
+	for (int trial = 0; trial < 160; ++trial) {
+		const int rank = rng.pick(1, 4);
+		ArrayList<int> shape;
+		int nElem = 1;
+		for (int d = 0; d < rank; ++d) {
+			int dim = rng.pick(1, 5);
+			shape.add(dim);
+			nElem *= dim;
+		}
+		if (nElem > 80)
+			continue;
+		NDArrayType ty = types[rng.pick(0, 4)];
+		NDArray owner(shape, ty);
+		for (int i = 0; i < nElem; ++i) {
+			if (ty == F32)
+				owner.setFlat((size_t)i, (float)i);
+			else if (ty == INT32)
+				owner.setFlat((size_t)i, (int32_t)i);
+			else if (ty == UINT8)
+				owner.setFlat((size_t)i, (int)(i & 255));
+			else
+				owner.setFlat((size_t)i, (i % 8) - 4);
+		}
+
+		FuzzGeom g;
+		fuzzGeomInit(g, shape);
+		NDArrayView v = owner.view();
+		if ((trial & 1) != 0 && (ty == F32 || ty == INT32 || ty == UINT8)) {
+			v = NDArrayView::wrap(owner.data(), owner.byteSize(), shape, ty);
+			EXPECT_EQ(v.data(), owner.data());
+		}
+
+		const int nOps = rng.pick(1, 5);
+		for (int step = 0; step < nOps; ++step) {
+			if (g.rank == 0)
+				break;
+			int kind = rng.pick(0, 5);
+			if (kind == 0 && g.rank >= 1) {
+				int axis = rng.pick(0, g.rank);
+				if (g.shape[axis] <= 0)
+					continue;
+				int index = rng.pick(0, g.shape[axis]);
+				v = v.slice(axis, index);
+				fuzzGeomSlice(g, axis, index);
+			} else if (kind == 1) {
+				v = v.transpose();
+				fuzzGeomTranspose(g);
+			} else if (kind == 2 && g.rank >= 2) {
+				int a = rng.pick(0, g.rank);
+				int b = rng.pick(0, g.rank);
+				if (a == b)
+					continue;
+				v = v.swapaxes(a, b);
+				fuzzGeomSwap(g, a, b);
+			} else if (kind == 3 && g.rank >= 1 && g.rank < 4) {
+				ArrayList<int> target;
+				target.add(2);
+				for (int d = 0; d < g.rank; ++d)
+					target.add(g.shape[d]);
+				if (!v.isBroadcastableTo(target))
+					continue;
+				v = v.broadcastTo(target);
+				fuzzGeomBroadcast(g, target);
+			} else if (kind == 4 && g.rank >= 2) {
+				int last = g.rank - 1;
+				if (g.shape[last] <= 0)
+					continue;
+				int index = rng.pick(0, g.shape[last]);
+				v = v.col(index);
+				fuzzGeomSlice(g, last, index);
+			}
+		}
+		fuzzCheckView(owner, v, g);
+	}
+}

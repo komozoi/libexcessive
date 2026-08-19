@@ -240,6 +240,43 @@ TEST(NDArray_elementwise, Minimum_Maximum_F32) {
 	EXPECT_FLOAT_EQ(mx.get<float>({2}), 3.0f);
 }
 
+TEST(NDArray_elementwise, Minimum_Maximum_BINARY_AndOr) {
+	NDArray a({8}, BINARY);
+	NDArray b({8}, BINARY);
+	for (int i = 0; i < 8; ++i) {
+		a.set({i}, i & 1);
+		b.set({i}, (i >> 1) & 1);
+	}
+	NDArray mn = a.minimum(b);
+	NDArray mx = a.maximum(b);
+	EXPECT_EQ(mn.type, BINARY);
+	EXPECT_EQ(mx.type, BINARY);
+	for (int i = 0; i < 8; ++i) {
+		int av = a.get<int>({i});
+		int bv = b.get<int>({i});
+		EXPECT_EQ(mn.get<int>({i}), av & bv);
+		EXPECT_EQ(mx.get<int>({i}), av | bv);
+	}
+}
+
+TEST(NDArray_elementwise, Minimum_Maximum_INT8_FourWideTail) {
+	NDArray a({17}, INT8);
+	NDArray b({17}, INT8);
+	for (int i = 0; i < 17; ++i) {
+		a.set({i}, (int8_t)(i - 8));
+		b.set({i}, (int8_t)(4 - i));
+	}
+	NDArray mn = a.minimum(b);
+	NDArray mx = a.maximum(b);
+	EXPECT_EQ(mn.type, INT8);
+	for (int i = 0; i < 17; ++i) {
+		int av = a.get<int>({i});
+		int bv = b.get<int>({i});
+		EXPECT_EQ(mn.get<int>({i}), av < bv ? av : bv);
+		EXPECT_EQ(mx.get<int>({i}), av > bv ? av : bv);
+	}
+}
+
 TEST(NDArray_elementwise, Minimum_Promotes_UINT8_F32) {
 	NDArray a(ArrayList<uint8_t>({1, 10, 3}));
 	NDArray b(ArrayList({2.5f, 2.5f, 2.5f}));
